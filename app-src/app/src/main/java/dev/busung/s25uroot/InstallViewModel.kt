@@ -283,6 +283,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             require(newArchOk || oldArchOk) {
                 app.getString(R.string.error_success_marker)
             }
+            val rootDurationMillis = SystemClock.elapsedRealtime() - startedAt
+            AppPreferences.setLastRootDurationMillis(app, rootDurationMillis)
+            appendLog("[+] Root acquired in ${rootDurationMillis / 1_000.0} seconds")
         } finally {
             if (process.isAlive) {
                 process.destroy()

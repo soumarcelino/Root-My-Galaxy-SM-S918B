@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PROFILE_ID="dm3q-S918BXXSAFZF5"
+PROFILE_ID="dm3q-S918BXXSAFZG1-ksunext"
 TARGET_MODEL="SM-S918B"
 TARGET_DEVICE="dm3q"
-TARGET_BUILD_DISPLAY="BP4A.251205.006.S918BXXSAFZF5"
-TARGET_FINGERPRINT="samsung/dm3qxxx/dm3q:16/BP4A.251205.006/S918BXXSAFZF5:user/release-keys"
-TARGET_KERNEL_RELEASE="5.15.189-android13-8-33413713-abS918BXXSAFZF5"
-TARGET_KERNEL_VERSION="#1 SMP PREEMPT Tue Jun 9 09:47:44 UTC 2026"
+TARGET_BUILD_DISPLAY="BP4A.251205.006.S918BXXSAFZG1"
+TARGET_FINGERPRINT="samsung/dm3qxxx/dm3q:16/BP4A.251205.006/S918BXXSAFZG1:user/release-keys"
+TARGET_KERNEL_RELEASE="5.15.189-android13-8-33413713-abS918BXXSAFZG1"
+TARGET_KERNEL_VERSION="#1 SMP PREEMPT Mon Jul 6 09:56:11 UTC 2026"
 TARGET_SDK="36"
 TARGET_ABI="arm64-v8a"
 TARGET_PAGE_SIZE="4096"
@@ -15,9 +15,9 @@ TARGET_PAGE_SIZE="4096"
 EXPECTED_BASE_MD5="3c82d4f678bd58846facf3e4ad356a33"
 EXPECTED_PAYLOAD_MD5="f6298194afb543d618b6f7015d1d08eb"
 EXPECTED_PAYLOAD_SIZE="131072"
-EXPECTED_KSUD_MD5="bd9080bc728f3b98f0239236cd2e22ec"
-EXPECTED_KSUD_SIZE="6756208"
-EXPECTED_HELPER_MD5="08fad03af01e7a411154180f4b22385a"
+EXPECTED_KSUD_MD5="27cfc835164a385670ff309c47a711b0"
+EXPECTED_KSUD_SIZE="3852248"
+EXPECTED_HELPER_MD5="e00bec081b9d35635245bc76cf2d2a51"
 
 ADB_STAGE_DIR="/data/local/tmp/rmg-dm3q"
 ADB_HELPER="/data/local/tmp/libcve43499root"
@@ -32,8 +32,8 @@ UPSTREAM_REPO="${UPSTREAM_REPO:-${PROJECTS_DIR}/rmg-f731u}"
 PATCHER="${PATCHER:-${REPO_ROOT}/tools/patch_payload.py}"
 SPEC="${SPEC:-${REPO_ROOT}/tools/f731u-to-dm3q-s918b-afzf5.spec.json}"
 BASE_PAYLOAD="${BASE_PAYLOAD:-${UPSTREAM_REPO}/app-src/app/src/main/assets/cve-2026-43499-app.so}"
-KSUD_PATH="${KSUD_PATH:-${UPSTREAM_REPO}/app-src/app/src/main/assets/ksud-f731u-kdp}"
-HELPER_PATH="${HELPER_PATH:-${UPSTREAM_REPO}/app-src/app/src/main/jniLibs/arm64-v8a/libcve43499root.so}"
+KSUD_PATH="${KSUD_PATH:-${REPO_ROOT}/app/src/main/assets/ksud-f731u-kdp}"
+HELPER_PATH="${HELPER_PATH:-${REPO_ROOT}/app/src/main/jniLibs/arm64-v8a/libcve43499root.so}"
 OUT_DIR="${OUT_DIR:-${REPO_ROOT}/out/${PROFILE_ID}}"
 PATCHED_PAYLOAD="${OUT_DIR}/cve-2026-43499-app.so"
 
@@ -52,7 +52,7 @@ Usage:
 
 Default:
   validates the connected SM-S918B, patches the F731U base payload into the
-  dm3q/S918BXXSAFZF5 payload, prepares local app assets, and prints the manual
+  dm3q/S918BXXSAFZG1 KernelSU Next payload, prepares local app assets, and prints the manual
   ADB exploit command.
 
 Options:
@@ -189,7 +189,7 @@ prepare_app_assets() {
   "payloads": [
     {
       "payloadId": "${PROFILE_ID}",
-      "displayName": "Galaxy S23 Ultra SM-S918B | S918BXXSAFZF5",
+      "displayName": "Galaxy S23 Ultra SM-S918B | S918BXXSAFZG1 | KernelSU Next",
       "models": ["${TARGET_MODEL}"],
       "kernelVersions": ["5.15.189"],
       "exploit": {

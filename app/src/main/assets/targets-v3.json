@@ -2,8 +2,8 @@
   "schemaVersion": 3,
   "payloads": [
     {
-      "payloadId": "dm3q-S918BXXSAFZF5",
-      "displayName": "Galaxy S23 Ultra SM-S918B | S918BXXSAFZF5",
+      "payloadId": "dm3q-S918BXXSAFZG1-ksunext",
+      "displayName": "Galaxy S23 Ultra SM-S918B | S918BXXSAFZG1 | KernelSU Next",
       "models": ["SM-S918B"],
       "kernelVersions": ["5.15.189"],
       "exploit": {
@@ -12,7 +12,7 @@
       },
       "kernelsu": {
         "url": "asset://ksud-f731u-kdp",
-        "size": 6756208
+        "size": 3852248
       }
     }
   ]

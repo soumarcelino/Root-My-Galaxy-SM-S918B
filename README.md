@@ -1,5 +1,8 @@
 # Root My Galaxy SM-S918B
 
+Current Android app version: **0.3.0 (31)**. In-app updates are checked from
+[this repository's releases](https://github.com/soumarcelino/Root-My-Galaxy-SM-S918B/releases).
+
 Porting workspace for Root My Galaxy on the Samsung Galaxy S23 Ultra
 `SM-S918B`, codename `dm3q`, firmware `S918BXXSAFZF5`.
 
@@ -80,10 +83,15 @@ Upstream reference material is also kept in:
 - [PORTING.md](PORTING.md)
 - [PROJECT-MANIFEST.txt](PROJECT-MANIFEST.txt)
 - [kernelsu/README.md](kernelsu/README.md)
+- [KernelSU Next AFZG1](kernelsu-next/README.md)
 - [support/README.md](support/README.md)
 
 
 ## Quick Start
+
+The Android app now uses KernelSU Next v3.3.0 by default for the validated
+`S918BXXSAFZG1` profile. The bundled helper, ksud and Manager package are
+version-locked; see [KernelSU Next AFZG1](kernelsu-next/README.md).
 
 From the repository root:
 
