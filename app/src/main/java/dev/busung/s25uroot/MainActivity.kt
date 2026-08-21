@@ -245,9 +245,9 @@ private val languageOptions = listOf(
 )
 
 private const val KERNEL_SU_MANAGER_URL =
-    "https://github.com/tiann/KernelSU/releases/download/v3.2.5/KernelSU_v3.2.5_32525-release.apk"
-private const val KERNEL_SU_MANAGER_PACKAGE = "me.weishu.kernelsu"
-private const val KERNEL_SU_HOME_URL = "https://kernelsu.org/"
+    "https://github.com/KernelSU-Next/KernelSU-Next/releases/download/v3.3.0/KernelSU_Next_v3.3.0_33214-release.apk"
+private const val KERNEL_SU_MANAGER_PACKAGE = "com.rifsxd.ksunext"
+private const val KERNEL_SU_HOME_URL = "https://github.com/KernelSU-Next/KernelSU-Next"
 private const val SHIZUKU_MANAGER_PACKAGE = "moe.shizuku.manager"
 private const val SHIZUKU_MANAGER_URL = "https://github.com/thedjchi/Shizuku/releases/"
 
@@ -753,7 +753,6 @@ private fun InstallStatusCard(installState: InstallUiState, onInstall: () -> Uni
     val context = LocalContext.current
     val view = LocalView.current
     val interactionSource = remember { MutableInteractionSource() }
-    val uriHandler = LocalUriHandler.current
     val managerInstalled = remember(installState) { isKernelSuManagerInstalled(context) }
     Card(
         onClick = {
@@ -761,11 +760,7 @@ private fun InstallStatusCard(installState: InstallUiState, onInstall: () -> Uni
             when {
                 installState.busy -> Unit
                 installState.phase == InstallPhase.Installed -> {
-                    if (managerInstalled) {
-                        openKernelSuManager(context)
-                    } else {
-                        uriHandler.openUri(KERNEL_SU_MANAGER_URL)
-                    }
+                    openKernelSuManager(context)
                 }
                 else -> onInstall()
             }

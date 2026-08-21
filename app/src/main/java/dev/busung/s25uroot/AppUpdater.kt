@@ -18,11 +18,12 @@ data class UpdateInfo(
     val releaseUrl: String,
 )
 
-const val ROOT_MY_GALAXY_URL = "https://github.com/youyoudezhuzhu/rmg-f731u"
+const val ROOT_MY_GALAXY_URL = "https://github.com/soumarcelino/Root-My-Galaxy-SM-S918B"
 
 object AppUpdater {
 
-    private const val GITHUB_API = "https://api.github.com/repos/youyoudezhuzhu/rmg-f731u"
+    private const val GITHUB_API =
+        "https://api.github.com/repos/soumarcelino/Root-My-Galaxy-SM-S918B"
     private const val RELEASES_PAGE = "$ROOT_MY_GALAXY_URL/releases/latest"
 
     suspend fun fetchLatestRelease(): UpdateInfo? = withContext(Dispatchers.IO) {
@@ -64,16 +65,27 @@ object AppUpdater {
     }
 
     fun isUpdateAvailable(latestVersion: String, currentVersion: String): Boolean =
-        latestVersion.isNotEmpty() && !sameVersion(latestVersion, currentVersion)
+        compareVersions(latestVersion, currentVersion)?.let { it > 0 } ?: false
 
     /**
-     * v0.2.35: 版本号比较容忍 "-f731u" 等机型后缀。
-     * Release tag 如 "v0.2.34-f731u" 与 App versionName "0.2.34" 应视为相同版本。
+     * Compare numeric release components while tolerating a leading "v" and
+     * target suffixes such as "-f731u". Invalid tags fail closed.
      */
-    private fun sameVersion(a: String, b: String): Boolean {
-        val normA = a.trim().removePrefix("v").substringBefore("-").trim()
-        val normB = b.trim().removePrefix("v").substringBefore("-").trim()
-        return normA == normB && normA.isNotEmpty()
+    private fun compareVersions(a: String, b: String): Int? {
+        fun parse(value: String): List<Int>? {
+            val normalized = value.trim().removePrefix("v").substringBefore("-").trim()
+            if (normalized.isEmpty()) return null
+            return normalized.split(".").map { it.toIntOrNull() ?: return null }
+        }
+
+        val left = parse(a) ?: return null
+        val right = parse(b) ?: return null
+        for (index in 0 until maxOf(left.size, right.size)) {
+            val comparison = (left.getOrElse(index) { 0 })
+                .compareTo(right.getOrElse(index) { 0 })
+            if (comparison != 0) return comparison
+        }
+        return 0
     }
 
     suspend fun downloadApk(

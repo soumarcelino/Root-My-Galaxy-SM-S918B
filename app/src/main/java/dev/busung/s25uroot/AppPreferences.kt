@@ -35,6 +35,7 @@ object AppPreferences {
     private const val ADVANCED_MODE = "advanced_mode"
     private const val SHIZUKU_MODE = "shizuku_mode"
     private const val CONSUMED_INSTALL_REQUEST = "consumed_install_request"
+    private const val LAST_ROOT_DURATION_MILLIS = "last_root_duration_millis"
 
     fun accentColor(context: Context): AccentColor = AccentColor.fromStoredValue(
         prefs(context).getString(ACCENT_COLOR, null),
@@ -74,6 +75,16 @@ object AppPreferences {
             .apply()
     }
 
+    fun lastRootDurationMillis(context: Context): Long =
+        prefs(context).getLong(LAST_ROOT_DURATION_MILLIS, DEFAULT_ROOT_DURATION_MILLIS)
+            .coerceAtLeast(MIN_ROOT_DURATION_MILLIS)
+
+    fun setLastRootDurationMillis(context: Context, durationMillis: Long) {
+        prefs(context).edit()
+            .putLong(LAST_ROOT_DURATION_MILLIS, durationMillis.coerceAtLeast(MIN_ROOT_DURATION_MILLIS))
+            .apply()
+    }
+
     @Synchronized
     fun consumeInstallRequest(context: Context, requestId: String?): Boolean {
         if (requestId.isNullOrBlank()) return false
@@ -96,4 +107,7 @@ object AppPreferences {
         context.getSystemService(LocaleManager::class.java).applicationLocales =
             LocaleList.forLanguageTags(languageTag)
     }
+
+    private const val DEFAULT_ROOT_DURATION_MILLIS = 120_000L
+    private const val MIN_ROOT_DURATION_MILLIS = 1_000L
 }
