@@ -35,12 +35,14 @@ class PayloadRepository(private val context: Context) {
     fun download(profile: TargetProfile, onProgress: (String) -> Unit): VerifiedPayloads {
         val directory = File(context.filesDir, "payloads/${profile.profileId}").apply { mkdirs() }
         /* v0.2.28+: 强制使用内嵌 assets，绝不网络下载（杜绝版本漂移）。*/
-        val exploit = bundledAsset("cve-2026-43499-app.so", directory, onProgress,
+        val exploitName = profile.exploit.url.removePrefix("asset://")
+        val kernelSuName = profile.kernelSu.url.removePrefix("asset://")
+        val exploit = bundledAsset(exploitName, directory, onProgress,
             context.getString(R.string.artifact_exploit_bundled))
-            ?: error("bundled exploit missing: cve-2026-43499-app.so")
-        val kernelSu = bundledAsset("ksud-f731u-kdp", directory, onProgress,
+            ?: error("bundled exploit missing: $exploitName")
+        val kernelSu = bundledAsset(kernelSuName, directory, onProgress,
             context.getString(R.string.artifact_kernelsu_bundled))
-            ?: error("bundled KernelSU missing: ksud-f731u-kdp")
+            ?: error("bundled KernelSU missing: $kernelSuName")
         Os.chmod(exploit.absolutePath, 0b100100100)
         Os.chmod(kernelSu.absolutePath, 0b100100100)
         return VerifiedPayloads(profile, exploit, kernelSu)

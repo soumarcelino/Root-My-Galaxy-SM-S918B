@@ -14,6 +14,20 @@
         "url": "asset://ksud-f731u-kdp",
         "size": 3852248
       }
+    },
+    {
+      "payloadId": "dm3q-S918U1UES8FZF5",
+      "displayName": "Galaxy S23 Ultra SM-S918U1 | S918U1UES8FZF5",
+      "models": ["SM-S918U1"],
+      "kernelVersions": ["5.15.189"],
+      "exploit": {
+        "url": "asset://cve-2026-43499-app-s918u1.so",
+        "size": 131072
+      },
+      "kernelsu": {
+        "url": "asset://ksud-f731u-kdp",
+        "size": 6756208
+      }
     }
   ]
 }
