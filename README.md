@@ -1,38 +1,29 @@
 # Root My Galaxy SM-S918B
 
-Current Android app version: **0.3.0 (31)**. In-app updates are checked from
-[this repository's releases](https://github.com/soumarcelino/Root-My-Galaxy-SM-S918B/releases).
+Root My Galaxy v0.3.0 brings KernelSU Next support to the Samsung Galaxy S23
+Ultra `SM-S918B` (`dm3q`). This repository contains the Android app, target
+configuration, porting sources, patches, and build tools for the project.
 
-Porting workspace for Root My Galaxy on the Samsung Galaxy S23 Ultra
-`SM-S918B`, codename `dm3q`, firmware `S918BXXSAFZF5`.
-
-This repository keeps the source, Android app, target manifests, patch specs,
-KernelSU reference patches, and helper scripts needed to reproduce the local
-port. Generated payloads, native helper binaries, APKs, extracted kernel images,
-firmware dumps, and local build caches are intentionally not tracked.
+[Releases](https://github.com/soumarcelino/Root-My-Galaxy-SM-S918B/releases) ·
+[Documentation](docs/README.md)
 
 Use this only on devices you own or are explicitly authorized to test.
 
-## Screenshots
+# Root My Galaxy v0.3.0 is here
 
-These screenshots show the SM-S918B port reaching a root shell, KernelSU running
-in LKM jailbreak mode, and the Root My Galaxy app recognizing the target.
+## Now with KernelSU Next support
 
 <table>
   <tr>
     <td align="center"><strong>Root My Galaxy app</strong></td>
-    <td align="center"><strong>KernelSU Manager</strong></td>
-    <td align="center"><strong>Root shell</strong></td>
+    <td align="center"><strong>KernelSU Next</strong></td>
   </tr>
   <tr>
     <td align="center">
-      <img src="docs/assets/screenshots/root-my-galaxy-app.jpg" alt="Root My Galaxy app showing KernelSU active on SM-S918B" width="220">
+      <img src="docs/assets/screenshots/root-my-galaxy-v0.3.0.jpg" alt="Root My Galaxy v0.3.0 running on the SM-S918B" width="360">
     </td>
     <td align="center">
-      <img src="docs/assets/screenshots/kernelsu-manager.jpg" alt="KernelSU Manager running on Samsung Galaxy S23 Ultra with kernel 5.15.189" width="220">
-    </td>
-    <td align="center">
-      <img src="docs/assets/screenshots/root-shell.png" alt="ADB root shell on SM-S918B showing uid=0 and kernel SELinux context" width="320">
+      <img src="docs/assets/screenshots/kernelsu-next-v3.3.0.jpg" alt="KernelSU Next v3.3.0 working on the SM-S918B" width="360">
     </td>
   </tr>
 </table>
