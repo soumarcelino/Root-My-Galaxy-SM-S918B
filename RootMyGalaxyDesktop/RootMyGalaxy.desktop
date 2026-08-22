@@ -1,0 +1,11 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Root My Galaxy
+Comment=Root My Galaxy desktop tool
+Exec=python3 -c "import os,sys,subprocess; subprocess.run([os.path.join(os.path.dirname(sys.argv[1]),'start.sh')], check=False)" %k
+Icon=android-package-archive
+Terminal=false
+Categories=Utility;
+StartupNotify=true
