@@ -24,7 +24,7 @@ page size: 4096
 The bundled app profile is generated at:
 
 ```text
-app/src/main/assets/support/targets-v2.json
+app/src/main/assets/targets-v3.json
 ```
 
 The important fields are:

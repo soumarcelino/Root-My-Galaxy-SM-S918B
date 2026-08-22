@@ -35,15 +35,27 @@ class PayloadRepository(private val context: Context) {
     fun download(profile: TargetProfile, onProgress: (String) -> Unit): VerifiedPayloads {
         val directory = File(context.filesDir, "payloads/${profile.profileId}").apply { mkdirs() }
         /* v0.2.28+: 强制使用内嵌 assets，绝不网络下载（杜绝版本漂移）。*/
-        val exploit = bundledAsset("cve-2026-43499-app.so", directory, onProgress,
+        val exploit = bundledAssetFor(profile.exploit, directory, onProgress,
             context.getString(R.string.artifact_exploit_bundled))
-            ?: error("bundled exploit missing: cve-2026-43499-app.so")
-        val kernelSu = bundledAsset("ksud-f731u-kdp", directory, onProgress,
+            ?: error("bundled exploit missing: ${profile.exploit.url}")
+        val kernelSu = bundledAssetFor(profile.kernelSu, directory, onProgress,
             context.getString(R.string.artifact_kernelsu_bundled))
-            ?: error("bundled KernelSU missing: ksud-f731u-kdp")
+            ?: error("bundled KernelSU missing: ${profile.kernelSu.url}")
         Os.chmod(exploit.absolutePath, 0b100100100)
         Os.chmod(kernelSu.absolutePath, 0b100100100)
         return VerifiedPayloads(profile, exploit, kernelSu)
+    }
+
+    private fun bundledAssetFor(
+        artifact: RemoteArtifact,
+        directory: File,
+        onProgress: (String) -> Unit,
+        label: String,
+    ): File? {
+        if (!artifact.url.startsWith(ASSET_PREFIX)) return null
+        val name = artifact.url.removePrefix(ASSET_PREFIX)
+        require(name.isNotBlank() && File(name).name == name) { "Invalid bundled asset name" }
+        return bundledAsset(name, directory, onProgress, label)
     }
 
     /** 从 APK assets 解出内嵌文件；失败返回 null（由调用方 fallback 到下载）。 */
@@ -163,6 +175,7 @@ class PayloadRepository(private val context: Context) {
         }
 
     companion object {
+        private const val ASSET_PREFIX = "asset://"
         private const val COMMIT_API_URL =
             "https://api.github.com/repos/youyoudezhuzhu/rmg-f731u/git/ref/heads/main"
         /* v0.2.21: raw.githubusercontent.com 在大陆常被 CDN 缓存旧文件，

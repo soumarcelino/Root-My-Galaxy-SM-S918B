@@ -34,6 +34,7 @@ object AppPreferences {
     private const val THEME_MODE = "theme_mode"
     private const val ADVANCED_MODE = "advanced_mode"
     private const val SHIZUKU_MODE = "shizuku_mode"
+    private const val OPTIMIZE_ON_EXPLOIT = "optimize_on_exploit"
     private const val CONSUMED_INSTALL_REQUEST = "consumed_install_request"
     private const val LAST_ROOT_DURATION_MILLIS = "last_root_duration_millis"
 
@@ -73,6 +74,13 @@ object AppPreferences {
         prefs(context).edit()
             .putBoolean(SHIZUKU_MODE, enabled)
             .apply()
+    }
+
+    fun optimizeOnExploit(context: Context): Boolean =
+        prefs(context).getBoolean(OPTIMIZE_ON_EXPLOIT, true)
+
+    fun setOptimizeOnExploit(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(OPTIMIZE_ON_EXPLOIT, enabled).apply()
     }
 
     fun lastRootDurationMillis(context: Context): Long =
