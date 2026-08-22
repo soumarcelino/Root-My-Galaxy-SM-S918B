@@ -129,6 +129,8 @@
     <string name="kernel_version_mismatch_body">Esse celular usa o kernel %1$s, mas o payload que você selecionou suporta o %2$s. Os offsets podem ser incompatíveis.</string>
     <string name="shizuku_mode">Usar Shizuku</string>
     <string name="shizuku_mode_description">Usar o Shizuku para executar o payload. Isso pode melhorar a confiabilidade.</string>
+    <string name="optimize_on_exploit">Executar otimizações</string>
+    <string name="optimize_on_exploit_description">Usar o Shizuku para interromper os apps do usuário e solicitar desempenho máximo antes do exploit</string>
     <string name="shizuku_not_running_title">Shizuku não está em execução</string>
     <string name="shizuku_not_running_body">Inicie o Shizuku com adb ou root primeiro.</string>
     <string name="action_download_shizuku">Baixar o Shizuku</string>

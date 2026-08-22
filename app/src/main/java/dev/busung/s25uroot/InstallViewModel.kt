@@ -163,6 +163,10 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 appendLog(app.getString(R.string.log_download_verified))
 
                 setPhase(InstallPhase.Exploiting, app.getString(R.string.status_exploit_running))
+                if (AppPreferences.optimizeOnExploit(app)) {
+                    appendLog("[*] Applying startup optimization through Shizuku")
+                    appendLog("[*] ${StartupOptimizer.apply(app)}")
+                }
                 executeExploit(payloads.exploit)
 
                 setPhase(InstallPhase.LoadingKernelSu, app.getString(R.string.status_ksu_loading))
