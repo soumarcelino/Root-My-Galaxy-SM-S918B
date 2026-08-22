@@ -1,0 +1,6 @@
+Reconstructed payload source for Root My Galaxy Desktop
+
+This is a clean-room reconstruction based on observable behavior and the
+original AArch64 payload ELF with SHA-256:
+
+9837d252b7c8faa933d26b66602905492b7e6cdb317b3459efd2ff5dea5582e5
