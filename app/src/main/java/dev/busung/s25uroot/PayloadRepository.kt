@@ -13,6 +13,7 @@ data class VerifiedPayloads(
     val profile: TargetProfile,
     val exploit: File,
     val kernelSu: File,
+    val helper: File,
 )
 
 class PayloadRepository(private val context: Context) {
@@ -25,7 +26,8 @@ class PayloadRepository(private val context: Context) {
     }
 
     fun resolveTarget(snapshot: DeviceSnapshot): TargetProfile = loadTargets()
-        .firstOrNull { it.matches(snapshot) }
+        .filter { it.matches(snapshot) }
+        .maxByOrNull { it.specificity }
         ?: error(context.getString(R.string.repo_no_profile))
 
     fun resolveTarget(profileId: String): TargetProfile = loadTargets()
@@ -41,9 +43,13 @@ class PayloadRepository(private val context: Context) {
         val kernelSu = bundledAssetFor(profile.kernelSu, directory, onProgress,
             context.getString(R.string.artifact_kernelsu_bundled))
             ?: error("bundled KernelSU missing: ${profile.kernelSu.url}")
+        val helper = bundledAssetFor(profile.helper, directory, onProgress,
+            context.getString(R.string.artifact_helper_bundled))
+            ?: error("bundled helper missing: ${profile.helper.url}")
         Os.chmod(exploit.absolutePath, 0b100100100)
         Os.chmod(kernelSu.absolutePath, 0b100100100)
-        return VerifiedPayloads(profile, exploit, kernelSu)
+        Os.chmod(helper.absolutePath, 0b111101101)
+        return VerifiedPayloads(profile, exploit, kernelSu, helper)
     }
 
     private fun bundledAssetFor(

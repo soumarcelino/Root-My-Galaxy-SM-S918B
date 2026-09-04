@@ -117,6 +117,7 @@
 
     <string name="artifact_exploit">exploit</string>
     <string name="artifact_exploit_bundled">exploit (bundled)</string>
+    <string name="artifact_helper_bundled">helper (bundled)</string>
     <string name="artifact_kernelsu">KernelSU</string>
     <string name="artifact_kernelsu_bundled">KernelSU Next (bundled)</string>
     <string name="repo_no_profile">No compatible payload supports this model and kernel version</string>

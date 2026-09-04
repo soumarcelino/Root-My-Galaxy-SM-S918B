@@ -117,10 +117,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             mutableTargetCatalog.value = try {
                 TargetCatalogUiState(
                     profiles = repository.loadTargets().sortedWith(
-                        compareBy(
-                            TargetProfile::displayName,
-                            TargetProfile::profileId,
-                        ),
+                        compareByDescending<TargetProfile> { it.specificity }
+                            .thenBy(TargetProfile::displayName)
+                            .thenBy(TargetProfile::profileId),
                     ),
                 )
             } catch (error: Throwable) {
@@ -167,7 +166,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                     appendLog("[*] Applying startup optimization through Shizuku")
                     appendLog("[*] ${StartupOptimizer.apply(app)}")
                 }
-                executeExploit(payloads.exploit)
+                executeExploit(payloads)
 
                 setPhase(InstallPhase.LoadingKernelSu, app.getString(R.string.status_ksu_loading))
                 installKernelSu(payloads)
@@ -183,7 +182,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private suspend fun executeExploit(payload: File) {
+    private suspend fun executeExploit(payloads: VerifiedPayloads) {
+        val payload = payloads.exploit
         val shizuku = shizukuEnabled()
         appendLog("[diag] shizukuEnabled=$shizuku isRunning=${ShizukuController.isRunning()} isGranted=${ShizukuController.isGranted()}")
         // v0.2.34: pstore dump —— 重启后读上次内核崩溃日志（KDP/DEFEX/RKP 拦截铁证）
@@ -194,7 +194,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         } else {
             logFile.delete()
         }
-        val helper = helperFile()
+        val helper = helperFile(payloads.helper)
         appendLog("[diag] helper=${helper.absolutePath}")
         if (!shizuku) {
             require(helper.canExecute()) { app.getString(R.string.error_helper_unavailable) }
@@ -329,6 +329,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun installKernelSu(payloads: VerifiedPayloads) {
+        val helper = helperFile(payloads.helper)
         if (shizukuEnabled()) {
             // v0.2.26+: helper 硬编码 ksud 路径 /data/local/tmp/ksud-selected（F7310 版 helper）
             shizukuStage(payloads.kernelSu, "/data/local/tmp/ksud-selected", "755")
@@ -340,12 +341,12 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 "/system/bin/cp $source /data/local/tmp/ksud-s25u-kdp && " +
                     "/system/bin/cp $source /data/local/tmp/.ksud-stage && " +
                     "/system/bin/chmod 755 /data/local/tmp/ksud-s25u-kdp /data/local/tmp/.ksud-stage"
-            val stage = runHelper("-c", stageCommand)
+            val stage = runHelper(helper, "-c", stageCommand)
             require(stage.code == 0) { app.getString(R.string.error_ksu_stage, stage.output) }
             appendLog(app.getString(R.string.log_ksu_staged))
         }
 
-        val lateLoad = runHelper("--late-load")
+        val lateLoad = runHelper(helper, "--late-load")
         require(lateLoad.code == 0) {
             app.getString(R.string.error_ksu_verify, lateLoad.code, lateLoad.output)
         }
@@ -418,14 +419,12 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun helperFile(): File =
+    private fun helperFile(source: File): File =
         if (shizukuEnabled()) {
-            shizukuStage(nativeHelperFile(), SHIZUKU_HELPER_PATH, "755")
+            shizukuStage(source, SHIZUKU_HELPER_PATH, "755")
         } else {
-            nativeHelperFile()
+            source
         }
-
-    private fun nativeHelperFile() = File(app.applicationInfo.nativeLibraryDir, "libcve43499root.so")
 
     private fun shizukuEnabled(): Boolean = AppPreferences.shizukuMode(app)
 
@@ -468,8 +467,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         return stdout + stderr
     }
 
-    private fun runHelper(vararg arguments: String): CommandResult {
-        val helper = helperFile()
+    private fun runHelper(helper: File, vararg arguments: String): CommandResult {
         val process = if (shizukuEnabled()) {
             ShizukuController.exec(arrayOf(helper.absolutePath) + arguments)
         } else {

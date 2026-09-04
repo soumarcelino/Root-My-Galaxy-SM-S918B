@@ -1,0 +1,24 @@
+{
+  "profiles": [
+    {
+      "id": "dm3q-S918BXXSAFZG1-ksunext",
+      "build_display": "BP4A.251205.006.S918BXXSAFZG1",
+      "fingerprint": "samsung/dm3qxxx/dm3q:16/BP4A.251205.006/S918BXXSAFZG1:user/release-keys",
+      "kernel_release": "5.15.189-android13-8-33413713-abS918BXXSAFZG1",
+      "kernel_version": "#1 SMP PREEMPT Mon Jul 6 09:56:11 UTC 2026",
+      "payload": "cve-2026-43499-app-afzg1.so",
+      "helper": "libcve43499root-afzg1.so",
+      "ksud": "ksud-next"
+    },
+    {
+      "id": "dm3q-S918BXXSAFZH3-ksunext",
+      "build_display": "BP4A.251205.006.S918BXXSAFZH3",
+      "fingerprint": "samsung/dm3qxxx/dm3q:16/BP4A.251205.006/S918BXXSAFZH3:user/release-keys",
+      "kernel_release": "5.15.189-android13-8-33413713-abS918BXXSAFZH3",
+      "kernel_version": "#1 SMP PREEMPT Tue Aug 11 06:33:52 UTC 2026",
+      "payload": "cve-2026-43499-app-afzh3.so",
+      "helper": "libcve43499root-afzh3.so",
+      "ksud": "ksud-next"
+    }
+  ]
+}

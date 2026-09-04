@@ -15,6 +15,11 @@ data class TargetProfile(
     val kernelVersions: Set<String>,
     val exploit: RemoteArtifact,
     val kernelSu: RemoteArtifact,
+    val helper: RemoteArtifact,
+    val buildDisplays: Set<String> = emptySet(),
+    val fingerprints: Set<String> = emptySet(),
+    val kernelReleases: Set<String> = emptySet(),
+    val kernelVersionInfos: Set<String> = emptySet(),
 ) {
     init {
         require(models.isNotEmpty()) { "Payload must support at least one model" }
@@ -27,8 +32,18 @@ data class TargetProfile(
     fun matchesKernelVersion(snapshot: DeviceSnapshot): Boolean =
         snapshot.kernelVersion in kernelVersions
 
+    fun matchesExactBuild(snapshot: DeviceSnapshot): Boolean =
+        (buildDisplays.isEmpty() || snapshot.buildId in buildDisplays) &&
+            (fingerprints.isEmpty() || snapshot.fingerprint in fingerprints) &&
+            (kernelReleases.isEmpty() || snapshot.kernelRelease in kernelReleases) &&
+            (kernelVersionInfos.isEmpty() || snapshot.kernelVersionInfo in kernelVersionInfos)
+
     fun matches(snapshot: DeviceSnapshot): Boolean =
-        matchesDevice(snapshot) && matchesKernelVersion(snapshot)
+        matchesDevice(snapshot) && matchesKernelVersion(snapshot) && matchesExactBuild(snapshot)
+
+    val specificity: Int
+        get() = listOf(buildDisplays, fingerprints, kernelReleases, kernelVersionInfos)
+            .count { it.isNotEmpty() }
 
     val supportedModels: String
         get() = models.joinToString()
@@ -66,6 +81,16 @@ data class SupportManifest(
                                 url = kernelSu.getString("url"),
                                 size = kernelSu.getLong("size"),
                             ),
+                            helper = payload.getJSONObject("helper").let { helper ->
+                                RemoteArtifact(
+                                    url = helper.getString("url"),
+                                    size = helper.getLong("size"),
+                                )
+                            },
+                            buildDisplays = payload.optJSONArray("buildDisplays").strings(),
+                            fingerprints = payload.optJSONArray("fingerprints").strings(),
+                            kernelReleases = payload.optJSONArray("kernelReleases").strings(),
+                            kernelVersionInfos = payload.optJSONArray("kernelVersionInfos").strings(),
                         ),
                     )
                 }
@@ -73,8 +98,10 @@ data class SupportManifest(
             return SupportManifest(schemaVersion, payloads)
         }
 
-        private fun JSONArray.strings(): Set<String> = buildSet {
-            for (index in 0 until length()) add(getString(index))
+        private fun JSONArray?.strings(): Set<String> = buildSet {
+            this@strings?.let { array ->
+                for (index in 0 until array.length()) add(array.getString(index))
+            }
         }
     }
 }
