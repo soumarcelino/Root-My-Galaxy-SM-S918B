@@ -1,15 +1,23 @@
 # Root My Galaxy SM-S918B
 
-Root My Galaxy v0.3.0 brings KernelSU Next support to the Samsung Galaxy S23
-Ultra `SM-S918B` (`dm3q`). This repository contains the Android app, target
-configuration, porting sources, patches, and build tools for the project.
+Root My Galaxy v0.4.0 brings KernelSU Next support and exact firmware-profile
+selection to the Samsung Galaxy S23 Ultra `SM-S918B` (`dm3q`). This repository
+contains the Android app, target configuration, porting sources, patches, and
+build tools for the project.
 
 [Releases](https://github.com/soumarcelino/Root-My-Galaxy-SM-S918B/releases) ·
 [Documentation](docs/README.md)
 
 Use this only on devices you own or are explicitly authorized to test.
 
-# Root My Galaxy v0.3.0 is here
+# Root My Galaxy v0.4.0 is here
+
+## Firmware support added in v0.4.0
+
+- New support for firmware `S918BXXSAFZH3`.
+- Security patch level: `05/08/2026`.
+- The previous `S918BXXSAFZG1` payload remains bundled for older compatible
+  devices.
 
 ## Now with KernelSU Next support
 
@@ -20,7 +28,7 @@ Use this only on devices you own or are explicitly authorized to test.
   </tr>
   <tr>
     <td align="center">
-      <img src="docs/assets/screenshots/root-my-galaxy-v0.3.0.jpg" alt="Root My Galaxy v0.3.0 running on the SM-S918B" width="360">
+      <img src="docs/assets/screenshots/root-my-galaxy-v0.3.0.jpg" alt="Root My Galaxy running on the SM-S918B" width="360">
     </td>
     <td align="center">
       <img src="docs/assets/screenshots/kernelsu-next-v3.3.0.jpg" alt="KernelSU Next v3.3.0 working on the SM-S918B" width="360">
@@ -33,10 +41,10 @@ Use this only on devices you own or are explicitly authorized to test.
 ```text
 model: SM-S918B
 device: dm3q
-build display: BP4A.251205.006.S918BXXSAFZF5
-fingerprint: samsung/dm3qxxx/dm3q:16/BP4A.251205.006/S918BXXSAFZF5:user/release-keys
-kernel release: 5.15.189-android13-8-33413713-abS918BXXSAFZF5
-kernel build: #1 SMP PREEMPT Tue Jun 9 09:47:44 UTC 2026
+build display: BP4A.251205.006.S918BXXSAFZH3
+fingerprint: samsung/dm3qxxx/dm3q:16/BP4A.251205.006/S918BXXSAFZH3:user/release-keys
+kernel release: 5.15.189-android13-8-33413713-abS918BXXSAFZH3
+kernel build: #1 SMP PREEMPT Tue Aug 11 06:33:52 UTC 2026
 ```
 
 ## Prerequisites
@@ -80,9 +88,9 @@ Upstream reference material is also kept in:
 
 ## Quick Start
 
-The Android app now uses KernelSU Next v3.3.0 by default for the validated
-`S918BXXSAFZG1` profile. The bundled helper, ksud and Manager package are
-version-locked; see [KernelSU Next AFZG1](kernelsu-next/README.md).
+The Android app uses KernelSU Next v3.3.0 with a profile selected from the
+detected firmware. Both `S918BXXSAFZG1` and `S918BXXSAFZH3` have version-locked
+payloads and helpers; see [KernelSU Next AFZG1](kernelsu-next/README.md).
 
 From the repository root:
 
@@ -109,7 +117,8 @@ Build, install, and stage local ADB files:
 tools/port-sm-s918b-afzf5.sh
 tools/f731u-to-dm3q-s918b-afzf5.spec.json
 tools/patch_payload.py
-app/src/main/assets/support/targets-v2.json
+app/src/main/assets/targets-v3.json
+RootMyGalaxyDesktop/assets/profiles.json
 src/targets/dm3q-S918BXXSAFZF5/target.h
 src/targets/dm3q-S918BXXSAFZF5/p0_fingerprint.h
 ```
@@ -124,8 +133,8 @@ Credit goes to that project for the F731U app/payload baseline, closed helper
 flow, KernelSU late-load packaging, support manifest structure, and the porting
 procedure used as the starting point for this SM-S918B adaptation.
 
-This repository is an adaptation for `SM-S918B` / `dm3q` /
-`S918BXXSAFZF5`, not the original F731U target.
+This repository is an adaptation for `SM-S918B` / `dm3q` with profiles for
+`S918BXXSAFZG1` and `S918BXXSAFZH3`, not the original F731U target.
 
 ## 🇧🇷 É Brazuca também? 
 
