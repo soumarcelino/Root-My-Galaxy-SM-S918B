@@ -16,9 +16,15 @@
       "fingerprint": "samsung/dm3qxxx/dm3q:16/BP4A.251205.006/S918BXXSAFZH3:user/release-keys",
       "kernel_release": "5.15.189-android13-8-33413713-abS918BXXSAFZH3",
       "kernel_version": "#1 SMP PREEMPT Tue Aug 11 06:33:52 UTC 2026",
-      "payload": "cve-2026-43499-app-afzh3.so",
+      "payload": "cve-2026-43499-app-afzh3-tuned.so",
       "helper": "libcve43499root-afzh3.so",
-      "ksud": "ksud-next"
+      "ksud": "ksud-next",
+      "execution": {
+        "attempts": 1,
+        "p0_timeout_sec": 45,
+        "attempt_timeout_sec": 60,
+        "pselect_delay_usec": 20000
+      }
     }
   ]
 }

@@ -8,6 +8,36 @@ data class RemoteArtifact(
     val size: Long,
 )
 
+data class TargetExecution(
+    val attempts: Int? = null,
+    val p0TimeoutSec: Int? = null,
+    val attemptTimeoutSec: Int? = null,
+    val pselectDelayUsec: Int? = null,
+    val maxRuntimeMs: Long? = null,
+) {
+    init {
+        attempts?.let { require(it in 1..64) { "Invalid exploit attempt count" } }
+        p0TimeoutSec?.let { require(it in 5..900) { "Invalid P0 timeout" } }
+        attemptTimeoutSec?.let { require(it in 5..900) { "Invalid exploit timeout" } }
+        pselectDelayUsec?.let {
+            require(it in 0..1_000_000) { "Invalid P-select delay" }
+        }
+        maxRuntimeMs?.let {
+            require(it in 1..600_000) { "Invalid payload runtime limit" }
+        }
+        if (p0TimeoutSec != null && attemptTimeoutSec != null) {
+            require(p0TimeoutSec <= attemptTimeoutSec) {
+                "P0 timeout exceeds exploit timeout"
+            }
+        }
+    }
+
+    val configured: Boolean
+        get() = attempts != null || p0TimeoutSec != null ||
+            attemptTimeoutSec != null || pselectDelayUsec != null ||
+            maxRuntimeMs != null
+}
+
 data class TargetProfile(
     val profileId: String,
     val displayName: String,
@@ -20,6 +50,7 @@ data class TargetProfile(
     val fingerprints: Set<String> = emptySet(),
     val kernelReleases: Set<String> = emptySet(),
     val kernelVersionInfos: Set<String> = emptySet(),
+    val execution: TargetExecution = TargetExecution(),
 ) {
     init {
         require(models.isNotEmpty()) { "Payload must support at least one model" }
@@ -91,6 +122,15 @@ data class SupportManifest(
                             fingerprints = payload.optJSONArray("fingerprints").strings(),
                             kernelReleases = payload.optJSONArray("kernelReleases").strings(),
                             kernelVersionInfos = payload.optJSONArray("kernelVersionInfos").strings(),
+                            execution = payload.optJSONObject("execution").let { execution ->
+                                TargetExecution(
+                                    attempts = execution.optionalInt("attempts"),
+                                    p0TimeoutSec = execution.optionalInt("p0_timeout_sec"),
+                                    attemptTimeoutSec = execution.optionalInt("attempt_timeout_sec"),
+                                    pselectDelayUsec = execution.optionalInt("pselect_delay_usec"),
+                                    maxRuntimeMs = execution.optionalLong("max_runtime_ms"),
+                                )
+                            },
                         ),
                     )
                 }
@@ -103,5 +143,11 @@ data class SupportManifest(
                 for (index in 0 until array.length()) add(array.getString(index))
             }
         }
+
+        private fun JSONObject?.optionalInt(name: String): Int? =
+            this?.takeIf { it.has(name) && !it.isNull(name) }?.getInt(name)
+
+        private fun JSONObject?.optionalLong(name: String): Long? =
+            this?.takeIf { it.has(name) && !it.isNull(name) }?.getLong(name)
     }
 }

@@ -184,7 +184,24 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
 
     private suspend fun executeExploit(payloads: VerifiedPayloads) {
         val payload = payloads.exploit
+        val execution = payloads.profile.execution
+        val exploitAttempts = (execution.attempts ?: EXPLOIT_ATTEMPTS.toInt()).toString()
+        val p0AttemptTimeout =
+            (execution.p0TimeoutSec ?: P0_ATTEMPT_TIMEOUT_SEC.toInt()).toString()
+        val exploitAttemptTimeout =
+            (execution.attemptTimeoutSec ?: EXPLOIT_ATTEMPT_TIMEOUT_SEC.toInt()).toString()
+        val pselectDelayUsec = execution.pselectDelayUsec
+        val maxRuntimeMs = execution.maxRuntimeMs
         val shizuku = shizukuEnabled()
+        if (execution.configured) {
+            appendLog(
+                "[diag] execution profile: attempts=$exploitAttempts " +
+                    "p0_timeout_sec=$p0AttemptTimeout " +
+                    "attempt_timeout_sec=$exploitAttemptTimeout " +
+                    "pselect_delay_usec=${pselectDelayUsec ?: "default"} " +
+                    "max_runtime_ms=${maxRuntimeMs ?: "disabled"}",
+            )
+        }
         appendLog("[diag] shizukuEnabled=$shizuku isRunning=${ShizukuController.isRunning()} isGranted=${ShizukuController.isGranted()}")
         // v0.2.34: pstore dump —— 重启后读上次内核崩溃日志（KDP/DEFEX/RKP 拦截铁证）
         if (shizuku) dumpPstore()
@@ -206,13 +223,16 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             appendLog("[diag] Shizuku branch: payload=${stagedPayload.absolutePath}")
             // v0.2.32+: 完全对齐 s9180-root-kit 工具包 run_root.sh（作者验证过的调用方式）：
             //   1) WARMUP 400x /system/bin/true（调整 slab 分配器状态，让 ashmem 对象落在可利用页）
-            //   2) 仅 3 个环境变量（无 PSELECT_DELAY_USEC）
+            //   2) 使用 profile 的执行参数；未配置时保持旧默认值
             //   3) CVE43499_ROOT_HELPER=... EXPLOIT_ATTEMPTS=N LD_PRELOAD=... /system/bin/true
             // v0.2.34: Shizuku 分支补 P0_ATTEMPT_TIMEOUT_SEC + P0_OFFSET（对齐 App 分支，提高写原语可靠性）
             val shizukuEnv = buildList {
                 add("CVE43499_ROOT_HELPER=${helper.absolutePath}")
-                add("EXPLOIT_ATTEMPTS=$EXPLOIT_ATTEMPTS")
-                add("P0_ATTEMPT_TIMEOUT_SEC=$P0_ATTEMPT_TIMEOUT_SEC")
+                add("EXPLOIT_ATTEMPTS=$exploitAttempts")
+                add("P0_ATTEMPT_TIMEOUT_SEC=$p0AttemptTimeout")
+                add("EXPLOIT_ATTEMPT_TIMEOUT_SEC=$exploitAttemptTimeout")
+                pselectDelayUsec?.let { add("PSELECT_DELAY_USEC=$it") }
+                maxRuntimeMs?.let { add("RMG_MAX_RUNTIME_MS=$it") }
                 cachedP0Offset(bootToken)?.let { add("$P0_OFFSET_ENV=$it") }
             }.toTypedArray()
             ShizukuController.exec(
@@ -233,9 +253,11 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 logFile.absolutePath,
             ).redirectErrorStream(true)
             processBuilder.environment().apply {
-                put("EXPLOIT_ATTEMPTS", EXPLOIT_ATTEMPTS)
-                put("P0_ATTEMPT_TIMEOUT_SEC", P0_ATTEMPT_TIMEOUT_SEC)
-                put("EXPLOIT_ATTEMPT_TIMEOUT_SEC", EXPLOIT_ATTEMPT_TIMEOUT_SEC)
+                put("EXPLOIT_ATTEMPTS", exploitAttempts)
+                put("P0_ATTEMPT_TIMEOUT_SEC", p0AttemptTimeout)
+                put("EXPLOIT_ATTEMPT_TIMEOUT_SEC", exploitAttemptTimeout)
+                pselectDelayUsec?.let { put("PSELECT_DELAY_USEC", it.toString()) }
+                maxRuntimeMs?.let { put("RMG_MAX_RUNTIME_MS", it.toString()) }
                 cachedP0Offset(bootToken)?.let { put(P0_OFFSET_ENV, it) }
             }
             processBuilder.start()
@@ -537,7 +559,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private const val EXPLOIT_ATTEMPTS = "24"
         private const val P0_ATTEMPT_TIMEOUT_SEC = "45"
         private const val EXPLOIT_ATTEMPT_TIMEOUT_SEC = "120"
-        private const val EXPLOIT_STALL_MILLIS = 90_000L
+        private const val EXPLOIT_STALL_MILLIS = 150_000L
         private const val EXPLOIT_TOTAL_MILLIS = 900_000L
         private const val INSTALL_RECEIPT = "install_receipt"
         private const val RECEIPT_BOOT_TOKEN = "kernel_boot_id"
@@ -553,8 +575,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private const val SHIZUKU_PAYLOAD_PATH = "/data/local/tmp/ksu-payload"
         private const val SHIZUKU_KSUD_PATH = "/data/local/tmp/ksud-s25u-kdp"
         private const val SHIZUKU_KSUD_STAGE_PATH = "/data/local/tmp/.ksud-stage"
-        private val LOG_POLL_INTERVAL = 250.milliseconds
-        private val SHIZUKU_LOG_POLL_INTERVAL = 1.seconds
+        private val LOG_POLL_INTERVAL = 50.milliseconds
+        private val SHIZUKU_LOG_POLL_INTERVAL = 100.milliseconds
         private val ANSI_ESCAPE = Regex("\u001B\\[[0-?]*[ -/]*[@-~]")
         private val P0_OFFSET_PATTERN = Regex(
             "slide-kaslr-ok[^\\n]*slide=([0-9a-fA-F]{16})",

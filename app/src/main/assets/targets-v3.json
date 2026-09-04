@@ -33,7 +33,7 @@
       "kernelReleases": ["5.15.189-android13-8-33413713-abS918BXXSAFZH3"],
       "kernelVersionInfos": ["#1 SMP PREEMPT Tue Aug 11 06:33:52 UTC 2026"],
       "exploit": {
-        "url": "asset://cve-2026-43499-app-afzh3.so",
+        "url": "asset://cve-2026-43499-app-afzh3-tuned.so",
         "size": 131072
       },
       "kernelsu": {
@@ -42,7 +42,13 @@
       },
       "helper": {
         "url": "asset://libcve43499root-afzh3.so",
-        "size": 29232
+        "size": 30272
+      },
+      "execution": {
+        "attempts": 1,
+        "p0_timeout_sec": 45,
+        "attempt_timeout_sec": 60,
+        "pselect_delay_usec": 20000
       }
     },
     {

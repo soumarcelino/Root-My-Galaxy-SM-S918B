@@ -1,0 +1,36 @@
+{
+  "name": "F731U-F731USQS8GZF1 to dm3q-S918BXXSAFZH3 tuned profile",
+  "comment": "New AFZH3 payload derived from the validated POC. It preserves the validated boot quiet window and P-select timing, while reducing the default run to one attempt, using 45 s for P0, 60 s for the attempt, and polling the supervisor every 10 ms.",
+  "byte_patches": [
+    {
+      "offset": "0x00954c",
+      "old_bytes": "01018052",
+      "bytes": "21008052",
+      "comment": "default to one exploit attempt"
+    },
+    {
+      "offset": "0x009588",
+      "old_bytes": "410b8052",
+      "bytes": "81078052",
+      "comment": "default overall attempt timeout: 60 s"
+    },
+    {
+      "offset": "0x0095a4",
+      "old_bytes": "81028052",
+      "bytes": "a1058052",
+      "comment": "default P0 timeout: 45 s"
+    },
+    {
+      "offset": "0x0096f4",
+      "old_bytes": "00d49052",
+      "bytes": "00e28452",
+      "comment": "supervisor poll: 10 ms"
+    },
+    {
+      "offset": "0x0096f8",
+      "old_bytes": "2000a072",
+      "bytes": "1f2003d5",
+      "comment": "remove the high half of the old 100 ms delay"
+    }
+  ]
+}

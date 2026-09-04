@@ -1,0 +1,21 @@
+{
+  "name": "F731U-F731USQS8GZF1 to dm3q-S918BXXSAFZH3",
+  "comment": "AFZH3 kernel 5.15.189 symbols recovered from the laboratory boot image; data-symbol offsets are AFZG1 - 0x100.",
+  "symbol_fixes": [
+    {"offset": "0x0067ec", "type": "mov_imm16", "new_value": "0xd4b8"},
+    {"offset": "0x0068b8", "type": "mov_imm16", "new_value": "0x2947"},
+    {"offset": "0x006964", "type": "mov_imm16", "new_value": "0x2947"},
+    {"offset": "0x006b7c", "type": "mov_imm16", "new_value": "0x2947"},
+    {"offset": "0x006bdc", "type": "mov_imm16", "new_value": "0x2947"},
+    {"offset": "0x007470", "type": "mov_imm16", "new_value": "0xf460"},
+    {"offset": "0x007478", "type": "mov_imm16", "new_value": "0x099f"},
+    {"offset": "0x00754c", "type": "mov_imm16", "new_value": "0xf460"},
+    {"offset": "0x007554", "type": "mov_imm16", "new_value": "0x099f"},
+    {"offset": "0x00765c", "type": "mov_imm16", "new_value": "0xf460"},
+    {"offset": "0x00766c", "type": "mov_imm16", "new_value": "0x099f"},
+    {"offset": "0x00789c", "type": "mov_imm16", "new_value": "0xb987"},
+    {"offset": "0x0078ac", "type": "mov_imm16", "new_value": "0x4478"},
+    {"offset": "0x007af4", "type": "mov_imm16", "new_value": "0xf460"},
+    {"offset": "0x007afc", "type": "mov_imm16", "new_value": "0x099f"}
+  ]
+}

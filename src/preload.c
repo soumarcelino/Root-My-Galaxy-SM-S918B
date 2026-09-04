@@ -63,6 +63,11 @@ static int env_int(const char *name, int fallback, int min, int max) {
   return (int)parsed;
 }
 
+static int fast_profile_enabled(void) {
+  const char *value = getenv("RMG_FAST");
+  return value && *value && strcmp(value, "0") != 0;
+}
+
 static int attempt_delay_usec(int base_delay, int attempt) {
 #if defined(APP_PAYLOAD_ATTEMPT_DELAYS_USEC)
   static const int delays[] = {
@@ -89,6 +94,10 @@ static int attempt_delay_usec(int base_delay, int attempt) {
 
 static void wait_for_boot_quiet_window(void) {
 #if defined(APP_PAYLOAD) && APP_PAYLOAD
+  if (fast_profile_enabled()) {
+    pr_info("fast profile: skipping boot allocator quiet window\n");
+    return;
+  }
   struct timespec uptime;
   SYSCHK(clock_gettime(CLOCK_BOOTTIME, &uptime));
   if (uptime.tv_sec < APP_MIN_BOOT_UPTIME_SEC) {
@@ -120,6 +129,13 @@ __attribute__((constructor)) static void load(void) {
   int p0_attempt_timeout_sec = env_int(
       "P0_ATTEMPT_TIMEOUT_SEC", DEFAULT_P0_ATTEMPT_TIMEOUT_SEC, 5,
       attempt_timeout_sec);
+  int fast_profile = fast_profile_enabled();
+  if (fast_profile) {
+    max_attempts = 1;
+    base_delay = 0;
+    attempt_timeout_sec = 2;
+    p0_attempt_timeout_sec = 2;
+  }
   if (p0_attempt_timeout_sec > attempt_timeout_sec) {
     p0_attempt_timeout_sec = attempt_timeout_sec;
   }
@@ -204,7 +220,7 @@ __attribute__((constructor)) static void load(void) {
         } while (waited < 0 && errno == EINTR);
         break;
       }
-      usleep(100000);
+      usleep(fast_profile ? 10000 : 100000);
     }
     if (waited < 0) {
       pr_error("waitpid attempt=%d pid=%d errno=%d\n",

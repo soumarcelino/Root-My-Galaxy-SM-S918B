@@ -1,0 +1,60 @@
+{
+  "name": "dm3q-S918BXXSAFZH3 fast profile",
+  "comment": "Derived from the validated AFZH3 payload. Fail-fast only: one attempt, no boot quiet wait, 2 s P0/overall timeout, 10 ms supervisor poll. The tracefs collection sleep remains intact.",
+  "byte_patches": [
+    {
+      "offset": "0x009518",
+      "old_bytes": "6c010054",
+      "bytes": "0b000014",
+      "comment": "skip the 120 s boot quiet-window branch"
+    },
+    {
+      "offset": "0x00954c",
+      "old_bytes": "01018052",
+      "bytes": "21008052",
+      "comment": "default to one exploit attempt"
+    },
+    {
+      "offset": "0x00956c",
+      "old_bytes": "01c48952",
+      "bytes": "01008052",
+      "comment": "default P-select delay: 0 us"
+    },
+    {
+      "offset": "0x009588",
+      "old_bytes": "410b8052",
+      "bytes": "41008052",
+      "comment": "default overall attempt timeout: 2 s"
+    },
+    {
+      "offset": "0x00958c",
+      "old_bytes": "a2008052",
+      "bytes": "42008052",
+      "comment": "minimum overall attempt timeout: 2 s"
+    },
+    {
+      "offset": "0x0095a4",
+      "old_bytes": "81028052",
+      "bytes": "41008052",
+      "comment": "default P0 timeout: 2 s"
+    },
+    {
+      "offset": "0x0095a8",
+      "old_bytes": "a2008052",
+      "bytes": "42008052",
+      "comment": "minimum P0 timeout: 2 s"
+    },
+    {
+      "offset": "0x0096f4",
+      "old_bytes": "00d49052",
+      "bytes": "00e28452",
+      "comment": "supervisor poll: 10 ms"
+    },
+    {
+      "offset": "0x0096f8",
+      "old_bytes": "2000a072",
+      "bytes": "1f2003d5",
+      "comment": "remove the high half of the old 100 ms delay"
+    }
+  ]
+}

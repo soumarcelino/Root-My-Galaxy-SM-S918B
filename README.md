@@ -18,6 +18,8 @@ Use this only on devices you own or are explicitly authorized to test.
 - Security patch level: `05/08/2026`.
 - The previous `S918BXXSAFZG1` payload remains bundled for older compatible
   devices.
+- AFZH3 now uses a new tuned payload: one validated attempt, preserved
+  P-select timing, 45-second P0 timeout, and 60-second attempt timeout.
 
 ## Now with KernelSU Next support
 
@@ -98,6 +100,12 @@ From the repository root:
 ./tools/port-sm-s918b-afzf5.sh
 ```
 
+For the AFZH3 laboratory firmware and the new tuned payload, use:
+
+```sh
+./tools/port-sm-s918b-afzh3.sh --no-adb-check
+```
+
 Build the debug APK:
 
 ```sh
@@ -115,7 +123,10 @@ Build, install, and stage local ADB files:
 
 ```text
 tools/port-sm-s918b-afzf5.sh
+tools/port-sm-s918b-afzh3.sh
 tools/f731u-to-dm3q-s918b-afzf5.spec.json
+tools/f731u-to-dm3q-s918b-afzh3.spec.json
+tools/f731u-to-dm3q-s918b-afzh3-tuned.spec.json
 tools/patch_payload.py
 app/src/main/assets/targets-v3.json
 RootMyGalaxyDesktop/assets/profiles.json

@@ -997,20 +997,73 @@ static void relay_payload_log_tail(const char *path, int transport_fd) {
   close(fd);
 }
 
+static int payload_runtime_limit_ms(void) {
+  const char *value = getenv("RMG_MAX_RUNTIME_MS");
+  if (!value || !*value) {
+    return 0;
+  }
+
+  char *end = NULL;
+  errno = 0;
+  long parsed = strtol(value, &end, 10);
+  if (errno || end == value || *end || parsed < 1 || parsed > 600000) {
+    dprintf(STDERR_FILENO,
+            "[runner] ignoring invalid RMG_MAX_RUNTIME_MS=%s\n", value);
+    return 0;
+  }
+  return (int)parsed;
+}
+
+static int runtime_deadline_expired(const struct timespec *deadline) {
+  if (!deadline) {
+    return 0;
+  }
+
+  struct timespec now;
+  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+    return 1;
+  }
+  return now.tv_sec > deadline->tv_sec ||
+         (now.tv_sec == deadline->tv_sec && now.tv_nsec >= deadline->tv_nsec);
+}
+
+static void kill_payload_group(pid_t payload_pid) {
+  /* The payload calls setsid(); kill the session and also cover the short
+   * interval before that call completes. */
+  (void)kill(-payload_pid, SIGKILL);
+  (void)kill(payload_pid, SIGKILL);
+}
+
+static pid_t wait_payload_with_deadline(pid_t payload_pid, int *status,
+                                        const struct timespec *deadline) {
+  for (;;) {
+    pid_t waited = waitpid(payload_pid, status, WNOHANG);
+    if (waited == payload_pid || (waited < 0 && errno != EINTR)) {
+      return waited;
+    }
+    if (runtime_deadline_expired(deadline)) {
+      kill_payload_group(payload_pid);
+      do {
+        waited = waitpid(payload_pid, status, 0);
+      } while (waited < 0 && errno == EINTR);
+      return waited;
+    }
+    usleep(1000);
+  }
+}
+
 static pid_t follow_payload_log(const char *path, int transport_fd,
-                                pid_t payload_pid, int *status) {
+                                pid_t payload_pid, int *status,
+                                const struct timespec *deadline,
+                                int runtime_limit_ms) {
   int fd = open(path, O_RDONLY | O_CLOEXEC);
   int transport_ok = 1;
   if (fd < 0) {
     dprintf(transport_fd, "[runner-live] open failed errno=%d\n", errno);
-    pid_t waited;
-    do {
-      waited = waitpid(payload_pid, status, 0);
-    } while (waited < 0 && errno == EINTR);
-    return waited;
+    return wait_payload_with_deadline(payload_pid, status, deadline);
   }
 
-  if (dprintf(transport_fd, "[runner-live] following path=%s interval_ms=10\n",
+  if (dprintf(transport_fd, "[runner-live] following path=%s interval_ms=1\n",
               path) < 0) {
     transport_ok = 0;
   }
@@ -1070,14 +1123,46 @@ static pid_t follow_payload_log(const char *path, int transport_fd,
       close(fd);
       return waited;
     }
+    if (runtime_deadline_expired(deadline)) {
+      if (transport_ok) {
+        dprintf(transport_fd,
+                "[runner-live] deadline exceeded child=%d limit_ms=%d\n",
+                payload_pid, runtime_limit_ms);
+      }
+      kill_payload_group(payload_pid);
+      do {
+        waited = waitpid(payload_pid, status, 0);
+      } while (waited < 0 && errno == EINTR);
+      if (transport_ok) {
+        dprintf(transport_fd, "[runner-live] child=%d killed status=0x%x\n",
+                payload_pid, *status);
+      }
+      close(fd);
+      return waited;
+    }
     /* Limit supervisor-only completion latency without changing payload timing. */
-    usleep(10000);
+    usleep(1000);
   }
 }
 
 static int payload_runner_main(int argc, char **argv) {
   if (argc != 5) {
     return 2;
+  }
+  int runtime_limit_ms = payload_runtime_limit_ms();
+  struct timespec deadline_value;
+  const struct timespec *deadline = NULL;
+  if (runtime_limit_ms > 0) {
+    if (clock_gettime(CLOCK_MONOTONIC, &deadline_value) != 0) {
+      return errno ? errno : EIO;
+    }
+    deadline_value.tv_sec += runtime_limit_ms / 1000;
+    deadline_value.tv_nsec += (long)(runtime_limit_ms % 1000) * 1000000L;
+    if (deadline_value.tv_nsec >= 1000000000L) {
+      deadline_value.tv_sec++;
+      deadline_value.tv_nsec -= 1000000000L;
+    }
+    deadline = &deadline_value;
   }
   if (!rmg_target_validate(stderr, 0)) {
     return ENODEV;
@@ -1121,7 +1206,7 @@ static int payload_runner_main(int argc, char **argv) {
   if (payload_pid > 0) {
     int status = 0;
     pid_t waited = follow_payload_log(argv[4], transport_fd, payload_pid,
-                                      &status);
+                                      &status, deadline, runtime_limit_ms);
     if (waited < 0) {
       int saved_errno = errno;
       relay_payload_log_tail(argv[4], transport_fd);

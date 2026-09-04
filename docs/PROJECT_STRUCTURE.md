@@ -44,9 +44,20 @@ PROJECT-MANIFEST.txt
 tools/port-sm-s918b-afzf5.sh
   Reproducible local port/build/staging script.
 
+tools/port-sm-s918b-afzh3.sh
+  Reproducible two-stage AFZH3 port, tuned-payload generation, APK build, and
+  optional ADB staging script.
+
 tools/f731u-to-dm3q-s918b-afzf5.spec.json
   Patch spec that changes the F731U base payload into the dm3q/S918BXXSAFZF5
   payload.
+
+tools/f731u-to-dm3q-s918b-afzh3.spec.json
+  Symbol/offset port from the F731U base to the laboratory AFZH3 firmware.
+
+tools/f731u-to-dm3q-s918b-afzh3-tuned.spec.json
+  Runtime tuning applied after the AFZH3 port; it preserves the validated
+  exploit timing while removing redundant attempts and supervisor latency.
 
 tools/patch_payload.py
   Applies the JSON patch spec to the base payload.

