@@ -70,6 +70,16 @@
     <string name="about_title">About Root My Galaxy</string>
     <string name="about_description">About Root My Galaxy</string>
     <string name="about_body">One-click installer that uses a kernel exploit to root supported Samsung Galaxy devices.</string>
+    <string name="uninstall_root">Uninstall root</string>
+    <string name="uninstall_root_description">Delete temporary files and KernelSU modules using temporary root</string>
+    <string name="uninstall_root_title">Uninstall root?</string>
+    <string name="uninstall_root_body">This permanently deletes all contents of /data/local/tmp and /data/adb/modules, plus /data/adb/ksud, using temporary root. It does not start KernelSU or remove an already loaded kernel root. Reboot if needed.</string>
+    <string name="uninstall_root_confirm">Delete files</string>
+    <string name="status_uninstalling_root">Using temporary root shell to delete root files</string>
+    <string name="status_root_uninstalled">Root files deleted</string>
+    <string name="error_uninstall_root">Root shell cleanup failed (rc=%1$d): %2$s</string>
+    <string name="phase_uninstalling_root">Run root shell cleanup without late-loading KernelSU</string>
+    <string name="phase_root_uninstalled">Temporary root files removed</string>
 
     <string name="install_title">Install</string>
     <string name="install_keep_open">Keep this screen open until installation finishes</string>

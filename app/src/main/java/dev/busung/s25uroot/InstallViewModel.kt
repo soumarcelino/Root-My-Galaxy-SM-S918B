@@ -182,6 +182,51 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun uninstallRoot(profileId: String? = null) {
+        if (installJob?.isActive == true) return
+        discoveryJob?.cancel()
+        installJob = viewModelScope.launch(Dispatchers.IO) {
+            mutableState.value = InstallUiState(
+                phase = InstallPhase.Checking,
+                probeOutput = mutableState.value.probeOutput,
+            )
+            startHistory()
+            try {
+                if (shizukuEnabled()) {
+                    appendLog(app.getString(R.string.log_shizuku_prepare))
+                    if (!ShizukuController.isRunning() && !ShizukuController.pingUntilRunning()) {
+                        error(app.getString(R.string.error_shizuku_unavailable))
+                    }
+                    if (!ShizukuController.isGranted() && !ShizukuController.requestPermission()) {
+                        error(app.getString(R.string.error_shizuku_permission))
+                    }
+                    appendLog(app.getString(R.string.log_shizuku_permission))
+                }
+                setPhase(InstallPhase.Checking, app.getString(R.string.status_checking_github))
+                val profile = if (profileId == null) {
+                    repository.resolveTarget(DeviceSnapshot.current())
+                } else {
+                    repository.resolveTarget(profileId)
+                }
+                appendLog(app.getString(R.string.log_profile, profile.profileId))
+                updateHistoryProfile(profile.profileId)
+                setPhase(InstallPhase.Downloading, app.getString(R.string.status_downloading_payload))
+                val payloads = repository.download(profile) { appendLog("[*] $it") }
+                appendLog(app.getString(R.string.log_download_verified))
+                setPhase(InstallPhase.Exploiting, app.getString(R.string.status_exploit_running))
+                executeExploit(payloads)
+                setPhase(InstallPhase.LoadingKernelSu, app.getString(R.string.status_uninstalling_root))
+                removeRootFiles(payloads.helper)
+                setPhase(InstallPhase.Installed, app.getString(R.string.status_root_uninstalled))
+                finishHistory(InstallRunResult.Succeeded)
+            } catch (error: Throwable) {
+                appendLog("[-] ${error.message ?: error.javaClass.simpleName}")
+                setPhase(InstallPhase.Failed, app.getString(R.string.status_install_failed))
+                finishHistory(InstallRunResult.Failed)
+            }
+        }
+    }
+
     private suspend fun executeExploit(payloads: VerifiedPayloads) {
         val payload = payloads.exploit
         val shizuku = shizukuEnabled()
@@ -353,6 +398,19 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         if (lateLoad.output.isNotBlank()) appendLog(lateLoad.output)
         storeInstallReceipt()
         appendLog(app.getString(R.string.log_ksu_control_verified))
+    }
+
+    private fun removeRootFiles(helperSource: File) {
+        val helper = helperFile(helperSource)
+        val cleanup =
+            "for target in /data/local/tmp /data/adb/modules; do " +
+                "[ -d \"\$target\" ] || continue; " +
+                "find \"\$target\" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; " +
+                "done; rm -f -- /data/adb/ksud"
+        val result = runHelper(helper, "-c", cleanup)
+        require(result.code == 0) {
+            app.getString(R.string.error_uninstall_root, result.code, result.output)
+        }
     }
 
     private fun detectInstalled(): Boolean {

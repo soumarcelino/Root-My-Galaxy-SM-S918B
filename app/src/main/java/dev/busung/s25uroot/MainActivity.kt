@@ -207,6 +207,12 @@ class MainActivity : ComponentActivity() {
                         AppPreferences.setOptimizeOnExploit(this, enabled)
                         optimizeOnExploit = enabled
                     },
+                    openUninstaller = {
+                        val uninstaller = Intent(this, InstallActivity::class.java)
+                            .putExtra(InstallActivity.EXTRA_INSTALL_REQUEST_ID, UUID.randomUUID().toString())
+                            .putExtra(InstallActivity.EXTRA_UNINSTALL_ROOT, true)
+                        startActivity(uninstaller)
+                    },
                     openInstaller = { profileId ->
                         val installer = Intent(this, InstallActivity::class.java)
                             .putExtra(InstallActivity.EXTRA_INSTALL_REQUEST_ID, UUID.randomUUID().toString())
@@ -294,6 +300,7 @@ private fun RootApp(
     onAdvancedModeChanged: (Boolean) -> Unit,
     onShizukuModeChanged: (Boolean) -> Unit,
     onOptimizeOnExploitChanged: (Boolean) -> Unit,
+    openUninstaller: () -> Unit,
     openInstaller: (String?) -> Unit,
 ) {
     val installState by installViewModel.state.collectAsStateWithLifecycle()
@@ -522,6 +529,7 @@ private fun RootApp(
                     onAdvancedModeChanged = onAdvancedModeChanged,
                     onShizukuModeChanged = onShizukuModeChanged,
                     onOptimizeOnExploitChanged = onOptimizeOnExploitChanged,
+                    openUninstaller = openUninstaller,
                 )
             }
         }
@@ -1422,6 +1430,7 @@ private fun SettingsPage(
     onAdvancedModeChanged: (Boolean) -> Unit,
     onShizukuModeChanged: (Boolean) -> Unit,
     onOptimizeOnExploitChanged: (Boolean) -> Unit,
+    openUninstaller: () -> Unit,
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -1430,6 +1439,7 @@ private fun SettingsPage(
     var showColorDialog by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
     var showShizukuMissingDialog by remember { mutableStateOf(false) }
+    var showUninstallRootDialog by remember { mutableStateOf(false) }
     var languageMenuTop by remember { mutableStateOf(32.dp) }
     var colorMenuTop by remember { mutableStateOf(32.dp) }
     val density = LocalDensity.current
@@ -1494,6 +1504,37 @@ private fun SettingsPage(
 
     if (showAboutDialog) {
         AboutDialog(onDismiss = { showAboutDialog = false })
+    }
+
+    if (showUninstallRootDialog) {
+        AlertDialog(
+            onDismissRequest = { showUninstallRootDialog = false },
+            icon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
+            title = {
+                DialogDimAmount(0.34f)
+                Text(stringResource(R.string.uninstall_root_title))
+            },
+            text = { Text(stringResource(R.string.uninstall_root_body)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        clickHaptic(view)
+                        showUninstallRootDialog = false
+                        openUninstaller()
+                    },
+                ) {
+                    Text(stringResource(R.string.uninstall_root_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    clickHaptic(view)
+                    showUninstallRootDialog = false
+                }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
     }
 
     LazyColumn(
@@ -1617,6 +1658,18 @@ private fun SettingsPage(
                     },
                 )
             }
+        }
+        item {
+            SettingsCard(
+                icon = Icons.Rounded.Delete,
+                title = stringResource(R.string.uninstall_root),
+                description = stringResource(R.string.uninstall_root_description),
+                value = "",
+                onClick = {
+                    clickHaptic(view)
+                    showUninstallRootDialog = true
+                },
+            )
         }
     }
 }

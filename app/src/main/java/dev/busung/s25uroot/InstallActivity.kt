@@ -74,6 +74,7 @@ class InstallActivity : ComponentActivity() {
         enableEdgeToEdge()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val profileId = intent.getStringExtra(EXTRA_PROFILE_ID)
+        val uninstallRoot = intent.getBooleanExtra(EXTRA_UNINSTALL_ROOT, false)
         val startInstall = savedInstanceState == null && AppPreferences.consumeInstallRequest(
             this,
             intent.getStringExtra(EXTRA_INSTALL_REQUEST_ID),
@@ -87,11 +88,18 @@ class InstallActivity : ComponentActivity() {
                 val installState by installViewModel.state.collectAsStateWithLifecycle()
                 BackHandler(enabled = installState.busy) {}
                 LaunchedEffect(startInstall, profileId) {
-                    if (startInstall) installViewModel.install(profileId)
+                    if (startInstall) {
+                        if (uninstallRoot) installViewModel.uninstallRoot(profileId)
+                        else installViewModel.install(profileId)
+                    }
                 }
                 InstallScreen(
                     installState = installState,
-                    onRetry = { installViewModel.install(profileId) },
+                    uninstallRoot = uninstallRoot,
+                    onRetry = {
+                        if (uninstallRoot) installViewModel.uninstallRoot(profileId)
+                        else installViewModel.install(profileId)
+                    },
                     onClose = ::finish,
                 )
             }
@@ -101,6 +109,7 @@ class InstallActivity : ComponentActivity() {
     companion object {
         const val EXTRA_INSTALL_REQUEST_ID = "install_request_id"
         const val EXTRA_PROFILE_ID = "profile_id"
+        const val EXTRA_UNINSTALL_ROOT = "uninstall_root"
     }
 }
 
@@ -130,6 +139,7 @@ private fun clickHaptic(view: View) {
 @Composable
 private fun InstallScreen(
     installState: InstallUiState,
+    uninstallRoot: Boolean,
     onRetry: () -> Unit,
     onClose: () -> Unit,
 ) {
@@ -166,7 +176,7 @@ private fun InstallScreen(
                 )
             }
 
-            InstallerStatusCard(installState)
+            InstallerStatusCard(installState, uninstallRoot)
             InstallerSteps(installState.phase)
             InstallerLog(
                 output = installState.log,
@@ -218,7 +228,7 @@ private fun InstallScreen(
 }
 
 @Composable
-private fun InstallerStatusCard(installState: InstallUiState) {
+private fun InstallerStatusCard(installState: InstallUiState, uninstallRoot: Boolean) {
     val context = LocalContext.current
     var rootDurationMillis by remember { mutableStateOf(AppPreferences.lastRootDurationMillis(context)) }
     var cycleProgress by remember {
@@ -285,7 +295,7 @@ private fun InstallerStatusCard(installState: InstallUiState) {
                         style = MaterialTheme.typography.titleLarge,
                     )
                     Text(
-                        text = installPhaseDetail(installState.phase),
+                        text = installPhaseDetail(installState.phase, uninstallRoot),
                         color = LocalContentColor.current.copy(alpha = 0.78f),
                     )
                 }
@@ -398,14 +408,14 @@ private fun InstallerLog(
 }
 
 @Composable
-private fun installPhaseDetail(phase: InstallPhase): String = stringResource(
+private fun installPhaseDetail(phase: InstallPhase, uninstallRoot: Boolean): String = stringResource(
     when (phase) {
         InstallPhase.Checking -> R.string.phase_checking
         InstallPhase.Ready -> R.string.phase_ready
         InstallPhase.Downloading -> R.string.phase_downloading
         InstallPhase.Exploiting -> R.string.phase_exploiting
-        InstallPhase.LoadingKernelSu -> R.string.phase_loading_ksu
-        InstallPhase.Installed -> R.string.phase_installed
+        InstallPhase.LoadingKernelSu -> if (uninstallRoot) R.string.phase_uninstalling_root else R.string.phase_loading_ksu
+        InstallPhase.Installed -> if (uninstallRoot) R.string.phase_root_uninstalled else R.string.phase_installed
         InstallPhase.Failed -> R.string.phase_failed
     },
 )
