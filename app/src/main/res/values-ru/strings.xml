@@ -6,7 +6,7 @@
     <string name="nav_history">История</string>
     <string name="nav_settings">Настройки</string>
     <string name="install_confirm_title">Установить KernelSU?</string>
-    <string name="install_confirm_body">Приложение проверит профиль поддержки, а затем загрузит с GitHub и запустит эксплойт и payload KernelSU.</string>
+    <string name="install_confirm_body">Приложение проверит устройство и прошивку, подготовит совместимый встроенный payload, а затем запустит эксплойт с KernelSU Next.</string>
     <string name="action_confirm">Подтвердить</string>
     <string name="action_cancel">Отмена</string>
     <string name="action_close">Закрыть</string>
@@ -61,8 +61,8 @@
     <string name="install_preparing">Подготовка…</string>
     <string name="step_support_title">Проверка поддержки</string>
     <string name="step_support_detail">Проверка профиля устройства и прошивки</string>
-    <string name="step_download_title">Загрузка</string>
-    <string name="step_download_detail">Загрузка манифеста поддержки</string>
+    <string name="step_download_title">Выбор payload</string>
+    <string name="step_download_detail">Выбор и подготовка совместимых встроенных бинарных файлов</string>
     <string name="step_exploit_title">Эксплойт ядра</string>
     <string name="step_exploit_detail">Получение временного root-доступа</string>
     <string name="step_ksu_title">Загрузка KernelSU</string>
@@ -70,7 +70,7 @@
     <string name="phase_checking">Проверка поддержки устройства и прошивки</string>
     <string name="phase_ready">Готово к установке</string>
     <string name="phase_downloading">Загрузка привязанных к commit payload-файлов с GitHub</string>
-    <string name="phase_exploiting">Это может занять 10 минут или больше. Устройство может нагреться или перестать отвечать.</string>
+    <string name="phase_exploiting">Это может занять 2 минуты или больше. Устройство может нагреться или перестать отвечать.</string>
     <string name="phase_loading_ksu">Загрузка KernelSU с использованием полученного временного root-доступа</string>
     <string name="phase_installed">Модуль KernelSU и канал управления успешно проверены</string>
     <string name="phase_failed">Проверьте место возникновения ошибки в журнале ниже</string>

@@ -5,7 +5,7 @@
     <string name="nav_history">Lịch sử</string>
     <string name="nav_settings">Cài đặt</string>
     <string name="install_confirm_title">Cài đặt KernelSU?</string>
-    <string name="install_confirm_body">Ứng dụng sẽ xác minh hồ sơ hỗ trợ, sau đó tải xuống và chạy exploit cùng payload KernelSU từ GitHub.</string>
+    <string name="install_confirm_body">Ứng dụng sẽ xác minh thiết bị và firmware, chuẩn bị payload tương thích được tích hợp sẵn trong ứng dụng, rồi chạy exploit với KernelSU Next.</string>
     <string name="action_confirm">Xác nhận</string>
     <string name="action_cancel">Hủy</string>
     <string name="action_close">Đóng</string>
@@ -52,8 +52,8 @@
     <string name="install_preparing">Đang chuẩn bị…</string>
     <string name="step_support_title">Kiểm tra hỗ trợ</string>
     <string name="step_support_detail">Xác minh hồ sơ thiết bị và firmware</string>
-    <string name="step_download_title">Tải xuống</string>
-    <string name="step_download_detail">Tải manifest hỗ trợ</string>
+    <string name="step_download_title">Chọn payload</string>
+    <string name="step_download_detail">Chọn và chuẩn bị tệp nhị phân tương thích được tích hợp trong ứng dụng</string>
     <string name="step_exploit_title">Khai thác kernel</string>
     <string name="step_exploit_detail">Giành quyền root khởi tạo</string>
     <string name="step_ksu_title">Nạp KernelSU</string>
@@ -61,7 +61,7 @@
     <string name="phase_checking">Đang kiểm tra thiết bị và firmware được hỗ trợ</string>
     <string name="phase_ready">Sẵn sàng cài đặt</string>
     <string name="phase_downloading">Đang tải payload khóa theo commit từ GitHub</string>
-    <string name="phase_exploiting">Việc này có thể mất từ 10 phút trở lên. Thiết bị của bạn có thể nóng hoặc ngừng phản hồi.</string>
+    <string name="phase_exploiting">Việc này có thể mất từ 2 phút trở lên. Thiết bị của bạn có thể nóng hoặc ngừng phản hồi.</string>
     <string name="phase_loading_ksu">Đang nạp KernelSU với quyền root khởi tạo đã giành được</string>
     <string name="phase_installed">Đã xác minh mô-đun KernelSU và kênh điều khiển</string>
     <string name="phase_failed">Xem lại điểm lỗi trong nhật ký bên dưới</string>
