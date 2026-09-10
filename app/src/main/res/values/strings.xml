@@ -97,6 +97,7 @@
     <string name="phase_ready">Ready to install</string>
     <string name="phase_downloading">Preparing bundled payloads</string>
     <string name="phase_exploiting">This may take 2 minutes or longer. Your device may become hot or stop responding.</string>
+    <string name="phase_waiting_boot_allocator">Waiting for the boot allocator quiet window to finish</string>
     <string name="phase_loading_ksu">Loading KernelSU Next with the acquired bootstrap root</string>
     <string name="phase_installed">KernelSU Next module and control channel verified</string>
     <string name="phase_failed">Review the failure point in the log below</string>
@@ -107,6 +108,7 @@
     <string name="status_checking_github">Checking GitHub support manifest</string>
     <string name="status_downloading_payload">Preparing payloads</string>
     <string name="status_exploit_running">Running kernel exploit</string>
+    <string name="status_waiting_boot_allocator">Waiting for boot allocator quiet window (%1$d s remaining)</string>
     <string name="status_ksu_loading">Late-loading KernelSU Next</string>
     <string name="status_install_failed">Installation failed</string>
     <string name="log_profile">[+] Support profile: %1$s</string>

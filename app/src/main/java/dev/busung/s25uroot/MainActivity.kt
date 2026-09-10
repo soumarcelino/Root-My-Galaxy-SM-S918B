@@ -92,7 +92,6 @@ import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
@@ -100,7 +99,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LoadingIndicator
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -700,12 +699,11 @@ private fun UpdateCard(
             )
             when (status) {
                 is UpdateStatus.Downloading -> {
-                    LinearProgressIndicator(
+                    LinearWavyProgressIndicator(
                         progress = { status.progress },
                         modifier = Modifier.fillMaxWidth(),
                         color = LocalContentColor.current,
                         trackColor = LocalContentColor.current.copy(alpha = 0.2f),
-                        drawStopIndicator = {},
                     )
                     Text(
                         text = stringResource(R.string.updater_downloading),
@@ -1707,8 +1705,7 @@ private fun UpdateSettingsCard(
         ) {
             when {
                 status is UpdateStatus.Checking -> LoadingIndicator(modifier = Modifier.size(28.dp))
-                status is UpdateStatus.Downloading -> CircularProgressIndicator(
-                    progress = { status.progress },
+                status is UpdateStatus.Downloading -> LoadingIndicator(
                     modifier = Modifier.size(28.dp),
                 )
                 else -> Icon(

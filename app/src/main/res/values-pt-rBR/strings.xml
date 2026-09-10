@@ -70,6 +70,7 @@
     <string name="phase_ready">Pronto para instalar</string>
     <string name="phase_downloading">Preparando os payloads embutidos</string>
     <string name="phase_exploiting">Isso pode levar 2 minutos ou mais. Seu dispositivo pode esquentar ou parar de responder.</string>
+    <string name="phase_waiting_boot_allocator">Aguardando o fim da janela silenciosa do boot allocator</string>
     <string name="phase_loading_ksu">Carregando o KernelSU Next com o root bootstrap adquirido</string>
     <string name="phase_installed">Módulo do KernelSU Next e canal de controle verificados</string>
     <string name="phase_failed">Revise o ponto de falha no log abaixo</string>
@@ -80,6 +81,7 @@
     <string name="status_checking_github">Verificando manifesto de suporte no GitHub</string>
     <string name="status_downloading_payload">Preparando payloads</string>
     <string name="status_exploit_running">Rodando exploit de kernel</string>
+    <string name="status_waiting_boot_allocator">Aguardando a janela do boot allocator (%1$d s restantes)</string>
     <string name="status_ksu_loading">Carregando o KernelSU Next tardiamente</string>
     <string name="status_install_failed">Instalação falhou</string>
     <string name="log_profile">[+] Perfil de suporte: %1$s</string>

@@ -20,6 +20,7 @@ enum class InstallPhase {
     Checking,
     Ready,
     Downloading,
+    WaitingForBootAllocator,
     Exploiting,
     LoadingKernelSu,
     Installed,
@@ -31,11 +32,14 @@ data class InstallUiState(
     val message: String = "",
     val probeOutput: String = "",
     val log: String = "",
+    val bootAllocatorRemainingMillis: Long? = null,
+    val bootAllocatorTotalMillis: Long? = null,
 ) {
     val busy: Boolean
         get() = phase in setOf(
             InstallPhase.Checking,
             InstallPhase.Downloading,
+            InstallPhase.WaitingForBootAllocator,
             InstallPhase.Exploiting,
             InstallPhase.LoadingKernelSu,
         )
@@ -291,6 +295,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         } else {
             { logFile.readTextIfPresent() }
         }
+        val bootAllocatorTracker = BootAllocatorLogTracker()
 
         try {
             val startedAt = SystemClock.elapsedRealtime()
@@ -298,26 +303,31 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             var lastRawLog = ""
             while (process.isAlive) {
                 val rawLog = readLog()
+                val now = SystemClock.elapsedRealtime()
+                val bootWindow = bootAllocatorTracker.update(rawLog, now)
+                updateBootAllocatorState(bootWindow, now)
                 if (rawLog != lastRawLog) {
                     cacheP0Offset(bootToken, rawLog)
                     publishExploitLog(logPrefix, rawLog)
                     lastRawLog = rawLog
-                    lastProgressAt = SystemClock.elapsedRealtime()
+                    lastProgressAt = now
                 }
-                val now = SystemClock.elapsedRealtime()
+                // The payload deliberately emits no logs during this timed sleep.
+                if (bootWindow != null) lastProgressAt = now
                 require(now - lastProgressAt < EXPLOIT_STALL_MILLIS) {
                     app.getString(R.string.error_exploit_stalled)
                 }
                 require(now - startedAt < EXPLOIT_TOTAL_MILLIS) {
                     app.getString(R.string.error_exploit_timeout)
                 }
-                delay(if (shizuku) SHIZUKU_LOG_POLL_INTERVAL else LOG_POLL_INTERVAL)
+                delay(if (shizuku && bootWindow == null) SHIZUKU_LOG_POLL_INTERVAL else LOG_POLL_INTERVAL)
             }
 
             val exitCode = process.waitFor()
             val rawLog = readLog()
             cacheP0Offset(bootToken, rawLog)
             publishExploitLog(logPrefix, rawLog)
+            updateBootAllocatorState(null, SystemClock.elapsedRealtime())
             val earlyOutput = readProcessOutput(process, shizuku).trim()
             require(exitCode == 0) {
                 app.getString(
@@ -371,6 +381,27 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 .joinToString("\n"),
         )
         updateHistoryLog()
+    }
+
+    private fun updateBootAllocatorState(window: BootAllocatorWindow?, nowMillis: Long) {
+        val current = mutableState.value
+        if (window != null) {
+            mutableState.value = current.copy(
+                phase = InstallPhase.WaitingForBootAllocator,
+                // Keep the main title on the exploit phase; the subtitle carries
+                // the boot allocator state and remaining time.
+                message = app.getString(R.string.status_exploit_running),
+                bootAllocatorRemainingMillis = window.remainingMillis(nowMillis),
+                bootAllocatorTotalMillis = window.totalMillis,
+            )
+        } else if (current.phase == InstallPhase.WaitingForBootAllocator) {
+            mutableState.value = current.copy(
+                phase = InstallPhase.Exploiting,
+                message = app.getString(R.string.status_exploit_running),
+                bootAllocatorRemainingMillis = null,
+                bootAllocatorTotalMillis = null,
+            )
+        }
     }
 
     private fun installKernelSu(payloads: VerifiedPayloads) {
@@ -540,7 +571,12 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     private fun shellQuote(value: String) = "'${value.replace("'", "'\\''")}'"
 
     private fun setPhase(phase: InstallPhase, message: String) {
-        mutableState.value = mutableState.value.copy(phase = phase, message = message)
+        mutableState.value = mutableState.value.copy(
+            phase = phase,
+            message = message,
+            bootAllocatorRemainingMillis = null,
+            bootAllocatorTotalMillis = null,
+        )
         appendLog("[*] $message")
     }
 

@@ -38,7 +38,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -48,7 +48,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -231,20 +231,23 @@ private fun InstallScreen(
 private fun InstallerStatusCard(installState: InstallUiState, uninstallRoot: Boolean) {
     val context = LocalContext.current
     var rootDurationMillis by remember { mutableStateOf(AppPreferences.lastRootDurationMillis(context)) }
-    var cycleProgress by remember {
-        mutableFloatStateOf(bootWindowProgress(SystemClock.elapsedRealtime(), rootDurationMillis))
-    }
+    var phaseStartedAt by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    var nowMillis by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(installState.phase) {
+        phaseStartedAt = SystemClock.elapsedRealtime()
         while (installState.busy) {
             rootDurationMillis = AppPreferences.lastRootDurationMillis(context)
-            cycleProgress = bootWindowProgress(SystemClock.elapsedRealtime(), rootDurationMillis)
+            nowMillis = SystemClock.elapsedRealtime()
             delay(250)
         }
     }
-    val progress = when (installState.phase) {
-        InstallPhase.Installed -> 1f
-        else -> cycleProgress
-    }
+    val phaseProgress = installPhaseProgress(
+        phase = installState.phase,
+        elapsedMillis = nowMillis - phaseStartedAt,
+        rootDurationMillis = rootDurationMillis,
+        bootAllocatorRemainingMillis = installState.bootAllocatorRemainingMillis,
+        bootAllocatorTotalMillis = installState.bootAllocatorTotalMillis,
+    )
 
     Card(
         modifier = Modifier
@@ -295,18 +298,27 @@ private fun InstallerStatusCard(installState: InstallUiState, uninstallRoot: Boo
                         style = MaterialTheme.typography.titleLarge,
                     )
                     Text(
-                        text = installPhaseDetail(installState.phase, uninstallRoot),
+                        text = installPhaseDetail(installState, uninstallRoot),
                         color = LocalContentColor.current.copy(alpha = 0.78f),
                     )
                 }
             }
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier.fillMaxWidth(),
-                color = LocalContentColor.current,
-                trackColor = LocalContentColor.current.copy(alpha = 0.2f),
-                drawStopIndicator = {},
-            )
+            if (installState.phase == InstallPhase.Checking ||
+                installState.phase == InstallPhase.Downloading
+            ) {
+                LinearWavyProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = LocalContentColor.current,
+                    trackColor = LocalContentColor.current.copy(alpha = 0.2f),
+                )
+            } else {
+                LinearWavyProgressIndicator(
+                    progress = { phaseProgress },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = LocalContentColor.current,
+                    trackColor = LocalContentColor.current.copy(alpha = 0.2f),
+                )
+            }
         }
     }
 }
@@ -408,21 +420,54 @@ private fun InstallerLog(
 }
 
 @Composable
-private fun installPhaseDetail(phase: InstallPhase, uninstallRoot: Boolean): String = stringResource(
-    when (phase) {
+private fun installPhaseDetail(installState: InstallUiState, uninstallRoot: Boolean): String {
+    if (installState.phase == InstallPhase.WaitingForBootAllocator) {
+        val remainingMillis = installState.bootAllocatorRemainingMillis ?: 0L
+        val seconds = remainingMillis / 1_000L + if (remainingMillis % 1_000L > 0L) 1L else 0L
+        return stringResource(R.string.status_waiting_boot_allocator, seconds)
+    }
+    return stringResource(when (installState.phase) {
         InstallPhase.Checking -> R.string.phase_checking
         InstallPhase.Ready -> R.string.phase_ready
         InstallPhase.Downloading -> R.string.phase_downloading
+        InstallPhase.WaitingForBootAllocator -> R.string.phase_waiting_boot_allocator
         InstallPhase.Exploiting -> R.string.phase_exploiting
         InstallPhase.LoadingKernelSu -> if (uninstallRoot) R.string.phase_uninstalling_root else R.string.phase_loading_ksu
         InstallPhase.Installed -> if (uninstallRoot) R.string.phase_root_uninstalled else R.string.phase_installed
         InstallPhase.Failed -> R.string.phase_failed
-    },
-)
+    })
+}
 
-internal fun bootWindowProgress(uptimeMillis: Long, windowMillis: Long): Float {
-    val safeWindowMillis = windowMillis.coerceAtLeast(1L)
-    return (uptimeMillis.coerceAtLeast(0L) % safeWindowMillis).toFloat() / safeWindowMillis
+internal fun installPhaseProgress(
+    phase: InstallPhase,
+    elapsedMillis: Long,
+    rootDurationMillis: Long,
+    bootAllocatorRemainingMillis: Long? = null,
+    bootAllocatorTotalMillis: Long? = null,
+): Float {
+    if (phase == InstallPhase.Installed) return 1f
+    val durationMillis = when (phase) {
+        InstallPhase.Checking -> 8_000L
+        InstallPhase.Ready -> 1L
+        InstallPhase.Downloading -> 5_000L
+        // The first run uses AppPreferences' 2-minute default. Later runs use
+        // the exact successful exploit duration saved by InstallViewModel.
+        InstallPhase.WaitingForBootAllocator -> bootAllocatorTotalMillis?.coerceAtLeast(1_000L) ?: 1_000L
+        InstallPhase.Exploiting -> rootDurationMillis.coerceAtLeast(1_000L)
+        InstallPhase.LoadingKernelSu -> 12_000L
+        InstallPhase.Installed -> 1L
+        InstallPhase.Failed -> 1L
+    }
+    val progress = if (phase == InstallPhase.WaitingForBootAllocator &&
+        bootAllocatorRemainingMillis != null && bootAllocatorTotalMillis != null &&
+        bootAllocatorTotalMillis > 0L
+    ) {
+        1f - (bootAllocatorRemainingMillis.toFloat() / bootAllocatorTotalMillis.toFloat())
+    } else {
+        elapsedMillis.coerceAtLeast(0L).toFloat() / durationMillis
+    }
+    return progress
+        .coerceIn(0f, if (phase == InstallPhase.WaitingForBootAllocator) 1f else 0.99f)
 }
 
 private fun stepState(phase: InstallPhase, stepIndex: Int): Int {
@@ -430,7 +475,7 @@ private fun stepState(phase: InstallPhase, stepIndex: Int): Int {
     val activeIndex = when (phase) {
         InstallPhase.Checking, InstallPhase.Ready, InstallPhase.Failed -> 0
         InstallPhase.Downloading -> 1
-        InstallPhase.Exploiting -> 2
+        InstallPhase.WaitingForBootAllocator, InstallPhase.Exploiting -> 2
         InstallPhase.LoadingKernelSu -> 3
         InstallPhase.Installed -> 4
     }
