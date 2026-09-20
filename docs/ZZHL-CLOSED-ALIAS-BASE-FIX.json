@@ -1,0 +1,238 @@
+{
+  "fix": "alias/physmap base corrected: P0_KERNEL_PHYS_LOAD 0xa8000000 -> 0xa8068000, i.e. DIRECT_ALIAS_BASE 0xFFFFFF8028000000 -> 0xFFFFFF8028068000 (+0x68000). Confirmed by 4 independent runtime observations from the working diamond-fox engine.",
+  "input_sha256": "11cac2f6df812a059c18c259eb46cf5fb3bb892d3f55e7e22980d659fd406fd6",
+  "symbols": {
+    "ashmem_fops": {
+      "relative": "0x02010238",
+      "old_alias_low32": "0x2a010238",
+      "new_alias_low32": "0x2a078238",
+      "fields": [
+        {
+          "file_offset": "0x68b8",
+          "shift": 0,
+          "old_imm": "0xfdc7",
+          "new_imm": "0x7dc7",
+          "changed": true
+        },
+        {
+          "file_offset": "0x68bc",
+          "shift": 16,
+          "old_imm": "0x2a01",
+          "new_imm": "0x2a07",
+          "changed": true
+        },
+        {
+          "file_offset": "0x6b7c",
+          "shift": 0,
+          "old_imm": "0xfdc7",
+          "new_imm": "0x7dc7",
+          "changed": true
+        },
+        {
+          "file_offset": "0x6b88",
+          "shift": 16,
+          "old_imm": "0x2a01",
+          "new_imm": "0x2a07",
+          "changed": true
+        }
+      ]
+    },
+    "kmalloc_caches": {
+      "relative": "0x02067330",
+      "old_alias_low32": "0x2a067330",
+      "new_alias_low32": "0x2a0cf330",
+      "fields": [
+        {
+          "file_offset": "0x789c",
+          "shift": 0,
+          "old_imm": "0x8ccf",
+          "new_imm": "0x0ccf",
+          "changed": true
+        },
+        {
+          "file_offset": "0x78b0",
+          "shift": 16,
+          "old_imm": "0x2a06",
+          "new_imm": "0x2a0c",
+          "changed": true
+        }
+      ]
+    },
+    "ASHMEM_MISC_FOPS": {
+      "relative": "0x02bfd1f8",
+      "old_alias_low32": "0x2abfd1f8",
+      "new_alias_low32": "0x2ac651f8",
+      "fields": [
+        {
+          "file_offset": "0x5664",
+          "shift": 0,
+          "old_imm": "0x2e07",
+          "new_imm": "0xae07",
+          "changed": true
+        },
+        {
+          "file_offset": "0x5670",
+          "shift": 16,
+          "old_imm": "0x2abf",
+          "new_imm": "0x2ac6",
+          "changed": true
+        },
+        {
+          "file_offset": "0x671c",
+          "shift": 0,
+          "old_imm": "0x2e07",
+          "new_imm": "0xae07",
+          "changed": true
+        },
+        {
+          "file_offset": "0x6730",
+          "shift": 16,
+          "old_imm": "0x2abf",
+          "new_imm": "0x2ac6",
+          "changed": true
+        }
+      ]
+    },
+    "SLIDE_NFULNL_LOGGER_OBJECT": {
+      "relative": "0x02a91e50",
+      "old_alias_low32": "0x2aa91e50",
+      "new_alias_low32": "0x2aaf9e50",
+      "fields": [
+        {
+          "file_offset": "0x5704",
+          "shift": 0,
+          "old_imm": "0xe1af",
+          "new_imm": "0x61af",
+          "changed": true
+        },
+        {
+          "file_offset": "0x5710",
+          "shift": 16,
+          "old_imm": "0x2aa9",
+          "new_imm": "0x2aaf",
+          "changed": true
+        },
+        {
+          "file_offset": "0x6a54",
+          "shift": 0,
+          "old_imm": "0xe1af",
+          "new_imm": "0x61af",
+          "changed": true
+        },
+        {
+          "file_offset": "0x6a64",
+          "shift": 16,
+          "old_imm": "0x2aa9",
+          "new_imm": "0x2aaf",
+          "changed": true
+        }
+      ]
+    },
+    "SLIDE_RANDOM_TABLE_BOOT_ID_DATA_PTR": {
+      "relative": "0x02bbab48",
+      "old_alias_low32": "0x2abbab48",
+      "new_alias_low32": "0x2ac22b48",
+      "fields": [
+        {
+          "file_offset": "0x5708",
+          "shift": 0,
+          "old_imm": "0x54b7",
+          "new_imm": "0xd4b7",
+          "changed": true
+        },
+        {
+          "file_offset": "0x5714",
+          "shift": 16,
+          "old_imm": "0x2abb",
+          "new_imm": "0x2ac2",
+          "changed": true
+        },
+        {
+          "file_offset": "0x69f0",
+          "shift": 0,
+          "old_imm": "0x54b7",
+          "new_imm": "0xd4b7",
+          "changed": true
+        },
+        {
+          "file_offset": "0x69f4",
+          "shift": 16,
+          "old_imm": "0x2abb",
+          "new_imm": "0x2ac2",
+          "changed": true
+        },
+        {
+          "file_offset": "0x6a08",
+          "shift": 0,
+          "old_imm": "0x54b7",
+          "new_imm": "0xd4b7",
+          "changed": true
+        },
+        {
+          "file_offset": "0x6a14",
+          "shift": 16,
+          "old_imm": "0x2abb",
+          "new_imm": "0x2ac2",
+          "changed": true
+        },
+        {
+          "file_offset": "0x6a38",
+          "shift": 0,
+          "old_imm": "0x54b7",
+          "new_imm": "0xd4b7",
+          "changed": true
+        },
+        {
+          "file_offset": "0x6a40",
+          "shift": 16,
+          "old_imm": "0x2abb",
+          "new_imm": "0x2ac2",
+          "changed": true
+        }
+      ]
+    },
+    "SYSTEM_UNBOUND_WQ": {
+      "relative": "0x02a90808",
+      "old_alias_low32": "0x2aa90808",
+      "new_alias_low32": "0x2aaf8808",
+      "fields": [
+        {
+          "file_offset": "0x8138",
+          "shift": 0,
+          "old_imm": "0xf7f7",
+          "new_imm": "0x77f7",
+          "changed": true
+        },
+        {
+          "file_offset": "0x814c",
+          "shift": 16,
+          "old_imm": "0x2aa9",
+          "new_imm": "0x2aaf",
+          "changed": true
+        }
+      ]
+    },
+    "SELINUX_ENFORCING_GHOSTLOCK": {
+      "relative": "0x02d8e640",
+      "old_alias_low32": "0x2ad8e640",
+      "new_alias_low32": "0x2adf6640",
+      "fields": [
+        {
+          "file_offset": "0x7fec",
+          "shift": 0,
+          "old_imm": "0x19bf",
+          "new_imm": "0x99bf",
+          "changed": true
+        },
+        {
+          "file_offset": "0x7ffc",
+          "shift": 16,
+          "old_imm": "0x2ad8",
+          "new_imm": "0x2adf",
+          "changed": true
+        }
+      ]
+    }
+  },
+  "output_sha256": "a7f68906cff19f3c6e9f4ea97287635be5ad5aefb4f438e7a0460f84beee74d6"
+}

@@ -1,0 +1,144 @@
+{
+  "addresses": {
+    "ANON_PIPE_BUF_OPS": "0xffffffc009e81e60",
+    "ASHMEM_COMPAT_IOCTL": "0xffffffc0091519a0",
+    "ASHMEM_FOPS": "0xffffffc00a010238",
+    "ASHMEM_IOCTL": "0xffffffc009151344",
+    "ASHMEM_MISC_FOPS": "0xffffffc00abfd1f8",
+    "ASHMEM_MMAP": "0xffffffc0091519f8",
+    "ASHMEM_OPEN": "0xffffffc009151cd8",
+    "ASHMEM_RELEASE": "0xffffffc009151d70",
+    "ASHMEM_SHOW_FDINFO": "0xffffffc009151e8c",
+    "CALL_USERMODEHELPER_EXEC_WORK": "0xffffffc008104888",
+    "COMMIT_CREDS": "0xffffffc0081203d0",
+    "CONFIGFS_BIN_WRITE_ITER": "0xffffffc0085d93e8",
+    "CONFIGFS_READ_ITER": "0xffffffc0085d89c0",
+    "COPY_SPLICE_READ": "0xffffffc008528dcc",
+    "INIT_TASK": "0xffffffc00ac05380",
+    "KMALLOC_CACHES": "0xffffffc00a067330",
+    "NOOP_LLSEEK": "0xffffffc0084bc658",
+    "OVERRIDE_CREDS": "0xffffffc00811f4a8",
+    "PREPARE_KERNEL_CRED": "0xffffffc00811e694",
+    "ROOT_TASK_GROUP": "0xffffffc00acb9ac0",
+    "SELINUX_ENFORCING": "0xffffffc00aa3c40c",
+    "SLIDE_INIT_TASK": "0xffffffc00ac05380",
+    "SLIDE_NFULNL_LOGGER_NAME": "0xffffffc009d60919",
+    "SLIDE_NFULNL_LOGGER_OBJECT": "0xffffffc00aa91e50",
+    "SLIDE_RANDOM_TABLE_BOOT_ID_DATA_PTR": "0xffffffc00abbab48",
+    "SLIDE_ROOT_TASK_GROUP": "0xffffffc00acb9ac0",
+    "SLIDE_SYSCTL_BOOTID": "0xffffffc00ae6c131",
+    "SLIDE_TRACEFS_WORKER_CALLER": "0xffffffc00810dd84",
+    "SYSTEM_UNBOUND_WQ": "0xffffffc00aa90808"
+  },
+  "btf_offset": "0x21f29dc",
+  "btf_size": 6098779,
+  "image_sha256": "4e4c47864ed87eed80df0a7b9bf39281936b77b6974bde8c8d9e94711db878e8",
+  "kimage_text_base": "0xffffffc008000000",
+  "layouts": {
+    "configfs_buffer": {
+      "bin_buffer": 88,
+      "bin_buffer_size": 96,
+      "cb_max_size": 100,
+      "needs_read_fill": 80,
+      "page": 16
+    },
+    "file_operations": {
+      "compat_ioctl": 88,
+      "llseek": 8,
+      "mmap": 96,
+      "open": 112,
+      "owner": 0,
+      "read": 16,
+      "read_iter": 32,
+      "release": 128,
+      "show_fdinfo": 224,
+      "splice_read": 200,
+      "unlocked_ioctl": 80,
+      "write": 24,
+      "write_iter": 40
+    },
+    "mm_struct": {
+      "__size__": 992
+    },
+    "page": {
+      "__size__": 64,
+      "compound_head": 8,
+      "page_type": 48,
+      "slab_cache": 24
+    },
+    "pipe_buffer": {
+      "__size__": 40
+    },
+    "pool_workqueue": {
+      "max_active": 96,
+      "nr_active": 92,
+      "nr_in_flight": 28,
+      "pool": 0,
+      "refcnt": 24,
+      "work_color": 16,
+      "wq": 8
+    },
+    "rt_mutex_waiter": {
+      "__size__": 88,
+      "deadline": 72,
+      "lock": 56,
+      "pi_tree_entry": 24,
+      "prio": 68,
+      "task": 48,
+      "wake_state": 64,
+      "ww_ctx": 80
+    },
+    "task_struct": {
+      "cred": 1944,
+      "normal_prio": 132,
+      "pi_blocked_on": 2224,
+      "pi_lock": 2180,
+      "pi_top_task": 2216,
+      "pi_waiters": 2200,
+      "prio": 124,
+      "real_cred": 1936,
+      "sched_task_group": 1024,
+      "usage": 56
+    },
+    "work_struct": {
+      "data": 0,
+      "entry": 8,
+      "func": 24
+    },
+    "worker_pool": {
+      "nr_idle": 52,
+      "worklist": 32
+    }
+  },
+  "offsets": {
+    "ANON_PIPE_BUF_OPS": "0x01e81e60",
+    "ASHMEM_COMPAT_IOCTL": "0x011519a0",
+    "ASHMEM_FOPS": "0x02010238",
+    "ASHMEM_IOCTL": "0x01151344",
+    "ASHMEM_MISC_FOPS": "0x02bfd1f8",
+    "ASHMEM_MMAP": "0x011519f8",
+    "ASHMEM_OPEN": "0x01151cd8",
+    "ASHMEM_RELEASE": "0x01151d70",
+    "ASHMEM_SHOW_FDINFO": "0x01151e8c",
+    "CALL_USERMODEHELPER_EXEC_WORK": "0x00104888",
+    "COMMIT_CREDS": "0x001203d0",
+    "CONFIGFS_BIN_WRITE_ITER": "0x005d93e8",
+    "CONFIGFS_READ_ITER": "0x005d89c0",
+    "COPY_SPLICE_READ": "0x00528dcc",
+    "INIT_TASK": "0x02c05380",
+    "KMALLOC_CACHES": "0x02067330",
+    "NOOP_LLSEEK": "0x004bc658",
+    "OVERRIDE_CREDS": "0x0011f4a8",
+    "PREPARE_KERNEL_CRED": "0x0011e694",
+    "ROOT_TASK_GROUP": "0x02cb9ac0",
+    "SELINUX_ENFORCING": "0x02a3c40c",
+    "SLIDE_INIT_TASK": "0x02c05380",
+    "SLIDE_NFULNL_LOGGER_NAME": "0x01d60919",
+    "SLIDE_NFULNL_LOGGER_OBJECT": "0x02a91e50",
+    "SLIDE_RANDOM_TABLE_BOOT_ID_DATA_PTR": "0x02bbab48",
+    "SLIDE_ROOT_TASK_GROUP": "0x02cb9ac0",
+    "SLIDE_SYSCTL_BOOTID": "0x02e6c131",
+    "SLIDE_TRACEFS_WORKER_CALLER": "0x0010dd84",
+    "SYSTEM_UNBOUND_WQ": "0x02a90808"
+  }
+}

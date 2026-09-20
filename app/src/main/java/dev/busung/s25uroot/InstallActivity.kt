@@ -2,7 +2,6 @@ package dev.busung.s25uroot
 
 import android.os.Build
 import android.os.Bundle
-import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.WindowManager
@@ -17,18 +16,15 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Memory
@@ -48,18 +44,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -146,7 +136,6 @@ private fun InstallScreen(
     val logScrollState = rememberScrollState()
     val view = LocalView.current
     LaunchedEffect(installState.log) {
-        delay(40)
         logScrollState.scrollTo(logScrollState.maxValue)
     }
 
@@ -177,7 +166,7 @@ private fun InstallScreen(
             }
 
             InstallerStatusCard(installState, uninstallRoot)
-            InstallerSteps(installState.phase)
+            ExecutionJourneyCard(installState)
             InstallerLog(
                 output = installState.log,
                 modifier = Modifier.weight(1f),
@@ -229,21 +218,8 @@ private fun InstallScreen(
 
 @Composable
 private fun InstallerStatusCard(installState: InstallUiState, uninstallRoot: Boolean) {
-    val context = LocalContext.current
-    var rootDurationMillis by remember { mutableStateOf(AppPreferences.lastRootDurationMillis(context)) }
-    var cycleProgress by remember {
-        mutableFloatStateOf(bootWindowProgress(SystemClock.elapsedRealtime(), rootDurationMillis))
-    }
-    LaunchedEffect(installState.phase) {
-        while (installState.busy) {
-            rootDurationMillis = AppPreferences.lastRootDurationMillis(context)
-            cycleProgress = bootWindowProgress(SystemClock.elapsedRealtime(), rootDurationMillis)
-            delay(250)
-        }
-    }
-    val progress = when (installState.phase) {
-        InstallPhase.Installed -> 1f
-        else -> cycleProgress
+    val progress = if (installState.phase == InstallPhase.Installed) 1f else {
+        (installState.executionStage.ordinal + 1f) / ExecutionStage.entries.size
     }
 
     Card(
@@ -312,7 +288,10 @@ private fun InstallerStatusCard(installState: InstallUiState, uninstallRoot: Boo
 }
 
 @Composable
-private fun InstallerSteps(phase: InstallPhase) {
+private fun ExecutionJourneyCard(installState: InstallUiState) {
+    val stage = installState.executionStage
+    val stageNumber = stage.ordinal + 1
+    val progress = stageNumber.toFloat() / ExecutionStage.entries.size
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
@@ -322,57 +301,102 @@ private fun InstallerSteps(phase: InstallPhase) {
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            installerSteps.forEachIndexed { index, step ->
-                val stepState = stepState(phase, index)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    Surface(
-                        modifier = Modifier.size(38.dp),
-                        shape = CircleShape,
-                        color = if (stepState >= 1) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerHighest
-                        },
-                        contentColor = if (stepState >= 1) {
-                            MaterialTheme.colorScheme.onPrimary
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (stepState == 2) Icons.Rounded.Check else step.icon,
-                                contentDescription = null,
-                                modifier = Modifier.size(21.dp),
-                            )
-                        }
-                    }
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = stringResource(step.title),
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        Text(
-                            text = stringResource(step.detail),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
-                        )
-                    }
-                    if (stepState == 1 && phase !in setOf(InstallPhase.Failed, InstallPhase.Ready)) {
-                        LoadingIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text(text = executionStageIcon(stage), fontSize = 30.sp)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.execution_stage_counter, stageNumber),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        text = executionStageTitle(stage),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        text = installState.executionDetail ?: executionStageDetail(stage),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
+            }
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth(),
+                drawStopIndicator = {},
+            )
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = if (installState.rootActive) {
+                    MaterialTheme.colorScheme.tertiaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainer
+                },
+            ) {
+                Text(
+                    text = if (installState.rootActive) {
+                        stringResource(R.string.root_live_active)
+                    } else {
+                        stringResource(R.string.root_live_waiting)
+                    },
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    color = if (installState.rootActive) {
+                        MaterialTheme.colorScheme.onTertiaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    style = MaterialTheme.typography.labelLarge,
+                )
             }
         }
     }
+}
+
+@Composable
+private fun executionStageTitle(stage: ExecutionStage): String = stringResource(
+    when (stage) {
+        ExecutionStage.Preparing -> R.string.execution_preparing_title
+        ExecutionStage.Stabilizing -> R.string.execution_stabilizing_title
+        ExecutionStage.StartingExploit -> R.string.execution_starting_title
+        ExecutionStage.LocatingKernel -> R.string.execution_locating_title
+        ExecutionStage.VerifyingKernelAccess -> R.string.execution_verifying_title
+        ExecutionStage.StartingTemporaryRoot -> R.string.execution_temporary_root_title
+        ExecutionStage.BuildingPipeBridge -> R.string.execution_pipe_title
+        ExecutionStage.LoadingKernelSu -> R.string.execution_ksu_title
+        ExecutionStage.VerifyingRoot -> R.string.execution_root_title
+    },
+)
+
+@Composable
+private fun executionStageDetail(stage: ExecutionStage): String = stringResource(
+    when (stage) {
+        ExecutionStage.Preparing -> R.string.execution_preparing_detail
+        ExecutionStage.Stabilizing -> R.string.execution_stabilizing_detail
+        ExecutionStage.StartingExploit -> R.string.execution_starting_detail
+        ExecutionStage.LocatingKernel -> R.string.execution_locating_detail
+        ExecutionStage.VerifyingKernelAccess -> R.string.execution_verifying_detail
+        ExecutionStage.StartingTemporaryRoot -> R.string.execution_temporary_root_detail
+        ExecutionStage.BuildingPipeBridge -> R.string.execution_pipe_detail
+        ExecutionStage.LoadingKernelSu -> R.string.execution_ksu_detail
+        ExecutionStage.VerifyingRoot -> R.string.execution_root_detail
+    },
+)
+
+private fun executionStageIcon(stage: ExecutionStage): String = when (stage) {
+    ExecutionStage.Preparing -> "📦"
+    ExecutionStage.Stabilizing -> "🌡️"
+    ExecutionStage.StartingExploit -> "🚀"
+    ExecutionStage.LocatingKernel -> "🧭"
+    ExecutionStage.VerifyingKernelAccess -> "🔎"
+    ExecutionStage.StartingTemporaryRoot -> "🔐"
+    ExecutionStage.BuildingPipeBridge -> "🌉"
+    ExecutionStage.LoadingKernelSu -> "⚙️"
+    ExecutionStage.VerifyingRoot -> "✅"
 }
 
 @Composable
@@ -423,20 +447,4 @@ private fun installPhaseDetail(phase: InstallPhase, uninstallRoot: Boolean): Str
 internal fun bootWindowProgress(uptimeMillis: Long, windowMillis: Long): Float {
     val safeWindowMillis = windowMillis.coerceAtLeast(1L)
     return (uptimeMillis.coerceAtLeast(0L) % safeWindowMillis).toFloat() / safeWindowMillis
-}
-
-private fun stepState(phase: InstallPhase, stepIndex: Int): Int {
-    if (phase == InstallPhase.Installed) return 2
-    val activeIndex = when (phase) {
-        InstallPhase.Checking, InstallPhase.Ready, InstallPhase.Failed -> 0
-        InstallPhase.Downloading -> 1
-        InstallPhase.Exploiting -> 2
-        InstallPhase.LoadingKernelSu -> 3
-        InstallPhase.Installed -> 4
-    }
-    return when {
-        stepIndex < activeIndex -> 2
-        stepIndex == activeIndex -> 1
-        else -> 0
-    }
 }

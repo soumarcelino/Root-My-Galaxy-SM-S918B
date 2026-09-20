@@ -1,937 +1,770 @@
 #!/usr/bin/env python3
-"""Standalone Qt6 root GUI with embedded runner logic."""
+"""Qt desktop frontend for the tested open-source AFZH3 root runner."""
 
 from __future__ import annotations
 
+import hashlib
 import os
-import json
 import re
 import shutil
+import signal
 import subprocess
 import sys
-import time
 from html import escape
 from pathlib import Path
 
-from PyQt6.QtCore import QElapsedTimer, QProcess, QProcessEnvironment, QTimer, Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import QProcess, QTimer
+from PyQt6.QtGui import QCloseEvent, QFont
 from PyQt6.QtWidgets import (
-    QApplication, QComboBox, QFormLayout, QFrame, QGroupBox, QHBoxLayout,
-    QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QLabel, QLineEdit, QMainWindow,
-    QMessageBox, QProgressBar, QPushButton, QSpinBox, QStatusBar,
-    QTextEdit, QStyleFactory, QVBoxLayout, QWidget, QGridLayout,
+    QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QMainWindow,
+    QMessageBox, QProgressBar, QPushButton, QStyleFactory, QTextEdit,
+    QVBoxLayout, QWidget,
 )
 
 
-ANSI_ESCAPE = re.compile(r"(?:\x1B|␛)\[[0-?]*[ -/]*[@-~]")
+ANSI_ESCAPE = re.compile(r"(?:\x1b|␛)\[[0-?]*[ -/]*[@-~]")
+ROOT_RE = re.compile(r"uid=0(?:\(root\))?")
+STAGES = (
+    ("Preparando a mochila", "Enviando helper e payload testados para o celular.", "📦",
+     ("preparando payload",)),
+    ("Esperando o momento certo", "Launcher local mede temperatura, memória e pressão.", "🌡️",
+     ("[launcher] gate conservador",)),
+    ("Iniciando a jornada", "O payload começou; agora cada mudança é acompanhada pelos logs.", "🚀",
+     ("starting exploit",)),
+    ("Encontrando o kernel", "Descobrindo onde o kernel está carregado neste boot.", "🧭",
+     ("stage=locating-kernel",)),
+    ("Testando a passagem", "Confirmando acesso de leitura e escrita antes de continuar.", "🔎",
+     ("stage=verifying-kernel-access",)),
+    ("Abrindo a porta temporária", "A mutação crítica começou; não interrompa esta etapa.", "🔐",
+     ("stage=starting-temporary-root",)),
+    ("Construindo a ponte", "Montando o canal seguro usado para acessar a memória física.", "🌉",
+     ("[pipe_rw]",)),
+    ("Ativando o KernelSU", "Carregando o controle de root para este boot.", "⚙️",
+     ("carregando kernelsu",)),
+    ("Conferindo a conquista", "Executando su -c id: só uid=0 confirma root de verdade.", "✅",
+     ("aguardando su", "root confirmado")),
+)
+
+
+def locate_runner() -> Path:
+    override = os.environ.get("ROOT_MY_GALAXY_RUNNER")
+    if override:
+        return Path(override).expanduser().resolve()
+    app_dir = Path(__file__).resolve().parent
+    candidates = (
+        app_dir.parent.parent / "ksu-payload-functional" / "simple-root",
+        app_dir.parent / "ksu-payload-functional" / "simple-root",
+    )
+    return next((path for path in candidates if path.is_file()), candidates[0])
 
 
 class RootWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
+        self.runner = locate_runner()
         self.process: QProcess | None = None
-        self.cleanup_process: QProcess | None = None
-        self.restore_process: QProcess | None = None
-        self.device_clock_process: QProcess | None = None
-        self.device_uptime_seconds: int | None = None
-        self.log_process: QProcess | None = None
+        self.verify_process: QProcess | None = None
+        self.root_probe_process: QProcess | None = None
+        self.reboot_process: QProcess | None = None
+        self.reconnect_process: QProcess | None = None
         self.selected_serial = ""
-        self.quiet_deadline: float | None = None
-        self.quiet_duration = 0
-        self.log_started = False
-        self.root_active = False
-        assets = Path(__file__).with_name("assets")
-        self.assets_dir = assets
-        self.profiles_path = assets / "profiles.json"
-        self.profiles = self._load_profiles()
-        self.active_profile: dict[str, str] | None = None
-        legacy = self.profiles[0]
-        self.helper_path = str(assets / legacy["helper"])
-        self.payload_path = str(assets / legacy["payload"])
-        self.ksud_path = str(assets / legacy["ksud"])
-        self.device_name = "No device"
-        self.elapsed = QElapsedTimer()
-        self.run_timer = QTimer(self)
-        self.run_timer.timeout.connect(self.update_elapsed_status)
-        self.uptime_timer = QTimer(self)
-        self.uptime_timer.setInterval(1000)
-        self.uptime_timer.timeout.connect(self.update_device_uptime)
-        self.setWindowTitle("Root My Galaxy")
-        self.resize(900, 600)
-        self.setMinimumSize(820, 540)
+        self.runner_exit_code: int | None = None
+        self.mutation_possible = False
+        self.reboot_required = False
+        self.current_boot_id = ""
+        state_home = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
+        self.unsafe_boot_path = state_home / "root-my-galaxy" / "unsafe-boot-id"
+        self.stage_index = 0
+        self._stdout_buffer = ""
+        self._stderr_buffer = ""
+        self.setWindowTitle("Root My Galaxy · AFZH3 Open Source")
+        self.resize(980, 680)
+        self.setMinimumSize(780, 520)
         self._build_ui()
+        self.root_timer = QTimer(self)
+        self.root_timer.setInterval(2000)
+        self.root_timer.timeout.connect(self.check_root_status)
         self.refresh_devices()
-        self.uptime_timer.start()
-
-    @staticmethod
-    def _sh_quote(value: str) -> str:
-        return "'" + value.replace("'", "'\"'\"'") + "'"
-
-    def _load_profiles(self) -> list[dict[str, str]]:
-        try:
-            with self.profiles_path.open(encoding="utf-8") as stream:
-                data = json.load(stream)
-        except (OSError, json.JSONDecodeError) as error:
-            raise RuntimeError(f"cannot load profile catalog: {error}") from error
-        profiles = data.get("profiles") if isinstance(data, dict) else None
-        if not isinstance(profiles, list) or not profiles:
-            raise RuntimeError("profile catalog is empty")
-        return [profile for profile in profiles if isinstance(profile, dict)]
-
-    def _adb_value(self, serial: str, *command: str) -> str:
-        try:
-            result = subprocess.run(
-                ["adb", "-s", serial, "shell", *command],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=10,
-            )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise RuntimeError(f"cannot read device properties: {error}") from error
-        if result.returncode != 0:
-            detail = result.stderr.strip() or f"exit {result.returncode}"
-            raise RuntimeError(f"cannot read device properties: {detail}")
-        return result.stdout.strip()
-
-    def _select_profile(self, serial: str) -> dict[str, str]:
-        properties = {
-            "build_display": self._adb_value(serial, "getprop", "ro.build.display.id"),
-            "fingerprint": self._adb_value(serial, "getprop", "ro.build.fingerprint"),
-            "kernel_release": self._adb_value(serial, "uname", "-r"),
-            "kernel_version": self._adb_value(serial, "uname", "-v"),
-        }
-        keys = tuple(properties)
-        for profile in self.profiles:
-            if all(profile.get(key) == properties[key] for key in keys):
-                return profile
-        raise RuntimeError(
-            "unsupported build: "
-            f"{properties['build_display']} / {properties['fingerprint']}"
-        )
-
-    def build_root_script(self, serial: str) -> str:
-        remote = "/data/local/tmp"
-        helper = self._sh_quote(self.helper_path)
-        payload = self._sh_quote(self.payload_path)
-        ksud = self._sh_quote(self.ksud_path)
-        serial_q = self._sh_quote(serial)
-        return f"""
-set -euo pipefail
-SERIAL={serial_q}
-REMOTE={remote}
-HELPER={helper}
-PAYLOAD={payload}
-KSUD={ksud}
-ADB="adb -s $SERIAL"
-
-echo "[*] $($ADB shell getprop ro.build.display.id)"
-echo "[*] Preparing exploit files"
-$ADB push "$HELPER" "$REMOTE/ksu-helper" >/dev/null
-$ADB push "$PAYLOAD" "$REMOTE/ksu-payload" >/dev/null
-$ADB push "$KSUD" "$REMOTE/ksud-selected" >/dev/null
-$ADB shell "chmod 0755 $REMOTE/ksu-helper $REMOTE/ksu-payload $REMOTE/ksud-selected"
-
-if $ADB shell "$REMOTE/ksu-helper -c id" 2>/dev/null | grep -q "uid=0"; then
-    echo "[*] Temporary root is already available; checking..."
-    if $ADB shell "$REMOTE/ksu-helper -c id" 2>/dev/null | grep -q "uid=0"; then
-        echo "[+] Root is already active through the helper. Nothing to do."
-        exit 0
-    fi
-fi
-
-echo "[*] Running exploit (up to ${{MAX_ATTEMPTS:-5}} attempts; probabilistic)"
-ROOTED=0
-for i in $(seq 1 "${{MAX_ATTEMPTS:-5}}"); do
-    echo "  -> attempt $i/${{MAX_ATTEMPTS:-5}}"
-    $ADB shell "mkdir -p $REMOTE && : > $REMOTE/exploit.log"
-    $ADB shell "EXPLOIT_ATTEMPTS=1 $REMOTE/ksu-helper --run-payload $REMOTE/ksu-payload $REMOTE/ksu-helper $REMOTE/exploit.log" || true
-    if $ADB shell "grep -q 'stage=privileged-transition-unimplemented' $REMOTE/exploit.log" 2>/dev/null; then
-        echo "[+] Research run completed at the privileged boundary"
-        exit 0
-    fi
-    if $ADB shell "grep -q 'stage=temporary-root-ready' $REMOTE/exploit.log" 2>/dev/null; then
-        ROOTED=1
-        echo "  [+] Temporary root ready on attempt $i"
-        break
-    fi
-done
-
-if [ "$ROOTED" -ne 1 ]; then
-    echo "[!] Exploit failed after ${{MAX_ATTEMPTS:-5}} attempts. Log:" >&2
-    $ADB shell "cat $REMOTE/exploit.log" 2>&1 >&2 || true
-    exit 1
-fi
-
-echo "[*] Loading KernelSU through ksud-next late-load"
-$ADB shell "S25U_KSUD_PATH=$REMOTE/ksud-selected $REMOTE/ksu-helper --late-load"
-
-sleep 1
-ROOT_ID=$($ADB shell "$REMOTE/ksu-helper -c id" 2>/dev/null || true)
-if echo "$ROOT_ID" | grep -q "uid=0"; then
-    echo "[+] Full root is active. Helper response:"
-    echo "$ROOT_ID"
-else
-    echo "[+] Full root is active; ksud-next late-load completed and driver control is confirmed."
-fi
-""".strip()
+        self.root_timer.start()
 
     def _build_ui(self) -> None:
-        central = QWidget()
+        central = QWidget(self)
         self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # Dolphin-like header: compact toolbar with clear context.
         header = QFrame()
         header.setObjectName("header")
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(22, 14, 22, 14)
-        self.title_label = QLabel("Root My Galaxy")
-        self.title_label.setObjectName("title")
-        self.subtitle_label = QLabel(self.device_name)
-        self.subtitle_label.setObjectName("subtitle")
-        self.active_time_label = QLabel("Device uptime · 00:00:00")
-        self.active_time_label.setObjectName("activeTime")
-        self.subtitle_label.hide()
-        self.active_time_label.hide()
-        header_layout.addWidget(self.title_label)
-        header_layout.addWidget(self.subtitle_label)
+        titles = QVBoxLayout()
+        title = QLabel("Root My Galaxy")
+        title.setObjectName("title")
+        subtitle = QLabel("Payload aberto AFZH3 · execução e logs em tempo real")
+        subtitle.setObjectName("subtitle")
+        titles.addWidget(title)
+        titles.addWidget(subtitle)
+        header_layout.addLayout(titles)
         header_layout.addStretch()
-        header_layout.addWidget(self.active_time_label)
-        layout.addWidget(header)
+        self.result_badge = QLabel("PRONTO")
+        self.result_badge.setObjectName("badge")
+        header_layout.addWidget(self.result_badge)
+        root.addWidget(header)
 
-        content_layout = QVBoxLayout()
-        content_layout.setContentsMargins(24, 16, 24, 20)
-        content_layout.setSpacing(12)
-        layout.addLayout(content_layout, 1)
+        body = QVBoxLayout()
+        body.setContentsMargins(22, 16, 22, 18)
+        body.setSpacing(12)
+        root.addLayout(body, 1)
 
-        self.root_check = QLabel("Root My Galaxy")
-        self.root_check.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.root_check.setStyleSheet(
-            "font-size: 18px; font-weight: 700; color: #16a34a; padding: 2px;"
-        )
-        self.root_check.hide()
-        content_layout.addWidget(self.root_check)
-
-        self.quiet_progress = QProgressBar()
-        self.quiet_progress.setTextVisible(True)
-        self.quiet_progress.setFormat("Quiet window · %v/%m s")
-        self.quiet_progress.setRange(0, 1)
-        self.quiet_progress.hide()
-
-        options = QGroupBox("Execution options")
-        form = QFormLayout(options)
         device_row = QHBoxLayout()
         self.devices = QComboBox()
-        self.devices.setMinimumWidth(420)
-        self.devices.currentIndexChanged.connect(self.check_selected_root)
-        self.refresh_button = QPushButton("Refresh")
+        self.devices.setMinimumWidth(430)
+        self.devices.currentIndexChanged.connect(self.device_changed)
+        self.refresh_button = QPushButton("Atualizar")
         self.refresh_button.clicked.connect(self.refresh_devices)
-        self.reboot_button = QPushButton("Reboot")
+        self.reboot_button = QPushButton("Reiniciar")
         self.reboot_button.clicked.connect(self.reboot_device)
-        self.settings_button = QPushButton("Settings")
-        self.settings_button.clicked.connect(self.show_settings)
-        device_box = QVBoxLayout()
-        device_box.addWidget(self.devices)
-        device_buttons = QHBoxLayout()
-        device_buttons.addWidget(self.refresh_button)
-        device_buttons.addWidget(self.settings_button)
-        device_buttons.addStretch(1)
-        device_box.addLayout(device_buttons)
-        form.addRow("ADB device:", device_box)
+        device_row.addWidget(QLabel("Dispositivo ADB:"))
+        device_row.addWidget(self.devices, 1)
+        device_row.addWidget(self.refresh_button)
+        device_row.addWidget(self.reboot_button)
+        body.addLayout(device_row)
 
-        self.kill_user_apps = QCheckBox("Kill all user applications")
-        self.kill_user_apps.setToolTip(
-            "Force-stops running applications belonging to the current user before the exploit. "
-            "This can improve stability by reducing background activity."
-        )
-        self.kill_user_apps.setChecked(True)
+        live_state = QFrame()
+        live_state.setObjectName("liveState")
+        live_layout = QHBoxLayout(live_state)
+        live_layout.setContentsMargins(12, 8, 12, 8)
+        self.connection_label = QLabel("ADB · verificando")
+        self.boot_label = QLabel("Sistema · verificando")
+        self.root_live_label = QLabel("Root · verificando")
+        live_layout.addWidget(self.connection_label)
+        live_layout.addStretch()
+        live_layout.addWidget(self.boot_label)
+        live_layout.addStretch()
+        live_layout.addWidget(self.root_live_label)
+        body.addWidget(live_state)
 
-        self.kill_system_apps = QCheckBox("Kill all system applications")
-        self.kill_system_apps.setToolTip(
-            "Force-stops all detected running packages, including system applications. "
-            "Use this only after repeated unsuccessful attempts; Android may temporarily become unstable."
+        stage_card = QFrame()
+        stage_card.setObjectName("stageCard")
+        stage_layout = QHBoxLayout(stage_card)
+        stage_layout.setContentsMargins(14, 11, 14, 11)
+        self.stage_icon = QLabel("🌱")
+        self.stage_icon.setObjectName("stageIcon")
+        self.stage_icon.setFixedWidth(42)
+        stage_text = QVBoxLayout()
+        stage_text.setSpacing(2)
+        self.stage_label = QLabel("Pronto para começar")
+        self.stage_label.setObjectName("stage")
+        self.stage_description = QLabel(
+            "Escolha o dispositivo e acompanhe cada passo até a prova de root."
         )
-        self.kill_user_apps.hide()
-        self.kill_system_apps.hide()
-        content_layout.addWidget(options)
+        self.stage_description.setObjectName("stageDescription")
+        self.stage_description.setWordWrap(True)
+        stage_text.addWidget(self.stage_label)
+        stage_text.addWidget(self.stage_description)
+        stage_layout.addWidget(self.stage_icon)
+        stage_layout.addLayout(stage_text, 1)
+        body.addWidget(stage_card)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, len(STAGES))
+        self.progress.setValue(0)
+        self.progress.setFormat("%v/%m etapas")
+        body.addWidget(self.progress)
 
         self.output = QTextEdit()
-        self.output.setObjectName("terminalOutput")
         self.output.setReadOnly(True)
         self.output.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
-        self.output.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.output.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        log_font = QFont("JetBrainsMono Nerd Font Mono")
-        log_font.setStyleHint(QFont.StyleHint.Monospace)
-        log_font.setPointSizeF(11.0)
-        log_font.setWeight(QFont.Weight.Normal)
-        log_font.setStyle(QFont.Style.StyleNormal)
-        log_font.setStyleStrategy(
-            QFont.StyleStrategy.PreferMatch | QFont.StyleStrategy.PreferQuality
-        )
-        log_font.setFixedPitch(True)
-        self.output.setFont(log_font)
-        self.output.setStyleSheet(
-            "QTextEdit#terminalOutput {"
-            "background: rgba(13, 15, 24, 230); color: #fffaf3; "
-            "border: 1px solid rgba(255, 250, 243, 45); border-radius: 10px; "
-            "padding: 10px; "
-            "font-family: 'JetBrainsMono Nerd Font Mono'; "
-            "font-size: 11pt; font-weight: 400; font-style: normal; }"
-        )
-        self.output.document().setDefaultFont(log_font)
-        self.output.hide()
-        content_layout.addWidget(self.output, 1)
+        font = QFont("JetBrainsMono Nerd Font Mono")
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        font.setPointSizeF(10.5)
+        font.setFixedPitch(True)
+        self.output.setFont(font)
+        body.addWidget(self.output, 1)
 
         controls = QHBoxLayout()
-        controls.setContentsMargins(0, 4, 0, 0)
-        self.start_button = QPushButton("Root My Galaxy")
-        self.start_button.setDefault(True)
-        self.start_button.clicked.connect(self.start)
-        self.stop_button = QPushButton("Stop")
+        self.status_label = QLabel("Selecione dispositivo e execute.")
+        controls.addWidget(self.status_label, 1)
+        self.stop_button = QPushButton("Parar")
         self.stop_button.setEnabled(False)
-        self.stop_button.clicked.connect(self.stop)
-        controls.addStretch(1)
-        controls.addWidget(self.reboot_button)
+        self.stop_button.clicked.connect(self.stop_run)
+        self.start_button = QPushButton("Executar payload")
+        self.start_button.setDefault(True)
+        self.start_button.clicked.connect(self.start_run)
         controls.addWidget(self.stop_button)
         controls.addWidget(self.start_button)
-        content_layout.addLayout(controls)
+        body.addLayout(controls)
 
-        self.status = QLabel("Ready")
-        self.status.hide()
-        self.status_bar = QStatusBar()
-        self.status_bar.addWidget(self.quiet_progress, 1)
-        self.setStatusBar(self.status_bar)
         self.setStyleSheet("""
             QMainWindow, QWidget { font-size: 13px; }
             #header { border-bottom: 1px solid palette(mid); }
-            #title { font-size: 24px; font-weight: 600; }
-            #subtitle { color: #4b5563; margin-left: 8px; }
-            #activeTime { color: palette(mid); font-family: monospace; }
-            QGroupBox {
-                font-weight: 600;
-                border: 1px solid palette(mid);
-                border-radius: 8px;
-                margin-top: 10px;
-                padding: 14px 12px 10px;
-            }
-            QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 5px; }
-            QPushButton { padding: 7px 14px; }
-            QComboBox, QLineEdit, QSpinBox {
-                padding: 6px 10px;
-            }
-            QCheckBox { spacing: 8px; }
+            #title { font-size: 24px; font-weight: 650; }
+            #subtitle { color: #a1a1aa; }
+            #stage { font-size: 16px; font-weight: 600; }
+            #stageCard { background: palette(alternate-base);
+                         border: 1px solid palette(mid); border-radius: 10px; }
+            #stageIcon { font-size: 26px; }
+            #stageDescription { color: #a1a1aa; }
+            #liveState { border: 1px solid palette(mid); border-radius: 8px; }
+            #badge { border: 1px solid palette(mid); border-radius: 10px;
+                     padding: 6px 12px; font-weight: 700; }
+            QTextEdit { background: #0d0f18; color: #fffaf3;
+                        border: 1px solid #343746; border-radius: 8px;
+                        padding: 9px; }
+            QPushButton { padding: 7px 15px; }
+            QComboBox { padding: 6px 10px; }
         """)
 
     def refresh_devices(self) -> None:
-        if hasattr(self, "reboot_button"):
-            self.reboot_button.setEnabled(True)
-        if not shutil.which("adb"):
-            self.devices.clear()
-            self.devices.addItem("adb not found")
-            self.start_button.setEnabled(False)
-            self.status.setText("Install Android platform-tools first")
-            return
-        try:
-            result = subprocess.run(["adb", "devices"], text=True, capture_output=True,
-                                    timeout=5, check=False)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            self.devices.clear()
-            self.devices.addItem(f"Could not query adb: {exc}")
-            return
-        entries = []
-        for line in result.stdout.splitlines()[1:]:
-            fields = line.split()
-            if len(fields) >= 2:
-                entries.append((fields[0], fields[1]))
+        selected = str(self.devices.currentData() or "")
+        self.devices.blockSignals(True)
         self.devices.clear()
-        for serial, state in entries:
-            label = self.device_label(serial, state)
-            self.devices.addItem(label, serial)
-        if not entries:
-            self.devices.addItem("No device detected")
-        self.start_button.setEnabled(any(state == "device" for _, state in entries))
-        self.status.setText(f"{len(entries)} device(s) found")
-        self.selected_serial = str(self.devices.currentData() or "")
-        self.update_selected_device_name()
-        self.check_selected_root()
-
-    def check_selected_root(self) -> None:
-        """Disable exploit execution when the selected device is already rooted."""
-        serial = self.devices.currentData()
-        if not serial or self.process is not None:
+        if not shutil.which("adb"):
+            self.devices.addItem("adb não encontrado")
+            self.devices.blockSignals(False)
+            self.start_button.setEnabled(False)
+            self.reboot_button.setEnabled(False)
+            self.set_result("ERRO", "#dc2626", "Instale Android platform-tools.")
             return
-        self.selected_serial = str(serial)
         try:
             result = subprocess.run(
-                ["adb", "-s", str(serial), "shell", "su", "-c", "id"],
-                text=True, capture_output=True, timeout=3, check=False,
+                ["adb", "devices", "-l"], text=True, capture_output=True,
+                timeout=5, check=False,
             )
-        except (OSError, subprocess.TimeoutExpired):
-            return
-        if result.returncode == 0 and "uid=0" in result.stdout:
-            self.root_active = True
-            self.title_label.setText("Root My Galaxy")
-            self.root_check.show()
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            self.devices.addItem(f"Falha ao consultar adb: {exc}")
+            self.devices.blockSignals(False)
             self.start_button.setEnabled(False)
-            self.stop_button.setEnabled(False)
             return
-        self.root_active = False
-        self.title_label.setText("Root My Galaxy")
-        self.root_check.hide()
-        self.start_button.setEnabled(self.devices.currentData() is not None)
 
-    def show_settings(self) -> None:
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Settings")
-        dialog.resize(720, 470)
-        dialog.setMinimumSize(680, 420)
-        dialog_layout = QVBoxLayout(dialog)
-        description = QLabel(
-            "Choose which running Android applications should be stopped before the exploit."
-        )
-        description.setWordWrap(True)
-        dialog_layout.addWidget(description)
+        online = []
+        for line in result.stdout.splitlines()[1:]:
+            fields = line.split()
+            if len(fields) < 2 or fields[1] != "device":
+                continue
+            serial = fields[0]
+            model = next(
+                (item.removeprefix("model:") for item in fields if item.startswith("model:")),
+                "Android",
+            )
+            online.append((serial, model))
+            self.devices.addItem(f"{model} · {serial}", serial)
+        if not online:
+            self.devices.addItem("Nenhum dispositivo autorizado")
+        elif selected:
+            index = self.devices.findData(selected)
+            if index >= 0:
+                self.devices.setCurrentIndex(index)
+        self.devices.blockSignals(False)
+        self.device_changed()
 
-        helper_edit = QLineEdit(self.helper_path)
-        payload_edit = QLineEdit(self.payload_path)
-        ksud_edit = QLineEdit(self.ksud_path)
-        binaries = (
-            ("Payload", payload_edit,
-             "Exploit payload executed by the helper to obtain the temporary root capability."),
-            ("Helper", helper_edit,
-             "Native launcher that coordinates the exploit and starts the payload on the device."),
-            ("ksud", ksud_edit,
-             "KernelSU daemon binary loaded after temporary root is available."),
-        )
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(12)
-        grid.setVerticalSpacing(4)
-        grid.setColumnMinimumWidth(0, 80)
-        grid.setColumnStretch(1, 1)
-        for row_index, (label, edit, explanation) in enumerate(binaries):
-            edit.setMinimumWidth(420)
-            name = QLabel(f"{label}:")
-            name.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            name.setStyleSheet("font-weight: 600;")
-            grid.addWidget(name, row_index * 2, 0)
-            grid.addWidget(edit, row_index * 2, 1)
-            browse = QPushButton("Browse…")
-            browse.setFixedWidth(90)
-            browse.clicked.connect(lambda _checked=False, target=edit: self.choose_binary(target))
-            grid.addWidget(browse, row_index * 2, 2)
-            hint = QLabel(explanation)
-            hint.setWordWrap(True)
-            hint.setStyleSheet("color: palette(mid); padding-bottom: 6px;")
-            grid.addWidget(hint, row_index * 2 + 1, 1, 1, 2)
-        dialog_layout.addLayout(grid)
-
-        self.kill_user_apps.show()
-        self.kill_system_apps.show()
-        dialog_layout.addWidget(self.kill_user_apps)
-        dialog_layout.addWidget(self.kill_system_apps)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        dialog_layout.addWidget(buttons)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.helper_path = helper_edit.text().strip() or self.helper_path
-            self.payload_path = payload_edit.text().strip() or self.payload_path
-            ksud_value = ksud_edit.text().strip() or self.ksud_path
-            if Path(ksud_value).name != "ksud-next":
-                ksud_value = str(Path(ksud_value).with_name("ksud-next"))
-            self.ksud_path = ksud_value
-        # Keep the controls available for the next Settings dialog.
-        self.kill_user_apps.setParent(self)
-        self.kill_system_apps.setParent(self)
-        self.kill_user_apps.hide()
-        self.kill_system_apps.hide()
-
-    def choose_binary(self, target: QLineEdit) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select binary", str(Path(target.text()).parent), "All files (*)"
-        )
-        if path:
-            target.setText(path)
-
-    def reboot_device(self) -> None:
+    def device_changed(self) -> None:
         serial = self.devices.currentData()
-        if not serial:
-            QMessageBox.warning(self, "No device", "Select an online adb device first.")
-            return
-        answer = QMessageBox.question(
-            self,
-            "Reboot device",
-            "Reboot the selected Android device now?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-        self.reboot_button.setEnabled(False)
+        self.selected_serial = str(serial or "")
+        idle = self.process is None and self.verify_process is None
         self.start_button.setEnabled(False)
-        self.status.setText("Rebooting…")
-        self.reboot_process = QProcess(self)
-        self.reboot_process.finished.connect(self.reboot_finished)
-        self.reboot_process.errorOccurred.connect(self.reboot_error)
-        self.reboot_process.start("adb", ["-s", str(serial), "reboot"])
-
-    def reboot_finished(self, exit_code: int, _status: QProcess.ExitStatus) -> None:
-        if hasattr(self, "reboot_process"):
-            self.reboot_process.deleteLater()
-            self.reboot_process = None
-        self.status.setText("Device rebooting…" if exit_code == 0 else "Reboot failed")
-        QTimer.singleShot(5000, self.refresh_devices)
-
-    def reboot_error(self, _error: QProcess.ProcessError) -> None:
-        self.status.setText("Reboot failed")
-        self.reboot_button.setEnabled(True)
-        if hasattr(self, "reboot_process") and self.reboot_process:
-            self.reboot_process.deleteLater()
-            self.reboot_process = None
-
-    @staticmethod
-    def device_label(serial: str, state: str) -> str:
-        """Return a human-readable device name while keeping serial as item data."""
-        if state != "device":
-            return f"Device unavailable ({state})"
-        try:
-            props = subprocess.run(
-                ["adb", "-s", serial, "shell", "getprop"],
-                text=True, capture_output=True, timeout=5, check=False,
-            ).stdout.splitlines()
-            values = {}
-            for line in props:
-                if line.startswith("[ro.product.manufacturer]:"):
-                    values["manufacturer"] = line.split(":", 1)[1].strip(" []")
-                elif line.startswith("[ro.product.model]:") or line.startswith("[ro.product.system.model]:"):
-                    values["model"] = line.split(":", 1)[1].strip(" []")
-                elif line.startswith("[ro.product.device]:") or line.startswith("[ro.product.system.device]:"):
-                    values["device"] = line.split(":", 1)[1].strip(" []")
-            manufacturer = values.get("manufacturer", "")
-            model = values.get("model", "")
-            device = values.get("device", "")
-            if not model or model.lower() in {"unknown", "generic", "android"}:
-                model = device
-            name = " ".join(part for part in (manufacturer, model) if part)
-            return name or "Android device"
-        except (OSError, subprocess.TimeoutExpired):
-            return "Android device"
-
-    def update_selected_device_name(self) -> None:
-        label = str(self.devices.currentText()).strip()
-        if label and label not in {"No device detected", "adb not found"}:
-            self.device_name = label
-            self.subtitle_label.setText(self.device_name)
-            self.subtitle_label.show()
-            self.active_time_label.show()
+        self.reboot_button.setEnabled(bool(serial) and idle)
+        if serial:
+            self.connection_label.setText("ADB · conectado")
+            self.boot_label.setText("Sistema · verificando")
+            self.root_live_label.setText("Root · verificando")
+            self.status_label.setStyleSheet("")
+            self.status_label.setText(f"Verificando estado de {serial}…")
+            QTimer.singleShot(0, self.check_root_status)
         else:
-            self.device_name = "No device"
-            self.subtitle_label.hide()
-            self.active_time_label.hide()
-            self.active_time_label.setText("Device uptime · 00:00:00")
+            self.connection_label.setText("ADB · desconectado")
+            self.boot_label.setText("Sistema · indisponível")
+            self.root_live_label.setText("Root · desconhecido")
+            self.reboot_button.setEnabled(False)
 
-    def start(self) -> None:
-        serial = self.devices.currentData()
-        if not serial or self.devices.currentText().endswith("not detected"):
-            QMessageBox.warning(self, "No device", "Select an online adb device first.")
+    def check_root_status(self) -> None:
+        if (
+            not self.selected_serial
+            or self.root_probe_process is not None
+            or self.process is not None
+            or self.verify_process is not None
+            or self.reboot_process is not None
+            or self.reconnect_process is not None
+        ):
             return
-        # A previous final poll may still be finishing after Stop. Never let
-        # that process block polling for the new run.
-        self.stop_remote_log_stream()
+        self.root_probe_process = QProcess(self)
+        self.root_probe_process.setProcessChannelMode(
+            QProcess.ProcessChannelMode.SeparateChannels
+        )
+        self.root_probe_process.finished.connect(self.root_probe_finished)
+        self.root_probe_process.errorOccurred.connect(self.root_probe_error)
+        script = (
+            "printf 'boot=%s\\n' \"$(getprop sys.boot_completed)\"; "
+            "printf 'boot_id=%s\\n' \"$(cat /proc/sys/kernel/random/boot_id)\"; "
+            "/system/bin/su -c id 2>/dev/null || true"
+        )
+        self.root_probe_process.start(
+            "adb", ["-s", self.selected_serial, "shell", script]
+        )
+
+    def root_probe_finished(self, exit_code: int, _status: QProcess.ExitStatus) -> None:
+        if not self.root_probe_process:
+            return
+        stdout = bytes(self.root_probe_process.readAllStandardOutput()).decode(errors="replace")
+        self.root_probe_process.deleteLater()
+        self.root_probe_process = None
+        connected = exit_code == 0 and "boot=" in stdout
+        booted = "boot=1" in stdout
+        rooted = bool(ROOT_RE.search(stdout))
+        boot_id_match = re.search(r"^boot_id=([0-9a-f-]+)$", stdout, re.MULTILINE)
+        boot_id = boot_id_match.group(1) if boot_id_match else ""
+        try:
+            unsafe_boot_id = self.unsafe_boot_path.read_text().strip()
+        except OSError:
+            unsafe_boot_id = ""
+        if boot_id and unsafe_boot_id:
+            if boot_id == unsafe_boot_id:
+                self.reboot_required = True
+                self.mutation_possible = True
+            else:
+                self.clear_unsafe_boot()
+        if boot_id and self.current_boot_id and boot_id != self.current_boot_id:
+            self.reboot_required = False
+            self.mutation_possible = False
+        if boot_id:
+            self.current_boot_id = boot_id
+        self.connection_label.setText("ADB · conectado" if connected else "ADB · desconectado")
+        self.boot_label.setText("Sistema · pronto" if booted else "Sistema · iniciando")
+        self.root_live_label.setText("Root · ativo" if rooted else "Root · inativo")
+        if rooted:
+            self.reboot_required = False
+            self.clear_unsafe_boot()
+            self.set_result("ROOT ATIVO", "#16a34a", "Monitor: uid=0 confirmado.")
+            self.start_button.setEnabled(False)
+        elif self.reboot_required:
+            self.set_result(
+                "REBOOT NECESSÁRIO", "#dc2626",
+                "Kernel alterado; reinicie antes de outra tentativa."
+            )
+            self.start_button.setEnabled(False)
+        elif booted:
+            self.set_result("SEM ROOT", "#dc2626", "Sistema pronto para executar o payload.")
+            self.start_button.setEnabled(True)
+        else:
+            self.set_result("INICIANDO", "#d97706", "Aguardando Android concluir o boot…")
+            self.start_button.setEnabled(False)
+        self.reboot_button.setEnabled(connected)
+
+    def root_probe_error(self, _error: QProcess.ProcessError) -> None:
+        if self.root_probe_process:
+            self.root_probe_process.deleteLater()
+            self.root_probe_process = None
+        self.connection_label.setText("ADB · erro")
+        self.root_live_label.setText("Root · desconhecido")
+
+    def mark_unsafe_boot(self) -> None:
+        if not self.current_boot_id:
+            return
+        try:
+            self.unsafe_boot_path.parent.mkdir(parents=True, exist_ok=True)
+            self.unsafe_boot_path.write_text(self.current_boot_id + "\n")
+        except OSError as exc:
+            self.append_log(f"[GUI] Não foi possível persistir estado crítico: {exc}", True)
+
+    def clear_unsafe_boot(self) -> None:
+        try:
+            self.unsafe_boot_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def start_run(self) -> None:
+        if not self.selected_serial:
+            QMessageBox.warning(self, "ADB", "Selecione um dispositivo autorizado.")
+            return
+        if not self.runner.is_file() or not os.access(self.runner, os.X_OK):
+            self.set_result("ERRO", "#dc2626", f"Runner ausente: {self.runner}")
+            return
+        if self.reboot_required:
+            QMessageBox.warning(
+                self, "Reboot necessário",
+                "Uma tentativa alterou o kernel neste boot. Reinicie o celular "
+                "antes de executar novamente.",
+            )
+            return
 
         self.output.clear()
-        self.output.show()
-        self.root_check.hide()
-        self.quiet_progress.hide()
-        self.root_active = False
-        self.title_label.setText("Root My Galaxy")
-        self.selected_serial = str(serial)
-        self.log_started = False
-        self.append_output("Preparing a clean remote run…")
-        self.append_output("[GUI] Keeping the device screen awake during the exploit…")
-        self.append_output("[GUI] Disabling Android child-process restrictions…")
-        if self.kill_system_apps.isChecked():
-            self.append_output("[GUI] Stopping all user and system applications for a clean run…")
-        elif self.kill_user_apps.isChecked():
-            self.append_output("[GUI] Stopping all user applications to improve exploit stability…")
-        self.start_button.setEnabled(False)
-        self.stop_button.setEnabled(False)
-        self.refresh_button.setEnabled(False)
-        self.cleanup_process = QProcess(self)
-        self.cleanup_process.finished.connect(self.start_script)
-        self.cleanup_process.errorOccurred.connect(self.cleanup_error)
-        if self.kill_system_apps.isChecked():
-            package_filter = "sed -nE 's/.* ([A-Za-z0-9._]+)\\/u[0-9]+[^ ]*.*/\\1/p'"
-        elif self.kill_user_apps.isChecked():
-            package_filter = "sed -nE 's/.* ([A-Za-z0-9._]+)\\/u[0-9]+a[0-9]+.*/\\1/p'"
-        else:
-            package_filter = "true"
-        cleanup_script = ""
-        cleanup_script += (
-            "input keyevent KEYCODE_WAKEUP; "
-            "svc power stayon true; "
-            "settings put global settings_enable_monitor_phantom_procs false; "
+        self.progress.setValue(0)
+        self.stage_index = 0
+        self.runner_exit_code = None
+        self.mutation_possible = False
+        self._stdout_buffer = ""
+        self._stderr_buffer = ""
+        self.stage_icon.setText("🎬")
+        self.stage_label.setText("Preparando a execução")
+        self.stage_description.setText(
+            "Validando runner, payload e conexão ADB antes do primeiro passo."
         )
-        if self.kill_system_apps.isChecked() or self.kill_user_apps.isChecked():
-            cleanup_script += (
-                "user=$(cmd activity get-current-user); "
-                "dumpsys activity processes | "
-                f"{package_filter} | "
-                "sort -u | while read -r app; do "
-                "[ -n \"$app\" ] && am force-stop --user \"$user\" \"$app\"; "
-                "done; "
-            )
-        cleanup_script += (
-            "rm -f /data/local/tmp/exploit.log "
-            "/data/local/tmp/libcve43499root "
-            "/data/local/tmp/cve-2026-43499-app.so "
-            "/data/local/tmp/ksud-selected"
-        )
-        self.cleanup_process.start("adb", [
-            "-s", str(serial), "shell", "sh", "-c",
-            cleanup_script,
-        ])
+        self.set_result("EXECUTANDO", "#d97706", "Validando runner e dispositivo…")
+        self.append_log(f"[GUI] Runner: {self.runner}")
+        payload = self.runner.parent / "assets" / "ksu-payload"
+        if payload.is_file():
+            digest = hashlib.sha256(payload.read_bytes()).hexdigest()
+            self.append_log(f"[GUI] Payload SHA-256: {digest}")
+        launcher = self.runner.parent / "assets" / "stability-launcher"
+        if launcher.is_file():
+            digest = hashlib.sha256(launcher.read_bytes()).hexdigest()
+            self.append_log(f"[GUI] Launcher SHA-256: {digest}")
+        self.append_log("[GUI] Tela não será apagada. Aplicativos não serão encerrados.")
 
-    def start_script(self, _exit_code: int = 0,
-                     _exit_status: QProcess.ExitStatus | None = None) -> None:
-        if self.cleanup_process:
-            self.cleanup_process.deleteLater()
-            self.cleanup_process = None
-        try:
-            self.active_profile = self._select_profile(self.selected_serial)
-        except RuntimeError as error:
-            self.append_output(f"[profile] {error}")
-            self.start_button.setEnabled(True)
-            self.stop_button.setEnabled(False)
-            self.refresh_button.setEnabled(True)
-            self.status.setText("Unsupported build")
-            return
-        self.helper_path = str(self.assets_dir / self.active_profile["helper"])
-        self.payload_path = str(self.assets_dir / self.active_profile["payload"])
-        self.ksud_path = str(self.assets_dir / self.active_profile["ksud"])
-        self.append_output(f"[profile] {self.active_profile['id']}")
-        self.elapsed.start()
-        self.run_timer.start(1000)
-        self.active_time_label.setText("Device uptime · 00:00:00")
+        # The device-side C launcher owns the stability gate. Stop the live
+        # root poll first so no competing adb shell perturbs its samples.
+        self.root_timer.stop()
+        if self.root_probe_process:
+            probe = self.root_probe_process
+            self.root_probe_process = None
+            probe.blockSignals(True)
+            probe.kill()
+            probe.waitForFinished(1000)
+            probe.deleteLater()
+        self.start_button.setEnabled(False)
+        self.refresh_button.setEnabled(False)
+        self.reboot_button.setEnabled(False)
+        self.stop_button.setEnabled(True)
+        self.start_runner()
+
+    def start_runner(self) -> None:
+        self.set_result("AGUARDANDO", "#d97706", "Launcher aguardará estabilidade máxima…")
+
         self.process = QProcess(self)
-        env = QProcessEnvironment.systemEnvironment()
-        env.insert("MAX_ATTEMPTS", "5")
-        env.insert("HELPER", self.helper_path)
-        env.insert("PAYLOAD", self.payload_path)
-        env.insert("KSUD", self.ksud_path)
-        self.process.setProcessEnvironment(env)
         self.process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
         self.process.readyReadStandardOutput.connect(self.read_stdout)
         self.process.readyReadStandardError.connect(self.read_stderr)
-        self.process.finished.connect(self.finished)
-        self.process.errorOccurred.connect(self.process_error)
-        shell_script = self.build_root_script(self.selected_serial)
-        if shutil.which("stdbuf"):
-            self.process.start("stdbuf", ["-oL", "-eL", "bash", "-lc", shell_script])
-        else:
-            self.process.start("bash", ["-lc", shell_script])
-        self.start_remote_log_stream()
-        self.start_button.setEnabled(False)
-        self.stop_button.setEnabled(True)
-        self.refresh_button.setEnabled(False)
-        self.status.setText("Running…")
+        self.process.finished.connect(self.runner_finished)
+        self.process.errorOccurred.connect(self.runner_error)
+        self.process.start("setsid", [str(self.runner), self.selected_serial])
+        self.process.closeWriteChannel()
 
-    def cleanup_error(self, _error: QProcess.ProcessError) -> None:
-        message = self.cleanup_process.errorString() if self.cleanup_process else "unknown error"
-        self.append_output(f"[GUI] Cleanup failed: {message}")
-        if self.cleanup_process:
-            self.cleanup_process.deleteLater()
-            self.cleanup_process = None
-        self.start_button.setEnabled(True)
-        self.refresh_button.setEnabled(True)
-        self.status.setText("Cleanup failed")
-        self.restore_screen_state()
-
-    def restore_screen_state(self) -> None:
-        if not self.selected_serial or self.restore_process is not None:
+    def reboot_device(self) -> None:
+        if not self.selected_serial or self.process is not None:
             return
-        self.restore_process = QProcess(self)
-        self.restore_process.finished.connect(self.screen_restore_finished)
-        self.restore_process.errorOccurred.connect(self.screen_restore_error)
-        self.restore_process.start(
-            "adb", ["-s", self.selected_serial, "shell", "svc", "power", "stayon", "false"]
+        answer = QMessageBox.question(
+            self, "Reiniciar dispositivo",
+            "Reiniciar o dispositivo agora? O root ativo será perdido até nova execução.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.append_log(f"[GUI] Reiniciando {self.selected_serial}…")
+        self.set_result("REINICIANDO", "#d97706", "Comando adb reboot em andamento…")
+        self.stage_icon.setText("🔄")
+        self.stage_label.setText("Reiniciando o celular")
+        self.stage_description.setText(
+            "Aguardando o Android voltar e o monitor confirmar o novo estado."
+        )
+        self.connection_label.setText("ADB · reiniciando")
+        self.boot_label.setText("Sistema · reiniciando")
+        self.root_live_label.setText("Root · será removido")
+        self.start_button.setEnabled(False)
+        self.refresh_button.setEnabled(False)
+        self.reboot_button.setEnabled(False)
+        self.reboot_process = QProcess(self)
+        self.reboot_process.finished.connect(self.reboot_command_finished)
+        self.reboot_process.errorOccurred.connect(self.reboot_error)
+        self.reboot_process.start("adb", ["-s", self.selected_serial, "reboot"])
+
+    def reboot_command_finished(self, exit_code: int, _status: QProcess.ExitStatus) -> None:
+        if self.reboot_process:
+            self.reboot_process.deleteLater()
+            self.reboot_process = None
+        if exit_code != 0:
+            self.set_result("ERRO", "#dc2626", f"adb reboot falhou: código {exit_code}.")
+            self.refresh_button.setEnabled(True)
+            self.reboot_button.setEnabled(True)
+            return
+        self.append_log("[GUI] Reboot aceito; aguardando ADB reconectar…")
+        self.connection_label.setText("ADB · aguardando")
+        self.boot_label.setText("Sistema · iniciando")
+        self.root_live_label.setText("Root · inativo")
+        self.reconnect_process = QProcess(self)
+        self.reconnect_process.finished.connect(self.reconnect_finished)
+        self.reconnect_process.errorOccurred.connect(self.reconnect_error)
+        self.reconnect_process.start(
+            "adb", ["-s", self.selected_serial, "wait-for-device"]
         )
 
-    def screen_restore_finished(self, _exit_code: int, _status: QProcess.ExitStatus) -> None:
-        if self.restore_process:
-            self.restore_process.deleteLater()
-            self.restore_process = None
+    def reboot_error(self, _error: QProcess.ProcessError) -> None:
+        message = self.reboot_process.errorString() if self.reboot_process else "erro desconhecido"
+        if self.reboot_process:
+            self.reboot_process.deleteLater()
+            self.reboot_process = None
+        self.set_result("ERRO", "#dc2626", f"Falha ao iniciar adb reboot: {message}")
+        self.refresh_button.setEnabled(True)
+        self.reboot_button.setEnabled(bool(self.selected_serial))
 
-    def screen_restore_error(self, _error: QProcess.ProcessError) -> None:
-        if self.restore_process:
-            self.restore_process.deleteLater()
-            self.restore_process = None
+    def reconnect_finished(self, _exit_code: int, _status: QProcess.ExitStatus) -> None:
+        if self.reconnect_process:
+            self.reconnect_process.deleteLater()
+            self.reconnect_process = None
+        self.append_log("[GUI] ADB reconectado; aguardando Android finalizar boot.")
+        self.connection_label.setText("ADB · conectado")
+        self.refresh_button.setEnabled(True)
+        QTimer.singleShot(1500, self.check_root_status)
+
+    def reconnect_error(self, _error: QProcess.ProcessError) -> None:
+        message = self.reconnect_process.errorString() if self.reconnect_process else "erro desconhecido"
+        if self.reconnect_process:
+            self.reconnect_process.deleteLater()
+            self.reconnect_process = None
+        self.set_result("DESCONECTADO", "#dc2626", f"ADB não reconectou: {message}")
+        self.refresh_button.setEnabled(True)
 
     def read_stdout(self) -> None:
         if self.process:
-            self._drain_channel(self.process.readAllStandardOutput())
+            self._stdout_buffer = self.consume_bytes(
+                self._stdout_buffer, bytes(self.process.readAllStandardOutput()), False
+            )
 
     def read_stderr(self) -> None:
         if self.process:
-            self._drain_channel(self.process.readAllStandardError())
-
-    def _drain_channel(self, payload: bytes) -> None:
-        data = bytes(payload).decode(errors="replace")
-        if not data:
-            return
-        for line in data.splitlines():
-            if line.strip():
-                self.append_output(line)
-
-    def start_remote_log_stream(self) -> None:
-        if not self.selected_serial or self.log_process is not None:
-            return
-        self.log_started = True
-        self.log_process = QProcess(self)
-        self.log_process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
-        self.log_process.readyReadStandardOutput.connect(self.remote_log_ready)
-        self.log_process.errorOccurred.connect(self.remote_log_error)
-        self.log_process.start(
-            "adb",
-            ["-s", self.selected_serial, "shell", "sh", "-c",
-             "while [ ! -e /data/local/tmp/exploit.log ]; do sleep 1; done; "
-             "line=0; while [ -e /data/local/tmp/exploit.log ]; do "
-             "count=$(wc -l < /data/local/tmp/exploit.log); "
-             "if [ $count -lt $line ]; then line=0; fi; "
-             "if [ $count -gt $line ]; then "
-             "tail -n +$((line + 1)) /data/local/tmp/exploit.log; line=$count; fi; "
-             "sleep 1; done"]
-        )
-
-    def stop_remote_log_stream(self) -> None:
-        if self.log_process:
-            self.log_process.kill()
-            self.log_process.deleteLater()
-            self.log_process = None
-
-    def remote_log_ready(self) -> None:
-        if not self.log_process:
-            return
-        content = bytes(self.log_process.readAllStandardOutput()).decode(errors="replace")
-        if content:
-            self._drain_remote_log(content)
-
-    def _drain_remote_log(self, content: str) -> None:
-        content = ANSI_ESCAPE.sub("", content).replace("\r", "")
-        for line in content.splitlines():
-            if line.strip():
-                self.append_output(line)
-
-    def remote_log_error(self, _error: QProcess.ProcessError) -> None:
-        self.stop_remote_log_stream()
-
-    def show_remote_log_tail(self) -> None:
-        if not self.selected_serial:
-            return
-        try:
-            result = subprocess.run(
-                [
-                    "adb", "-s", self.selected_serial, "shell", "tail", "-n", "120",
-                    "/data/local/tmp/exploit.log",
-                ],
-                text=True, capture_output=True, timeout=5, check=False,
+            self._stderr_buffer = self.consume_bytes(
+                self._stderr_buffer, bytes(self.process.readAllStandardError()), True
             )
-        except (OSError, subprocess.TimeoutExpired):
-            return
-        tail = result.stdout.strip()
-        if not tail:
-            return
-        for line in tail.splitlines():
-            if line.strip():
-                self.append_output(line)
 
-    def append_output(self, text: str) -> None:
-        # Helpers may emit ANSI colours; they become visible as broken escape
-        # characters in a text widget, so strip them before rendering.
-        text = ANSI_ESCAPE.sub("", text).replace("\r", "")
-        hidden_lines = (
-            "$ python-root-flow",
-            "[*] Device:",
-            "[runner-live]",
-            "following path=",
+    def consume_bytes(self, pending: str, raw: bytes, error: bool) -> str:
+        text = pending + raw.decode(errors="replace").replace("\r", "\n")
+        lines = text.split("\n")
+        for line in lines[:-1]:
+            if line:
+                self.append_log(line, error)
+        return lines[-1]
+
+    def flush_buffers(self) -> None:
+        for line, error in ((self._stdout_buffer, False), (self._stderr_buffer, True)):
+            if line:
+                self.append_log(line, error)
+        self._stdout_buffer = ""
+        self._stderr_buffer = ""
+
+    def append_log(self, line: str, error: bool = False) -> None:
+        clean = ANSI_ESCAPE.sub("", line).strip("\r")
+        if not clean:
+            return
+        self.update_stage(clean)
+        lowered = clean.lower()
+        adb_progress = "file pushed" in lowered or "file pulled" in lowered
+        semantic_error = (
+            (error and not adb_progress)
+            or "falhou" in lowered or "erro" in lowered
+            or "ausente" in lowered or "inválido" in lowered
         )
-        if any(marker.lower() in text.lower() for marker in hidden_lines):
-            return
-        text = self.translate_log(text)
-        if text.startswith("[GUI]"):
-            text = text.replace("[GUI]", "[+]", 1)
-        if self.is_root_active(text):
-            self.set_root_active()
-        quiet_match = re.search(r"waiting for boot allocator quiet window seconds=(\d+)", text,
-                                flags=re.IGNORECASE)
-        if quiet_match:
-            self.log_started = True
-            self.quiet_duration = int(quiet_match.group(1))
-            self.quiet_deadline = time.monotonic() + self.quiet_duration
-            self.quiet_progress.setRange(0, self.quiet_duration)
-            self.quiet_progress.setValue(0)
-            self.quiet_progress.show()
-        transfer_markers = (
-            "staging", "staged", "adb push", "pushing", "sending",
-            "file pushed", "file pulled", " skipped", " mb/s",
+        color = "#ef4444" if semantic_error else (
+            "#22c55e" if "[+]" in clean or ROOT_RE.search(clean) else "#fffaf3"
         )
-        if any(marker in text.lower() for marker in transfer_markers):
-            return
-        color = "#dc2626" if "[!]" in text or "failed" in text.lower() else \
-            "#16a34a" if "[+]" in text or "root acquired" in text.lower() or "success" in text.lower() else \
-            "#fffaf3"
-        self.output.append(f'<span style="color:{color}">{escape(text)}</span>')
-        self.output.verticalScrollBar().setValue(self.output.verticalScrollBar().maximum())
+        self.output.append(f'<span style="color:{color}">{escape(clean)}</span>')
+        bar = self.output.verticalScrollBar()
+        bar.setValue(bar.maximum())
 
-    @staticmethod
-    def translate_log(text: str) -> str:
-        translations = {
-            "Staging from Termux files": "Preparing exploit files",
-            "Staging selected helper / payload / ksud from local assets": "Preparing exploit files",
-        }
-        for source, target in translations.items():
-            text = text.replace(source, target)
-        return text
+    def update_stage(self, line: str) -> None:
+        lowered = line.lower()
+        if lowered.startswith("[launcher] gate="):
+            match = re.search(
+                r"gate=(\d+/5).*temp=([^ ]+) mem=([^ ]+) runnable=(\d+).*"
+                r"psi=([^ ]+)", line
+            )
+            if match:
+                self.stage_description.setText(
+                    f"Estável {match.group(1)} · {match.group(2)} · "
+                    f"{match.group(3)} livres · {match.group(4)} tarefas · "
+                    f"PSI {match.group(5)}"
+                )
+        elif "[launcher] estabilidade máxima confirmada" in lowered:
+            self.stage_description.setText(
+                "Métricas, slab, capacidade de pipes e cooldown foram aprovados."
+            )
+        elif "[launcher] pipe-gate=pass" in lowered:
+            self.stage_description.setText(
+                "Capacidade de 480 pipes aprovada; iniciando cooldown do allocator."
+            )
+        if "stage=kernel-mutation-pending" in lowered:
+            self.mutation_possible = True
+            self.reboot_required = True
+            self.mark_unsafe_boot()
+            self.stop_button.setEnabled(False)
+            self.status_label.setText(
+                "Mutação kernel possível; aguarde conclusão ou reboot automático."
+            )
+        for index, (label, description, icon, markers) in enumerate(STAGES, start=1):
+            if index > self.stage_index and any(marker in lowered for marker in markers):
+                self.stage_index = index
+                self.progress.setValue(index)
+                self.stage_label.setText(label)
+                self.stage_description.setText(description)
+                self.stage_icon.setText(icon)
 
-    @staticmethod
-    def is_root_active(text: str) -> bool:
-        lowered = text.lower()
-        return "uid=0" in lowered or "root complete" in lowered or "full root" in lowered
-
-    def set_root_active(self) -> None:
-        self.root_active = True
-        self.title_label.setText("Root My Galaxy")
-        self.root_check.show()
-        self.quiet_progress.hide()
-        self.start_button.setEnabled(False)
-        self.stop_button.setEnabled(False)
-        self.status.setText("Root active")
-        self.status.setStyleSheet("color: #16a34a; font-weight: 700")
-
-    def update_elapsed_status(self) -> None:
-        if self.process and self.process.state() != QProcess.ProcessState.NotRunning:
-            self.update_active_time()
-            if self.quiet_deadline is not None:
-                remaining = max(0, int(self.quiet_deadline - time.monotonic() + 0.999))
-                self.status.setText(f"Quiet window · {remaining}s")
-                self.quiet_progress.setValue(self.quiet_duration - remaining)
-                if remaining == 0:
-                    self.quiet_deadline = None
-                    self.quiet_progress.hide()
-            else:
-                self.status.setText(f"Running · {self.elapsed.elapsed() // 1000}s")
-
-    def update_active_time(self) -> None:
-        self.update_device_uptime()
-
-    def update_device_uptime(self) -> None:
-        if not self.selected_serial:
-            self.active_time_label.hide()
-            return
-        self.request_device_time()
-        if self.device_uptime_seconds is None:
-            return
-        total = self.device_uptime_seconds
-        days, remainder = divmod(total, 86400)
-        hours, remainder = divmod(remainder, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        prefix = f"{days}d " if days else ""
-        self.active_time_label.setText(
-            f"Device uptime · {prefix}{hours:02d}:{minutes:02d}:{seconds:02d}"
-        )
-
-    def request_device_time(self) -> None:
-        if not self.selected_serial or self.device_clock_process is not None:
-            return
-        self.device_clock_process = QProcess(self)
-        self.device_clock_process.finished.connect(self.device_time_finished)
-        self.device_clock_process.errorOccurred.connect(self.device_time_error)
-        self.device_clock_process.start(
-            "adb", ["-s", self.selected_serial, "shell", "cat", "/proc/uptime"]
-        )
-
-    def device_time_finished(self, _exit_code: int, _status: QProcess.ExitStatus) -> None:
-        if not self.device_clock_process:
-            return
-        raw = bytes(self.device_clock_process.readAllStandardOutput()).decode().strip()
-        try:
-            uptime = int(float(raw.split()[0]))
-        except (ValueError, IndexError):
-            uptime = None
-        if uptime is not None:
-            self.device_uptime_seconds = uptime
-        self.device_clock_process.deleteLater()
-        self.device_clock_process = None
-
-    def device_time_error(self, _error: QProcess.ProcessError) -> None:
-        if self.device_clock_process:
-            self.device_clock_process.deleteLater()
-            self.device_clock_process = None
-
-    def stop(self) -> None:
-        if self.process and self.process.state() != QProcess.ProcessState.NotRunning:
-            self.append_output("\n[GUI] Stopping process…")
-            self.process.terminate()
-            QTimer.singleShot(2000, self.kill_if_running)
-        self.stop_remote_log_stream()
-
-    def kill_if_running(self) -> None:
-        if self.process and self.process.state() != QProcess.ProcessState.NotRunning:
-            self.process.kill()
-
-    def process_error(self, _error: QProcess.ProcessError) -> None:
-        self.append_output(f"[GUI] Process error: {self.process.errorString() if self.process else 'unknown'}")
-
-    def finished(self, exit_code: int, _exit_status: QProcess.ExitStatus) -> None:
+    def runner_finished(self, exit_code: int, _status: QProcess.ExitStatus) -> None:
         self.read_stdout()
         self.read_stderr()
-        self.update_active_time()
-        self.run_timer.stop()
-        self.quiet_deadline = None
-        self.quiet_progress.hide()
-        self.stop_remote_log_stream()
-        self.start_button.setEnabled(not self.root_active)
-        self.stop_button.setEnabled(False)
-        self.refresh_button.setEnabled(True)
-        if self.root_active:
-            self.status.setText("Root active")
-            self.status.setStyleSheet("color: #16a34a; font-weight: 700")
-            self.show_remote_log_tail()
-        elif exit_code == 0:
-            self.status.setText("Completed successfully")
-            self.status.setStyleSheet("color: #16a34a; font-weight: 600")
-        else:
-            self.status.setText(f"Finished with exit code {exit_code}")
-            self.status.setStyleSheet("color: #dc2626; font-weight: 600")
-        self.process = None
-        self.restore_screen_state()
-
-    def closeEvent(self, event) -> None:
-        self.stop_remote_log_stream()
-        if self.process and self.process.state() != QProcess.ProcessState.NotRunning:
-            self.process.kill()
-            self.process.waitForFinished(2000)
+        self.flush_buffers()
+        self.runner_exit_code = exit_code
+        self.append_log(f"[GUI] Runner finalizou com código {exit_code}.", exit_code != 0)
+        if self.process:
             self.process.deleteLater()
             self.process = None
-        for proc_name in ("cleanup_process", "restore_process", "device_clock_process", "reboot_process"):
-            proc = getattr(self, proc_name, None)
-            if proc:
-                proc.kill()
-                proc.waitForFinished(1000)
-                proc.deleteLater()
-                setattr(self, proc_name, None)
+        self.stop_button.setEnabled(False)
+        self.start_verification()
+
+    def runner_error(self, _error: QProcess.ProcessError) -> None:
+        if self.process:
+            self.append_log(f"[GUI] Falha ao iniciar runner: {self.process.errorString()}", True)
+            if self.process.error() == QProcess.ProcessError.FailedToStart:
+                self.process.deleteLater()
+                self.process = None
+                self.set_result("NÃO EXECUTADO", "#dc2626", "Runner não iniciou.")
+                self.stop_button.setEnabled(False)
+                self.refresh_button.setEnabled(True)
+                self.reboot_button.setEnabled(bool(self.selected_serial))
+                self.start_button.setEnabled(
+                    bool(self.selected_serial) and not self.reboot_required
+                )
+                self.root_timer.start()
+
+    def start_verification(self) -> None:
+        self.stage_index = len(STAGES)
+        self.progress.setValue(len(STAGES))
+        self.stage_label.setText("Conferindo a conquista")
+        self.stage_description.setText(
+            "Executando uma prova independente: adb shell su -c id."
+        )
+        self.stage_icon.setText("✅")
+        self.append_log("[GUI] Prova final: adb shell su -c id")
+        self.verify_process = QProcess(self)
+        self.verify_process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
+        self.verify_process.finished.connect(self.verification_finished)
+        self.verify_process.errorOccurred.connect(self.verification_error)
+        self.verify_process.start(
+            "adb", ["-s", self.selected_serial, "shell", "/system/bin/su", "-c", "id"]
+        )
+
+    def verification_finished(self, exit_code: int, _status: QProcess.ExitStatus) -> None:
+        if not self.verify_process:
+            return
+        stdout = bytes(self.verify_process.readAllStandardOutput()).decode(errors="replace").strip()
+        stderr = bytes(self.verify_process.readAllStandardError()).decode(errors="replace").strip()
+        if stdout:
+            self.append_log(stdout)
+        if stderr:
+            self.append_log(stderr, True)
+        rooted = exit_code == 0 and bool(ROOT_RE.search(stdout))
+        self.verify_process.deleteLater()
+        self.verify_process = None
+        self.root_timer.start()
+        self.refresh_button.setEnabled(True)
+        self.reboot_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        if rooted:
+            self.reboot_required = False
+            self.clear_unsafe_boot()
+            self.set_result("ROOT ATIVO", "#16a34a", "Sucesso: uid=0 confirmado.")
+            self.stage_label.setText("Root conquistado")
+            self.stage_description.setText(
+                "Tudo certo: o celular respondeu como uid=0 neste boot."
+            )
+            self.stage_icon.setText("🎉")
+            self.start_button.setEnabled(False)
+        else:
+            runner_note = f" Runner={self.runner_exit_code}." if self.runner_exit_code is not None else ""
+            if self.reboot_required:
+                self.set_result(
+                    "REBOOT NECESSÁRIO", "#dc2626",
+                    f"Kernel alterado; não tente novamente neste boot.{runner_note}"
+                )
+                self.stage_label.setText("Hora de recomeçar com segurança")
+                self.stage_description.setText(
+                    "Reinicie o celular antes de uma nova tentativa; o botão executar está bloqueado."
+                )
+                self.stage_icon.setText("🔄")
+                self.start_button.setEnabled(False)
+            else:
+                self.set_result("SEM ROOT", "#dc2626", f"Falha: uid=0 não confirmado.{runner_note}")
+                self.stage_label.setText("A jornada não terminou")
+                self.stage_description.setText(
+                    "O celular não confirmou uid=0. Consulte os logs para localizar a etapa que falhou."
+                )
+                self.stage_icon.setText("🧩")
+                self.start_button.setEnabled(bool(self.selected_serial))
+        QTimer.singleShot(500, self.check_root_status)
+
+    def verification_error(self, _error: QProcess.ProcessError) -> None:
+        message = self.verify_process.errorString() if self.verify_process else "erro desconhecido"
+        self.append_log(f"[GUI] Falha na verificação final: {message}", True)
+        if self.verify_process:
+            self.verify_process.deleteLater()
+            self.verify_process = None
+        self.set_result("SEM PROVA", "#dc2626", "Não foi possível executar su -c id.")
+        self.refresh_button.setEnabled(True)
+        self.reboot_button.setEnabled(bool(self.selected_serial))
+        self.start_button.setEnabled(bool(self.selected_serial) and not self.reboot_required)
+        self.root_timer.start()
+        QTimer.singleShot(500, self.check_root_status)
+
+    def set_result(self, badge: str, color: str, status: str) -> None:
+        self.result_badge.setText(badge)
+        self.result_badge.setStyleSheet(
+            f"color: {color}; border: 1px solid {color}; border-radius: 10px; "
+            "padding: 6px 12px; font-weight: 700;"
+        )
+        self.status_label.setText(status)
+        self.status_label.setStyleSheet(f"color: {color}; font-weight: 600;")
+
+    def stop_run(self) -> None:
+        if not self.process or self.process.state() == QProcess.ProcessState.NotRunning:
+            return
+        if self.mutation_possible:
+            QMessageBox.warning(
+                self, "Execução crítica",
+                "O kernel pode já ter sido alterado. Interrupção bloqueada; "
+                "aguarde o runner terminar.",
+            )
+            return
+        self.append_log("[GUI] Interrompendo grupo do runner…", True)
+        pid = int(self.process.processId())
+        try:
+            os.killpg(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            self.process.terminate()
+        QTimer.singleShot(2000, self.force_stop)
+
+    def force_stop(self) -> None:
+        if self.process and self.process.state() != QProcess.ProcessState.NotRunning:
+            pid = int(self.process.processId())
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                self.process.kill()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self.process and self.process.state() != QProcess.ProcessState.NotRunning:
+            if self.mutation_possible:
+                QMessageBox.warning(
+                    self, "Execução crítica",
+                    "Janela não pode ser fechada após possível mutação kernel. "
+                    "Aguarde o runner terminar.",
+                )
+                event.ignore()
+                return
+            self.stop_run()
+            self.process.waitForFinished(2500)
+        if self.verify_process:
+            self.verify_process.kill()
+            self.verify_process.waitForFinished(1000)
+        for process in (
+            self.root_probe_process, self.reboot_process, self.reconnect_process,
+        ):
+            if process:
+                process.kill()
+                process.waitForFinished(1000)
         event.accept()
 
 
 def main() -> int:
     app = QApplication(sys.argv)
-    app.setApplicationName("Standalone Exploit Root GUI")
+    app.setApplicationName("Root My Galaxy AFZH3")
     if "Breeze" in QStyleFactory.keys():
         app.setStyle(QStyleFactory.create("Breeze"))
     window = RootWindow()

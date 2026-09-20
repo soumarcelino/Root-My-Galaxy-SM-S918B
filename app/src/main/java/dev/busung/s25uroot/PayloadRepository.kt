@@ -14,6 +14,7 @@ data class VerifiedPayloads(
     val exploit: File,
     val kernelSu: File,
     val helper: File,
+    val launcher: File,
 )
 
 class PayloadRepository(private val context: Context) {
@@ -46,10 +47,18 @@ class PayloadRepository(private val context: Context) {
         val helper = bundledAssetFor(profile.helper, directory, onProgress,
             context.getString(R.string.artifact_helper_bundled))
             ?: error("bundled helper missing: ${profile.helper.url}")
+        val launcher = bundledAsset(
+            LAUNCHER_ASSET,
+            LAUNCHER_SIZE,
+            directory,
+            onProgress,
+            context.getString(R.string.artifact_launcher_bundled),
+        ) ?: error("bundled launcher missing: $LAUNCHER_ASSET")
         Os.chmod(exploit.absolutePath, 0b100100100)
         Os.chmod(kernelSu.absolutePath, 0b100100100)
         Os.chmod(helper.absolutePath, 0b111101101)
-        return VerifiedPayloads(profile, exploit, kernelSu, helper)
+        Os.chmod(launcher.absolutePath, 0b111101101)
+        return VerifiedPayloads(profile, exploit, kernelSu, helper, launcher)
     }
 
     private fun bundledAssetFor(
@@ -61,11 +70,11 @@ class PayloadRepository(private val context: Context) {
         if (!artifact.url.startsWith(ASSET_PREFIX)) return null
         val name = artifact.url.removePrefix(ASSET_PREFIX)
         require(name.isNotBlank() && File(name).name == name) { "Invalid bundled asset name" }
-        return bundledAsset(name, directory, onProgress, label)
+        return bundledAsset(name, artifact.size, directory, onProgress, label)
     }
 
     /** 从 APK assets 解出内嵌文件；失败返回 null（由调用方 fallback 到下载）。 */
-    private fun bundledAsset(name: String, directory: File, onProgress: (String) -> Unit, label: String): File? {
+    private fun bundledAsset(name: String, expectedSize: Long, directory: File, onProgress: (String) -> Unit, label: String): File? {
         return try {
             val destination = File(directory, name)
             // v0.2.36: 第二次运行修复——上次解出的文件被 chmod 0444（只读），
@@ -79,6 +88,7 @@ class PayloadRepository(private val context: Context) {
                         context.assets.open(name).use { input -> input.copyTo(output) }
                         output.fd.sync()
                     }
+                    require(alt.length() == expectedSize) { "Bundled asset size mismatch: $name" }
                     onProgress(label)
                     return alt
                 }
@@ -89,6 +99,7 @@ class PayloadRepository(private val context: Context) {
                 }
                 output.fd.sync()
             }
+            require(destination.length() == expectedSize) { "Bundled asset size mismatch: $name" }
             onProgress(label)
             destination
         } catch (e: Throwable) {
@@ -192,5 +203,7 @@ class PayloadRepository(private val context: Context) {
         private const val MUTABLE_RAW_PREFIX = "$RAW_REPOSITORY@main/"
         private const val MAX_COMMIT_RESPONSE_BYTES = 16 * 1024
         private const val MAX_MANIFEST_BYTES = 256 * 1024
+        private const val LAUNCHER_ASSET = "stability-launcher"
+        private const val LAUNCHER_SIZE = 15_832L
     }
 }

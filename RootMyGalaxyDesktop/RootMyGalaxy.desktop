@@ -1,11 +1,12 @@
-#!/usr/bin/env xdg-open
 [Desktop Entry]
-Version=1.0
 Type=Application
-Name=Root My Galaxy
-Comment=Root My Galaxy desktop tool
-Exec=python3 -c "import os,sys,subprocess; subprocess.run([os.path.join(os.path.dirname(sys.argv[1]),'start.sh')], check=False)" %k
+Version=1.0
+Name=Root My Galaxy AFZH3
+Comment=Executa o payload aberto AFZH3 com logs em tempo real
+Exec=/home/matias/Projects/Root-My-Galaxy-SM-S918B/RootMyGalaxyDesktop/start.sh
+Path=/home/matias/Projects/Root-My-Galaxy-SM-S918B/RootMyGalaxyDesktop
 Icon=android-package-archive
 Terminal=false
 Categories=Utility;
 StartupNotify=true
+NoDisplay=false

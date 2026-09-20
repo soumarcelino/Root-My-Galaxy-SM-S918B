@@ -22,3 +22,8 @@ local.properties
 # Device/runtime logs
 *.log
 exploit.log
+
+# Python virtualenvs / caches
+.venv/
+__pycache__/
+*.pyc

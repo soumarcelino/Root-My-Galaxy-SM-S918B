@@ -3,7 +3,10 @@
 
 #include <stdio.h>
 
-#include "target-afzg1.h"
+#ifndef TARGET_GUARD_HEADER
+#define TARGET_GUARD_HEADER "target-afzg1.h"
+#endif
+#include TARGET_GUARD_HEADER
 
 /*
  * Validate every immutable property used to select kernel offsets.  A caller

@@ -10,11 +10,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
 import java.io.File
 import java.io.InputStream
 import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.Duration.Companion.seconds
 
 enum class InstallPhase {
     Checking,
@@ -31,6 +32,9 @@ data class InstallUiState(
     val message: String = "",
     val probeOutput: String = "",
     val log: String = "",
+    val executionStage: ExecutionStage = ExecutionStage.Preparing,
+    val executionDetail: String? = null,
+    val rootActive: Boolean = false,
 ) {
     val busy: Boolean
         get() = phase in setOf(
@@ -60,6 +64,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     private var discoveryJob: Job? = null
     private var installJob: Job? = null
     private var activeHistoryEntry: InstallHistoryEntry? = null
+    private var fullRunLog = ""
     val state: StateFlow<InstallUiState> = mutableState.asStateFlow()
     val history: StateFlow<List<InstallHistoryEntry>> = mutableHistory.asStateFlow()
     val targetCatalog: StateFlow<TargetCatalogUiState> = mutableTargetCatalog.asStateFlow()
@@ -80,6 +85,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                     message = app.getString(R.string.status_ksu_active),
                     probeOutput = probe,
                     log = probe,
+                    executionStage = ExecutionStage.VerifyingRoot,
+                    rootActive = true,
                 )
                 return@launch
             }
@@ -162,10 +169,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 appendLog(app.getString(R.string.log_download_verified))
 
                 setPhase(InstallPhase.Exploiting, app.getString(R.string.status_exploit_running))
-                if (AppPreferences.optimizeOnExploit(app)) {
-                    appendLog("[*] Applying startup optimization through Shizuku")
-                    appendLog("[*] ${StartupOptimizer.apply(app)}")
-                }
                 executeExploit(payloads)
 
                 setPhase(InstallPhase.LoadingKernelSu, app.getString(R.string.status_ksu_loading))
@@ -229,96 +232,86 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
 
     private suspend fun executeExploit(payloads: VerifiedPayloads) {
         val payload = payloads.exploit
+        val launcher = payloads.launcher
         val shizuku = shizukuEnabled()
         appendLog("[diag] shizukuEnabled=$shizuku isRunning=${ShizukuController.isRunning()} isGranted=${ShizukuController.isGranted()}")
         // v0.2.34: pstore dump —— 重启后读上次内核崩溃日志（KDP/DEFEX/RKP 拦截铁证）
         if (shizuku) dumpPstore()
-        val logFile = if (shizuku) File(SHIZUKU_LOG_PATH) else File(app.filesDir, "exploit.log")
-        if (shizuku) {
-            ShizukuController.exec(arrayOf("rm", "-f", SHIZUKU_LOG_PATH)).waitFor()
-        } else {
-            logFile.delete()
-        }
         val helper = helperFile(payloads.helper)
-        appendLog("[diag] helper=${helper.absolutePath}")
+        appendLog("[diag] helper=${helper.absolutePath} launcher=${launcher.absolutePath}")
         if (!shizuku) {
             require(helper.canExecute()) { app.getString(R.string.error_helper_unavailable) }
+            require(launcher.canExecute()) { app.getString(R.string.error_launcher_unavailable) }
         }
         val logPrefix = mutableState.value.log
         val bootToken = currentBootToken()
         val process = if (shizuku) {
             val stagedPayload = shizukuStage(payload, SHIZUKU_PAYLOAD_PATH, "755")
-            appendLog("[diag] Shizuku branch: payload=${stagedPayload.absolutePath}")
-            // v0.2.32+: 完全对齐 s9180-root-kit 工具包 run_root.sh（作者验证过的调用方式）：
-            //   1) WARMUP 400x /system/bin/true（调整 slab 分配器状态，让 ashmem 对象落在可利用页）
-            //   2) 仅 3 个环境变量（无 PSELECT_DELAY_USEC）
-            //   3) CVE43499_ROOT_HELPER=... EXPLOIT_ATTEMPTS=N LD_PRELOAD=... /system/bin/true
-            // v0.2.34: Shizuku 分支补 P0_ATTEMPT_TIMEOUT_SEC + P0_OFFSET（对齐 App 分支，提高写原语可靠性）
-            val shizukuEnv = buildList {
-                add("CVE43499_ROOT_HELPER=${helper.absolutePath}")
-                add("EXPLOIT_ATTEMPTS=$EXPLOIT_ATTEMPTS")
-                add("P0_ATTEMPT_TIMEOUT_SEC=$P0_ATTEMPT_TIMEOUT_SEC")
+            val stagedLauncher = shizukuStage(launcher, SHIZUKU_LAUNCHER_PATH, "755")
+            appendLog(
+                "[diag] Shizuku branch: launcher=${stagedLauncher.absolutePath} " +
+                    "payload=${stagedPayload.absolutePath}",
+            )
+            val launcherEnv = buildList {
                 cachedP0Offset(bootToken)?.let { add("$P0_OFFSET_ENV=$it") }
             }.toTypedArray()
+            val command = "exec ${shellQuote(stagedLauncher.absolutePath)} " +
+                "--payload ${shellQuote(stagedPayload.absolutePath)} " +
+                "--helper ${shellQuote(helper.absolutePath)} 2>&1"
             ShizukuController.exec(
-                arrayOf(
-                    "/system/bin/sh",
-                    "-c",
-                    "i=0; while [ ${'$'}i -lt 400 ]; do /system/bin/true; i=$((i+1)); done; CVE43499_ROOT_HELPER=${shellQuote(helper.absolutePath)} LD_PRELOAD=${shellQuote(stagedPayload.absolutePath)} /system/bin/true 2>&1",
-                ),
-                shizukuEnv,
+                arrayOf("/system/bin/sh", "-c", command),
+                launcherEnv.takeIf { it.isNotEmpty() },
             )
         } else {
-            appendLog("[diag] App branch: payload=${payload.absolutePath}")
+            appendLog("[diag] App branch: launcher=${launcher.absolutePath} payload=${payload.absolutePath}")
             val processBuilder = ProcessBuilder(
-                helper.absolutePath,
-                "--run-payload",
+                launcher.absolutePath,
+                "--payload",
                 payload.absolutePath,
+                "--helper",
                 helper.absolutePath,
-                logFile.absolutePath,
             ).redirectErrorStream(true)
             processBuilder.environment().apply {
-                put("EXPLOIT_ATTEMPTS", EXPLOIT_ATTEMPTS)
-                put("P0_ATTEMPT_TIMEOUT_SEC", P0_ATTEMPT_TIMEOUT_SEC)
-                put("EXPLOIT_ATTEMPT_TIMEOUT_SEC", EXPLOIT_ATTEMPT_TIMEOUT_SEC)
                 cachedP0Offset(bootToken)?.let { put(P0_OFFSET_ENV, it) }
             }
             processBuilder.start()
         }
         val captured = StringBuilder()
-        val readLog: () -> String = if (shizuku) {
-            { drainProcessOutput(process, captured) }
-        } else {
-            { logFile.readTextIfPresent() }
-        }
 
         try {
             val startedAt = SystemClock.elapsedRealtime()
             var lastProgressAt = startedAt
-            var lastRawLog = ""
+            var lastUiPublishAt = startedAt
+            var lastHistorySaveAt = startedAt
             while (process.isAlive) {
-                val rawLog = readLog()
-                if (rawLog != lastRawLog) {
-                    cacheP0Offset(bootToken, rawLog)
-                    publishExploitLog(logPrefix, rawLog)
-                    lastRawLog = rawLog
+                val chunk = drainProcessOutput(process)
+                if (chunk.isNotEmpty()) {
+                    captured.append(chunk)
+                    cacheP0Offset(bootToken, chunk)
                     lastProgressAt = SystemClock.elapsedRealtime()
                 }
                 val now = SystemClock.elapsedRealtime()
+                if (chunk.isNotEmpty() && now - lastUiPublishAt >= UI_PUBLISH_MILLIS) {
+                    val persist = now - lastHistorySaveAt >= HISTORY_SAVE_MILLIS
+                    publishExploitLog(logPrefix, captured.toString(), persist)
+                    lastUiPublishAt = now
+                    if (persist) lastHistorySaveAt = now
+                }
                 require(now - lastProgressAt < EXPLOIT_STALL_MILLIS) {
                     app.getString(R.string.error_exploit_stalled)
                 }
                 require(now - startedAt < EXPLOIT_TOTAL_MILLIS) {
                     app.getString(R.string.error_exploit_timeout)
                 }
-                delay(if (shizuku) SHIZUKU_LOG_POLL_INTERVAL else LOG_POLL_INTERVAL)
+                delay(LOG_POLL_INTERVAL)
             }
 
             val exitCode = process.waitFor()
-            val rawLog = readLog()
+            captured.append(drainProcessOutput(process))
+            val rawLog = captured.toString()
             cacheP0Offset(bootToken, rawLog)
-            publishExploitLog(logPrefix, rawLog)
-            val earlyOutput = readProcessOutput(process, shizuku).trim()
+            publishExploitLog(logPrefix, rawLog, persist = true)
+            val earlyOutput = rawLog.trim()
             require(exitCode == 0) {
                 app.getString(
                     R.string.error_payload_exit,
@@ -336,7 +329,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             AppPreferences.setLastRootDurationMillis(app, rootDurationMillis)
             appendLog("[+] Root acquired in ${rootDurationMillis / 1_000.0} seconds")
         } finally {
-            if (process.isAlive) {
+            // Closing the UI must not abort a device-side launcher in a critical section.
+            if (process.isAlive && currentCoroutineContext().isActive) {
                 process.destroy()
                 delay(500.milliseconds)
                 if (process.isAlive) process.destroyForcibly()
@@ -345,7 +339,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         appendLog(app.getString(R.string.log_bootstrap_root))
     }
 
-    private fun drainProcessOutput(process: Process, buffer: StringBuilder): String {
+    private fun drainProcessOutput(process: Process): String {
+        val buffer = StringBuilder()
         return try {
             drainStream(process.inputStream, buffer)
             drainStream(process.errorStream, buffer)
@@ -364,13 +359,18 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun publishExploitLog(prefix: String, rawLog: String) {
+    private fun publishExploitLog(prefix: String, rawLog: String, persist: Boolean) {
+        val progress = parseExecutionProgress(rawLog, mutableState.value.executionStage)
+        val completeLog = listOf(prefix, stripAnsi(rawLog))
+            .filter(String::isNotBlank)
+            .joinToString("\n")
+        fullRunLog = completeLog
         mutableState.value = mutableState.value.copy(
-            log = listOf(prefix, stripAnsi(rawLog))
-                .filter(String::isNotBlank)
-                .joinToString("\n"),
+            log = logTail(completeLog),
+            executionStage = progress.stage,
+            executionDetail = progress.detail ?: mutableState.value.executionDetail,
         )
-        updateHistoryLog()
+        if (persist) updateHistoryLog()
     }
 
     private fun installKernelSu(payloads: VerifiedPayloads) {
@@ -396,7 +396,14 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             app.getString(R.string.error_ksu_verify, lateLoad.code, lateLoad.output)
         }
         if (lateLoad.output.isNotBlank()) appendLog(lateLoad.output)
+        require(NativeProbe.isKernelSuActive()) {
+            app.getString(R.string.error_ksu_control_inactive)
+        }
         storeInstallReceipt()
+        mutableState.value = mutableState.value.copy(
+            executionStage = ExecutionStage.VerifyingRoot,
+            rootActive = true,
+        )
         appendLog(app.getString(R.string.log_ksu_control_verified))
     }
 
@@ -507,18 +514,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         return staged
     }
 
-    private fun shizukuEnvironment(
-        bootToken: String?,
-        payloadPath: String,
-        helperPath: String,
-    ): Array<String> = buildList {
-        add("EXPLOIT_ATTEMPTS=$EXPLOIT_ATTEMPTS")
-        add("P0_ATTEMPT_TIMEOUT_SEC=$P0_ATTEMPT_TIMEOUT_SEC")
-        add("EXPLOIT_ATTEMPT_TIMEOUT_SEC=$EXPLOIT_ATTEMPT_TIMEOUT_SEC")
-        add("CVE43499_ROOT_HELPER=$helperPath")
-        cachedP0Offset(bootToken)?.let { add("$P0_OFFSET_ENV=$it") }
-    }.toTypedArray()
-
     private fun readProcessOutput(process: Process, shizuku: Boolean): String {
         val stdout = process.inputStream.bufferedReader().use { it.readText() }
         val stderr = if (shizuku) process.errorStream.bufferedReader().use { it.readText() } else ""
@@ -540,20 +535,38 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     private fun shellQuote(value: String) = "'${value.replace("'", "'\\''")}'"
 
     private fun setPhase(phase: InstallPhase, message: String) {
-        mutableState.value = mutableState.value.copy(phase = phase, message = message)
+        val stage = when (phase) {
+            InstallPhase.Checking, InstallPhase.Ready, InstallPhase.Downloading ->
+                ExecutionStage.Preparing
+            InstallPhase.Exploiting -> mutableState.value.executionStage
+            InstallPhase.LoadingKernelSu -> ExecutionStage.LoadingKernelSu
+            InstallPhase.Installed -> ExecutionStage.VerifyingRoot
+            InstallPhase.Failed -> mutableState.value.executionStage
+        }
+        mutableState.value = mutableState.value.copy(
+            phase = phase,
+            message = message,
+            executionStage = stage,
+            rootActive = phase == InstallPhase.Installed || mutableState.value.rootActive,
+        )
         appendLog("[*] $message")
     }
 
     private fun appendLog(line: String) {
         val cleanLine = stripAnsi(line).trim()
         if (cleanLine.isBlank()) return
+        val progress = parseExecutionProgress(cleanLine, mutableState.value.executionStage)
+        fullRunLog = (fullRunLog + "\n" + cleanLine).trim()
         mutableState.value = mutableState.value.copy(
-            log = (mutableState.value.log + "\n" + cleanLine).trim(),
+            log = logTail(fullRunLog),
+            executionStage = progress.stage,
+            executionDetail = progress.detail ?: mutableState.value.executionDetail,
         )
         updateHistoryLog()
     }
 
     private fun startHistory() {
+        fullRunLog = ""
         val entry = historyStore.create()
         activeHistoryEntry = entry
         publishHistory(entry)
@@ -568,7 +581,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun updateHistoryLog() =
-        updateHistory { it.copy(log = mutableState.value.log) }
+        updateHistory { it.copy(log = fullRunLog) }
 
     private fun updateHistoryProfile(profileId: String) =
         updateHistory { it.copy(profileId = profileId) }
@@ -578,7 +591,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             entry.copy(
                 completedAtMillis = System.currentTimeMillis(),
                 result = result,
-                log = mutableState.value.log,
+                log = fullRunLog,
             )
         }
         activeHistoryEntry = null
@@ -589,14 +602,12 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             .sortedByDescending(InstallHistoryEntry::startedAtMillis)
     }
 
-    private fun File.readTextIfPresent(): String = if (exists()) readText() else ""
-
     companion object {
-        private const val EXPLOIT_ATTEMPTS = "24"
-        private const val P0_ATTEMPT_TIMEOUT_SEC = "45"
-        private const val EXPLOIT_ATTEMPT_TIMEOUT_SEC = "120"
         private const val EXPLOIT_STALL_MILLIS = 90_000L
         private const val EXPLOIT_TOTAL_MILLIS = 900_000L
+        private const val UI_PUBLISH_MILLIS = 1_000L
+        private const val HISTORY_SAVE_MILLIS = 10_000L
+        private const val DISPLAY_LOG_LINES = 180
         private const val INSTALL_RECEIPT = "install_receipt"
         private const val RECEIPT_BOOT_TOKEN = "kernel_boot_id"
         private const val RECEIPT_VERIFIED = "verified"
@@ -606,18 +617,20 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private const val P0_OFFSET_ENV = "SLIDE_P0_OFFSET"
         private const val P0_OFFSET_MAX = 0x1f0000L
         private const val P0_OFFSET_MASK = 0xffffL
-        private const val SHIZUKU_LOG_PATH = "/data/local/tmp/ksu-exploit.log"
         private const val SHIZUKU_HELPER_PATH = "/data/local/tmp/ksu-helper"
         private const val SHIZUKU_PAYLOAD_PATH = "/data/local/tmp/ksu-payload"
+        private const val SHIZUKU_LAUNCHER_PATH = "/data/local/tmp/stability-launcher"
         private const val SHIZUKU_KSUD_PATH = "/data/local/tmp/ksud-s25u-kdp"
         private const val SHIZUKU_KSUD_STAGE_PATH = "/data/local/tmp/.ksud-stage"
-        private val LOG_POLL_INTERVAL = 250.milliseconds
-        private val SHIZUKU_LOG_POLL_INTERVAL = 1.seconds
+        private val LOG_POLL_INTERVAL = 1_000.milliseconds
         private val ANSI_ESCAPE = Regex("\u001B\\[[0-?]*[ -/]*[@-~]")
         private val P0_OFFSET_PATTERN = Regex(
-            "slide-kaslr-ok[^\\n]*slide=([0-9a-fA-F]{16})",
+            "(?:slide-kaslr-ok[^\\n]*slide=|\\[kaslr][^\\n]*p0_offset=)([0-9a-fA-F]{6,16})",
         )
 
         private fun stripAnsi(value: String): String = ANSI_ESCAPE.replace(value, "").replace("\r", "")
+
+        private fun logTail(value: String): String =
+            value.lineSequence().toList().takeLast(DISPLAY_LOG_LINES).joinToString("\n")
     }
 }
