@@ -5,8 +5,8 @@
     <string name="nav_history">執行紀錄</string>
     <string name="nav_settings">設定</string>
 
-    <string name="install_confirm_title">安裝 KernelSU？</string>
-    <string name="install_confirm_body">應用程式將驗證支援設定檔，然後從 GitHub 下載並執行 exploit 與 KernelSU payload。</string>
+    <string name="install_confirm_title">安裝 KernelSU Next？</string>
+    <string name="install_confirm_body">應用程式將驗證裝置與韌體，準備應用程式內建的相容 payload，然後使用 KernelSU Next 執行 exploit。</string>
 
     <string name="action_confirm">確認</string>
     <string name="action_cancel">取消</string>
@@ -61,8 +61,8 @@
 
     <string name="step_support_title">支援檢查</string>
     <string name="step_support_detail">驗證裝置與韌體設定檔</string>
-    <string name="step_download_title">下載</string>
-    <string name="step_download_detail">載入支援清單</string>
+    <string name="step_download_title">選擇 payload</string>
+    <string name="step_download_detail">選擇並準備內建於應用程式的相容二進位檔</string>
     <string name="step_exploit_title">核心 exploit</string>
     <string name="step_exploit_detail">取得 bootstrap root</string>
     <string name="step_ksu_title">載入 KernelSU</string>

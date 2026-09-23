@@ -5,7 +5,7 @@
     <string name="nav_history">Historique</string>
     <string name="nav_settings">Paramètres</string>
     <string name="install_confirm_title">Installer KernelSU ?</string>
-    <string name="install_confirm_body">L\'application vérifiera le profil de compatibilité, puis téléchargera et exécutera l\'exploit et la charge utile KernelSU depuis GitHub.</string>
+    <string name="install_confirm_body">L\'application vérifiera votre appareil et son firmware, préparera le payload compatible intégré à l\'application, puis exécutera l\'exploit avec KernelSU Next.</string>
     <string name="action_confirm">Confirmer</string>
     <string name="action_cancel">Annuler</string>
     <string name="action_close">Fermer</string>
@@ -58,8 +58,8 @@
     <string name="install_preparing">Préparation…</string>
     <string name="step_support_title">Vérification de compatibilité</string>
     <string name="step_support_detail">Vérifier l\'appareil et le profil du firmware</string>
-    <string name="step_download_title">Téléchargement</string>
-    <string name="step_download_detail">Charger le manifeste de compatibilité</string>
+    <string name="step_download_title">Sélection du payload</string>
+    <string name="step_download_detail">Sélectionner et préparer les binaires compatibles intégrés à l’application</string>
     <string name="step_exploit_title">Exploit du noyau</string>
     <string name="step_exploit_detail">Acquérir les droits root de base</string>
     <string name="step_ksu_title">Charger KernelSU</string>
@@ -67,7 +67,7 @@
     <string name="phase_checking">Vérification de l\'appareil et du firmware pris en charge</string>
     <string name="phase_ready">Prêt à installer</string>
     <string name="phase_downloading">Téléchargement des charges utiles depuis GitHub</string>
-    <string name="phase_exploiting">Cela peut prendre 10 minutes ou plus. Votre appareil peut chauffer ou ne plus répondre.</string>
+    <string name="phase_exploiting">Cela peut prendre 2 minutes ou plus. Votre appareil peut chauffer ou ne plus répondre.</string>
     <string name="phase_loading_ksu">Chargement de KernelSU avec les droits root de base acquis</string>
     <string name="phase_installed">Module KernelSU et canal de contrôle vérifiés</string>
     <string name="phase_failed">Vérifiez le point d\'échec dans le journal ci-dessous</string>

@@ -21,6 +21,7 @@ enum class InstallPhase {
     Checking,
     Ready,
     Downloading,
+    WaitingForBootAllocator,
     Exploiting,
     LoadingKernelSu,
     Installed,
@@ -35,11 +36,14 @@ data class InstallUiState(
     val executionStage: ExecutionStage = ExecutionStage.Preparing,
     val executionDetail: String? = null,
     val rootActive: Boolean = false,
+    val bootAllocatorRemainingMillis: Long? = null,
+    val bootAllocatorTotalMillis: Long? = null,
 ) {
     val busy: Boolean
         get() = phase in setOf(
             InstallPhase.Checking,
             InstallPhase.Downloading,
+            InstallPhase.WaitingForBootAllocator,
             InstallPhase.Exploiting,
             InstallPhase.LoadingKernelSu,
         )
@@ -277,6 +281,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             processBuilder.start()
         }
         val captured = StringBuilder()
+        val bootAllocatorTracker = BootAllocatorLogTracker()
 
         try {
             val startedAt = SystemClock.elapsedRealtime()
@@ -291,6 +296,10 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                     lastProgressAt = SystemClock.elapsedRealtime()
                 }
                 val now = SystemClock.elapsedRealtime()
+                val bootWindow = bootAllocatorTracker.update(captured.toString(), now)
+                updateBootAllocatorState(bootWindow, now)
+                // The launcher can be silent throughout the timed quiet window.
+                if (bootWindow != null) lastProgressAt = now
                 if (chunk.isNotEmpty() && now - lastUiPublishAt >= UI_PUBLISH_MILLIS) {
                     val persist = now - lastHistorySaveAt >= HISTORY_SAVE_MILLIS
                     publishExploitLog(logPrefix, captured.toString(), persist)
@@ -311,6 +320,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             val rawLog = captured.toString()
             cacheP0Offset(bootToken, rawLog)
             publishExploitLog(logPrefix, rawLog, persist = true)
+            updateBootAllocatorState(null, SystemClock.elapsedRealtime())
             val earlyOutput = rawLog.trim()
             require(exitCode == 0) {
                 app.getString(
@@ -371,6 +381,27 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             executionDetail = progress.detail ?: mutableState.value.executionDetail,
         )
         if (persist) updateHistoryLog()
+    }
+
+    private fun updateBootAllocatorState(window: BootAllocatorWindow?, nowMillis: Long) {
+        val current = mutableState.value
+        if (window != null) {
+            mutableState.value = current.copy(
+                phase = InstallPhase.WaitingForBootAllocator,
+                // Keep the main title on the exploit phase; the subtitle carries
+                // the boot allocator state and remaining time.
+                message = app.getString(R.string.status_exploit_running),
+                bootAllocatorRemainingMillis = window.remainingMillis(nowMillis),
+                bootAllocatorTotalMillis = window.totalMillis,
+            )
+        } else if (current.phase == InstallPhase.WaitingForBootAllocator) {
+            mutableState.value = current.copy(
+                phase = InstallPhase.Exploiting,
+                message = app.getString(R.string.status_exploit_running),
+                bootAllocatorRemainingMillis = null,
+                bootAllocatorTotalMillis = null,
+            )
+        }
     }
 
     private fun installKernelSu(payloads: VerifiedPayloads) {
@@ -538,7 +569,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         val stage = when (phase) {
             InstallPhase.Checking, InstallPhase.Ready, InstallPhase.Downloading ->
                 ExecutionStage.Preparing
-            InstallPhase.Exploiting -> mutableState.value.executionStage
+            InstallPhase.WaitingForBootAllocator, InstallPhase.Exploiting -> mutableState.value.executionStage
             InstallPhase.LoadingKernelSu -> ExecutionStage.LoadingKernelSu
             InstallPhase.Installed -> ExecutionStage.VerifyingRoot
             InstallPhase.Failed -> mutableState.value.executionStage
@@ -548,6 +579,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             message = message,
             executionStage = stage,
             rootActive = phase == InstallPhase.Installed || mutableState.value.rootActive,
+            bootAllocatorRemainingMillis = null,
+            bootAllocatorTotalMillis = null,
         )
         appendLog("[*] $message")
     }
