@@ -2,6 +2,40 @@
   "schemaVersion": 3,
   "payloads": [
     {
+      "payloadId": "dm3q-S918BXXSAFZF5",
+      "displayName": "Galaxy S23 Ultra SM-S918B | S918BXXSAFZF5 | KernelSU",
+      "models": [
+        "SM-S918B"
+      ],
+      "kernelVersions": [
+        "5.15.189"
+      ],
+      "buildDisplays": [
+        "BP4A.251205.006.S918BXXSAFZF5"
+      ],
+      "fingerprints": [
+        "samsung/dm3qxxx/dm3q:16/BP4A.251205.006/S918BXXSAFZF5:user/release-keys"
+      ],
+      "kernelReleases": [
+        "5.15.189-android13-8-33413713-abS918BXXSAFZF5"
+      ],
+      "kernelVersionInfos": [
+        "#1 SMP PREEMPT Tue Jun 9 09:47:44 UTC 2026"
+      ],
+      "exploit": {
+        "url": "asset://cve-2026-43499-app-afzf5.so",
+        "size": 131072
+      },
+      "kernelsu": {
+        "url": "asset://ksud-f731u-kdp-afzf5",
+        "size": 6756208
+      },
+      "helper": {
+        "url": "asset://libcve43499root-afzf5.so",
+        "size": 23640
+      }
+    },
+    {
       "payloadId": "dm3q-S918BXXUAZZHL-ksunext",
       "displayName": "Galaxy S23 Ultra SM-S918B | S918BXXUAZZHL | KernelSU Next",
       "models": ["SM-S918B"],
