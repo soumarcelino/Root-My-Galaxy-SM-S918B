@@ -1,6 +1,8 @@
 # Android/Gradle outputs
 **/.gradle/
 **/build/
+!/afzh3-open-payload-engine/build/
+!/zzhl-open-payload-engine/build/
 **/.cxx/
 local.properties
 

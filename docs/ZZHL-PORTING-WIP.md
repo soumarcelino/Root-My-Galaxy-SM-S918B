@@ -1,4 +1,24 @@
-# Porting ZZHL — registro completo
+# Porting ZZHL — registro WIP
+
+## Verificação atual — 2026-09-21
+
+O perfil `dm3q-S918BXXUAZZHL-ksunext` já está no manifesto Android e no
+catálogo desktop, separado dos perfis AFZG1 e AFZH3. A conexão ADB
+`RXCX602E20X` confirmou modelo `SM-S918B`, device `dm3q`, build display,
+fingerprint, kernel release e kernel version exatamente iguais aos valores do
+perfil. O `kernel.raw` em `build-do-firmware/dump/` tem SHA-256
+`4e4c47864ed87eed80df0a7b9bf39281936b77b6974bde8c8d9e94711db878e8`.
+Uma nova derivação com `tools/derive_zzhl_target.py` reproduziu integralmente
+`ZZHL/derived-target.json`: 29 endereços e 10 layouts BTF. A tabela P0 gerada
+contém os mesmos valores do header existente; somente a formatação difere.
+
+O APK inclui payload ZZHL SHA-256
+`001a13abc84ae963b884eadcd3d919c22a030d3b5c512bdb8113f2ee4c39cf1d`
+e helper SHA-256
+`eb2678570acd4e207aaa7d6c6bf3f0eab1d42341af403698e3ed70aeb3e0f651`.
+O `ksud-f731u-kdp` continua compartilhado e sua compatibilidade com ZZHL
+continua sem prova. Esta auditoria confirma identidade e integridade local;
+não constitui nova prova de root ou de estabilidade.
 
 ## Alvo
 

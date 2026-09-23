@@ -208,6 +208,6 @@ class PayloadRepository(private val context: Context) {
         private const val MAX_COMMIT_RESPONSE_BYTES = 16 * 1024
         private const val MAX_MANIFEST_BYTES = 256 * 1024
         private const val LAUNCHER_ASSET = "stability-launcher"
-        private const val LAUNCHER_SIZE = 15_832L
+        private const val LAUNCHER_SIZE = 16_616L
     }
 }

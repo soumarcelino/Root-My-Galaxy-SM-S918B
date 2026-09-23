@@ -1439,7 +1439,7 @@ int run_p0_pipe_oracle_diagnostic(int fd) {
 /* Read-only KASLR leak via the tracefs sched_blocked_reason event. Never
  * touches a real futex/rt_mutex object -- confirmed correct against this
  * exact device (base=0xffffffc008170000, matched /proc/kallsyms _text
- * exactly) in oss-clone-afzh3/src/kaslr.c this session, itself adapted
+ * exactly) in afzh3-open-payload-engine/src/kaslr.c this session, itself adapted
  * from src/slide.c:slide_tracefs_leak_kernel_base (already used by the
  * non-APP_PAYLOAD build). Reverse-engineered from
  * cve-2026-43499-app-afzh3.so's FUN_0010597c: that binary's own

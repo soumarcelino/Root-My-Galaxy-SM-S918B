@@ -1,0 +1,21 @@
+*.o
+*.d
+*.log
+*.gcda
+*.gcno
+*.profraw
+*.profdata
+core
+core.*
+.DS_Store
+.cache/
+.clangd/
+compile_commands.json
+__pycache__/
+*.pyc
+evidence/
+
+# Build intermediates and diagnostics. Keep only distributable payloads.
+/build/*
+!/build/app_main
+!/build/payload.so

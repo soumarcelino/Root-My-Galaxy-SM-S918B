@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "name": "dm3q-S918BXXSAFZH3",
+  "device": "dm3q",
+  "model": "SM-S918B",
+  "build": "S918BXXSAFZH3",
+  "kernel": "5.15.189-android13-8-33413713-abS918BXXSAFZH3",
+  "validated_payload_sha256": "24c3a3de7592b62d68747e6e66b26a679aa62d71cb6cc4a622f2bb0d1d2b765e",
+  "checks": [
+    {"name": "ashmem_misc_fops", "file": "src/main.c", "literal": "0x02bfcf28", "minimum": 1},
+    {"name": "real_ashmem_fops", "file": "src/main.c", "literal": "0x0200d4b8", "minimum": 1},
+    {"name": "init_task", "file": "src/main.c", "literal": "0x02c05080", "minimum": 1},
+    {"name": "selinux_enforcing", "file": "src/root_umh.c", "literal": "0x02d8e5c0", "minimum": 1},
+    {"name": "system_unbound_wq", "file": "src/root_umh.c", "literal": "0x02a90800", "minimum": 1},
+    {"name": "call_usermodehelper_exec_work", "file": "src/root_umh.c", "literal": "0x001045d0", "minimum": 1},
+    {"name": "kmalloc_caches", "file": "src/pipe_physrw.c", "literal": "0x02064478", "minimum": 1},
+    {"name": "anon_pipe_buf_ops", "file": "src/pipe_physrw.c", "literal": "0x01e7f460", "minimum": 1},
+    {"name": "skb_send_size", "file": "src/pipe_physrw.c", "literal": "0x8e80", "minimum": 1},
+    {"name": "pipe_count", "file": "src/pipe_physrw.c", "literal": "#define OSS_PIPE_COUNT 240", "minimum": 1},
+    {"name": "pipe_slots", "file": "src/pipe_physrw.c", "literal": "#define OSS_PIPE_SLOTS 32", "minimum": 1},
+    {"name": "fake_fops_offset", "file": "src/main.c", "literal": "0x1180", "minimum": 1},
+    {"name": "fake_work_offset", "file": "src/root_umh.c", "literal": "0x6000", "minimum": 1},
+    {"name": "umh_data_offset", "file": "src/root_umh.c", "literal": "0x6200", "minimum": 1},
+    {"name": "pipe_proof_offset", "file": "src/pipe_physrw.c", "literal": "0x7100", "minimum": 1}
+  ]
+}

@@ -1,0 +1,24 @@
+*.o
+*.d
+*.log
+*.gcda
+*.gcno
+*.profraw
+*.profdata
+core
+core.*
+.DS_Store
+.cache/
+.clangd/
+compile_commands.json
+__pycache__/
+*.pyc
+evidence/
+/zzhl-root-snapshot-*/
+
+# Build intermediates and diagnostics. Keep only distributable payloads.
+/build/*
+!/build/app_main
+!/build/oss_clone_payload.so
+!/build/oss_clone_p0_zzhl.so
+!/build/stability-launcher-zzhl

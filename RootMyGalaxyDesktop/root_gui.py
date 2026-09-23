@@ -16,19 +16,47 @@ from pathlib import Path
 from PyQt6.QtCore import QProcess, QTimer
 from PyQt6.QtGui import QCloseEvent, QFont
 from PyQt6.QtWidgets import (
-    QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QMainWindow,
-    QMessageBox, QProgressBar, QPushButton, QStyleFactory, QTextEdit,
-    QVBoxLayout, QWidget,
+    QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
+    QMainWindow, QMessageBox, QProgressBar, QPushButton, QStyleFactory,
+    QTextEdit, QVBoxLayout, QWidget,
 )
 
 
 ANSI_ESCAPE = re.compile(r"(?:\x1b|␛)\[[0-?]*[ -/]*[@-~]")
 ROOT_RE = re.compile(r"uid=0(?:\(root\))?")
+METRIC_RE = re.compile(r"^metric (.+)$", re.MULTILINE)
+
+# Mesmas fontes e awk do gate do launcher (read_device_metrics em
+# tools/validate-two-boots.sh): MemAvailable, temperatura de thermal_zone,
+# loadavg, tarefas executáveis e PSI some/avg10 de cpu/memory/io. Emite uma
+# linha "metric k=v ..." consumida por update_metrics; roda dentro do mesmo
+# adb shell do probe de root, sem abrir conexão concorrente.
+METRICS_SH = (
+    "mem=$(awk '/^MemAvailable:/{print $2;exit}' /proc/meminfo); "
+    "read up _rest < /proc/uptime; "
+    "load=$(awk '{print $1}' /proc/loadavg); "
+    "run=$(awk '{split($4,a,\"/\");print a[1]}' /proc/loadavg); "
+    "cpu=$(awk '/^some /{for(i=1;i<=NF;i++)if($i~/^avg10=/){sub(\"avg10=\",\"\",$i);print $i;exit}}' /proc/pressure/cpu); "
+    "mp=$(awk '/^some /{for(i=1;i<=NF;i++)if($i~/^avg10=/){sub(\"avg10=\",\"\",$i);print $i;exit}}' /proc/pressure/memory); "
+    "io=$(awk '/^some /{for(i=1;i<=NF;i++)if($i~/^avg10=/){sub(\"avg10=\",\"\",$i);print $i;exit}}' /proc/pressure/io); "
+    "temp=0; for z in /sys/class/thermal/thermal_zone*/temp; do "
+    "v=$(cat $z 2>/dev/null||true); case $v in *[!0-9]*|'')continue;; esac; "
+    "[ $v -lt 200000 ]&&[ $v -gt $temp ]&&temp=$v; done; "
+    "printf 'metric mem=%s temp=%s load=%s run=%s cpu=%s mp=%s io=%s up=%s\\n' "
+    "$mem $temp $load $run $cpu $mp $io $up"
+)
+# Limiares idênticos ao gate host (validate-two-boots.sh:146-152).
+METRIC_MIN_MEM_KB = 1048576
+METRIC_MAX_TEMP_MC = 45000
+METRIC_MAX_RUNNABLE = 8
+METRIC_PSI_MAX = {"cpu": 30.0, "mp": 5.0, "io": 10.0}
+# neutral vazio: usa cor de texto da palette (adapta ao tema claro/escuro).
+METRIC_COLORS = {"ok": "#16a34a", "warn": "#ef4444", "neutral": ""}
 STAGES = (
     ("Preparando a mochila", "Enviando helper e payload testados para o celular.", "📦",
      ("preparando payload",)),
     ("Esperando o momento certo", "Launcher local mede temperatura, memória e pressão.", "🌡️",
-     ("[launcher] gate conservador",)),
+     ("[launcher] gate ",)),
     ("Iniciando a jornada", "O payload começou; agora cada mudança é acompanhada pelos logs.", "🚀",
      ("starting exploit",)),
     ("Encontrando o kernel", "Descobrindo onde o kernel está carregado neste boot.", "🧭",
@@ -121,11 +149,11 @@ class RootWindow(QMainWindow):
         self.devices = QComboBox()
         self.devices.setMinimumWidth(430)
         self.devices.currentIndexChanged.connect(self.device_changed)
-        self.refresh_button = QPushButton("Atualizar")
+        self.refresh_button = QPushButton("🔄 Atualizar")
         self.refresh_button.clicked.connect(self.refresh_devices)
-        self.reboot_button = QPushButton("Reiniciar")
+        self.reboot_button = QPushButton("♻️ Reiniciar")
         self.reboot_button.clicked.connect(self.reboot_device)
-        device_row.addWidget(QLabel("Dispositivo ADB:"))
+        device_row.addWidget(QLabel("📱 Dispositivo ADB:"))
         device_row.addWidget(self.devices, 1)
         device_row.addWidget(self.refresh_button)
         device_row.addWidget(self.reboot_button)
@@ -135,15 +163,17 @@ class RootWindow(QMainWindow):
         live_state.setObjectName("liveState")
         live_layout = QHBoxLayout(live_state)
         live_layout.setContentsMargins(12, 8, 12, 8)
-        self.connection_label = QLabel("ADB · verificando")
-        self.boot_label = QLabel("Sistema · verificando")
-        self.root_live_label = QLabel("Root · verificando")
+        self.connection_label = QLabel("🔌 ADB · verificando")
+        self.boot_label = QLabel("🤖 Sistema · verificando")
+        self.root_live_label = QLabel("🔓 Root · verificando")
         live_layout.addWidget(self.connection_label)
         live_layout.addStretch()
         live_layout.addWidget(self.boot_label)
         live_layout.addStretch()
         live_layout.addWidget(self.root_live_label)
         body.addWidget(live_state)
+
+        body.addWidget(self._build_metrics_panel())
 
         stage_card = QFrame()
         stage_card.setObjectName("stageCard")
@@ -206,6 +236,13 @@ class RootWindow(QMainWindow):
             #stageIcon { font-size: 26px; }
             #stageDescription { color: #a1a1aa; }
             #liveState { border: 1px solid palette(mid); border-radius: 8px; }
+            #metricsCard { background: palette(alternate-base);
+                           border: 1px solid palette(mid); border-radius: 10px; }
+            #metricTitle { font-weight: 700; color: palette(text); font-size: 13px;
+                           padding-bottom: 2px; }
+            #metricCaption { color: #8b8ea0; font-size: 11px; font-weight: 600; }
+            #metricValue { font-size: 17px; font-weight: 800;
+                           font-family: "JetBrainsMono Nerd Font Mono", monospace; }
             #badge { border: 1px solid palette(mid); border-radius: 10px;
                      padding: 6px 12px; font-weight: 700; }
             QTextEdit { background: #0d0f18; color: #fffaf3;
@@ -214,6 +251,132 @@ class RootWindow(QMainWindow):
             QPushButton { padding: 7px 15px; }
             QComboBox { padding: 6px 10px; }
         """)
+
+    # Ordem, emoji e rótulos do painel realtime; chave casa com METRICS_SH.
+    METRIC_FIELDS = (
+        ("mem", "🧠 Memória livre"),
+        ("temp", "🌡️ Temperatura"),
+        ("run", "🏃 Tarefas exec."),
+        ("load", "📈 Carga 1m"),
+        ("cpu", "⚡ PSI CPU"),
+        ("mp", "💾 PSI memória"),
+        ("io", "💽 PSI I/O"),
+        ("up", "⏱️ Uptime"),
+    )
+    # Emoji de estado anexado ao valor.
+    STATE_EMOJI = {"ok": "✅", "warn": "⚠️", "neutral": "➖"}
+
+    def _build_metrics_panel(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("metricsCard")
+        grid = QGridLayout(card)
+        grid.setContentsMargins(12, 9, 12, 9)
+        grid.setHorizontalSpacing(18)
+        grid.setVerticalSpacing(6)
+        title = QLabel("📊 Telemetria do dispositivo · tempo real (gate)")
+        title.setObjectName("metricTitle")
+        grid.addWidget(title, 0, 0, 1, 4)
+        self.metric_labels: dict[str, QLabel] = {}
+        for index, (key, caption) in enumerate(self.METRIC_FIELDS):
+            row = 1 + index // 4
+            col = index % 4
+            cell = QVBoxLayout()
+            cell.setSpacing(1)
+            caption_label = QLabel(caption)
+            caption_label.setObjectName("metricCaption")
+            value_label = QLabel("—")
+            value_label.setObjectName("metricValue")
+            cell.addWidget(caption_label)
+            cell.addWidget(value_label)
+            grid.addLayout(cell, row, col)
+            self.metric_labels[key] = value_label
+        return card
+
+    def _set_metric(self, key: str, text: str, state: str) -> None:
+        label = self.metric_labels.get(key)
+        if label is None:
+            return
+        emoji = self.STATE_EMOJI[state]
+        suffix = f"  {emoji}" if text != "—" else ""
+        label.setText(f"{text}{suffix}")
+        color = METRIC_COLORS[state]
+        # neutral sem cor fixa: herda texto da palette (legível claro/escuro).
+        label.setStyleSheet(f"color: {color};" if color else "")
+
+    def clear_metrics(self) -> None:
+        for key in self.metric_labels:
+            self._set_metric(key, "—", "neutral")
+
+    def update_metrics(self, raw: str) -> None:
+        match = METRIC_RE.search(raw)
+        if not match:
+            self.clear_metrics()
+            return
+        values: dict[str, str] = {}
+        for token in match.group(1).split():
+            if "=" in token:
+                name, _, value = token.partition("=")
+                values[name] = value
+
+        def as_int(name: str) -> int | None:
+            try:
+                return int(values.get(name, ""))
+            except ValueError:
+                return None
+
+        def as_float(name: str) -> float | None:
+            try:
+                return float(values.get(name, ""))
+            except ValueError:
+                return None
+
+        mem_kb = as_int("mem")
+        if mem_kb is None:
+            self._set_metric("mem", "—", "neutral")
+        else:
+            self._set_metric(
+                "mem", f"{mem_kb / 1048576:.2f} GiB",
+                "ok" if mem_kb >= METRIC_MIN_MEM_KB else "warn",
+            )
+
+        temp_mc = as_int("temp")
+        if temp_mc is None:
+            self._set_metric("temp", "—", "neutral")
+        elif temp_mc == 0:
+            self._set_metric("temp", "n/d", "neutral")
+        else:
+            self._set_metric(
+                "temp", f"{temp_mc / 1000:.1f}°C",
+                "ok" if temp_mc <= METRIC_MAX_TEMP_MC else "warn",
+            )
+
+        runnable = as_int("run")
+        if runnable is None:
+            self._set_metric("run", "—", "neutral")
+        else:
+            self._set_metric(
+                "run", str(runnable),
+                "ok" if runnable <= METRIC_MAX_RUNNABLE else "warn",
+            )
+
+        load = as_float("load")
+        self._set_metric("load", f"{load:.2f}" if load is not None else "—", "neutral")
+
+        for key in ("cpu", "mp", "io"):
+            value = as_float(key)
+            if value is None:
+                self._set_metric(key, "—", "neutral")
+            else:
+                self._set_metric(
+                    key, f"{value:.1f}",
+                    "ok" if value <= METRIC_PSI_MAX[key] else "warn",
+                )
+
+        up = as_float("up")
+        if up is None:
+            self._set_metric("up", "—", "neutral")
+        else:
+            self._set_metric("up", f"{int(up) // 60}m{int(up) % 60:02d}s", "neutral")
 
     def refresh_devices(self) -> None:
         selected = str(self.devices.currentData() or "")
@@ -265,17 +428,18 @@ class RootWindow(QMainWindow):
         self.start_button.setEnabled(False)
         self.reboot_button.setEnabled(bool(serial) and idle)
         if serial:
-            self.connection_label.setText("ADB · conectado")
-            self.boot_label.setText("Sistema · verificando")
-            self.root_live_label.setText("Root · verificando")
+            self.connection_label.setText("🔌 ADB · conectado")
+            self.boot_label.setText("🤖 Sistema · verificando")
+            self.root_live_label.setText("🔓 Root · verificando")
             self.status_label.setStyleSheet("")
             self.status_label.setText(f"Verificando estado de {serial}…")
             QTimer.singleShot(0, self.check_root_status)
         else:
-            self.connection_label.setText("ADB · desconectado")
-            self.boot_label.setText("Sistema · indisponível")
-            self.root_live_label.setText("Root · desconhecido")
+            self.connection_label.setText("🔌 ADB · desconectado")
+            self.boot_label.setText("🤖 Sistema · indisponível")
+            self.root_live_label.setText("🔓 Root · desconhecido")
             self.reboot_button.setEnabled(False)
+            self.clear_metrics()
 
     def check_root_status(self) -> None:
         if (
@@ -296,6 +460,7 @@ class RootWindow(QMainWindow):
         script = (
             "printf 'boot=%s\\n' \"$(getprop sys.boot_completed)\"; "
             "printf 'boot_id=%s\\n' \"$(cat /proc/sys/kernel/random/boot_id)\"; "
+            + METRICS_SH + "; "
             "/system/bin/su -c id 2>/dev/null || true"
         )
         self.root_probe_process.start(
@@ -309,6 +474,10 @@ class RootWindow(QMainWindow):
         self.root_probe_process.deleteLater()
         self.root_probe_process = None
         connected = exit_code == 0 and "boot=" in stdout
+        if connected:
+            self.update_metrics(stdout)
+        else:
+            self.clear_metrics()
         booted = "boot=1" in stdout
         rooted = bool(ROOT_RE.search(stdout))
         boot_id_match = re.search(r"^boot_id=([0-9a-f-]+)$", stdout, re.MULTILINE)
@@ -328,9 +497,9 @@ class RootWindow(QMainWindow):
             self.mutation_possible = False
         if boot_id:
             self.current_boot_id = boot_id
-        self.connection_label.setText("ADB · conectado" if connected else "ADB · desconectado")
-        self.boot_label.setText("Sistema · pronto" if booted else "Sistema · iniciando")
-        self.root_live_label.setText("Root · ativo" if rooted else "Root · inativo")
+        self.connection_label.setText("🔌 ADB · conectado" if connected else "🔌 ADB · desconectado")
+        self.boot_label.setText("🤖 Sistema · pronto" if booted else "🤖 Sistema · iniciando")
+        self.root_live_label.setText("🔓 Root · ativo" if rooted else "🔓 Root · inativo")
         if rooted:
             self.reboot_required = False
             self.clear_unsafe_boot()
@@ -354,8 +523,9 @@ class RootWindow(QMainWindow):
         if self.root_probe_process:
             self.root_probe_process.deleteLater()
             self.root_probe_process = None
-        self.connection_label.setText("ADB · erro")
-        self.root_live_label.setText("Root · desconhecido")
+        self.connection_label.setText("🔌 ADB · erro")
+        self.root_live_label.setText("🔓 Root · desconhecido")
+        self.clear_metrics()
 
     def mark_unsafe_boot(self) -> None:
         if not self.current_boot_id:
@@ -457,9 +627,9 @@ class RootWindow(QMainWindow):
         self.stage_description.setText(
             "Aguardando o Android voltar e o monitor confirmar o novo estado."
         )
-        self.connection_label.setText("ADB · reiniciando")
-        self.boot_label.setText("Sistema · reiniciando")
-        self.root_live_label.setText("Root · será removido")
+        self.connection_label.setText("🔌 ADB · reiniciando")
+        self.boot_label.setText("🤖 Sistema · reiniciando")
+        self.root_live_label.setText("🔓 Root · será removido")
         self.start_button.setEnabled(False)
         self.refresh_button.setEnabled(False)
         self.reboot_button.setEnabled(False)
@@ -478,9 +648,9 @@ class RootWindow(QMainWindow):
             self.reboot_button.setEnabled(True)
             return
         self.append_log("[GUI] Reboot aceito; aguardando ADB reconectar…")
-        self.connection_label.setText("ADB · aguardando")
-        self.boot_label.setText("Sistema · iniciando")
-        self.root_live_label.setText("Root · inativo")
+        self.connection_label.setText("🔌 ADB · aguardando")
+        self.boot_label.setText("🤖 Sistema · iniciando")
+        self.root_live_label.setText("🔓 Root · inativo")
         self.reconnect_process = QProcess(self)
         self.reconnect_process.finished.connect(self.reconnect_finished)
         self.reconnect_process.errorOccurred.connect(self.reconnect_error)
@@ -502,7 +672,7 @@ class RootWindow(QMainWindow):
             self.reconnect_process.deleteLater()
             self.reconnect_process = None
         self.append_log("[GUI] ADB reconectado; aguardando Android finalizar boot.")
-        self.connection_label.setText("ADB · conectado")
+        self.connection_label.setText("🔌 ADB · conectado")
         self.refresh_button.setEnabled(True)
         QTimer.singleShot(1500, self.check_root_status)
 
@@ -564,7 +734,7 @@ class RootWindow(QMainWindow):
         lowered = line.lower()
         if lowered.startswith("[launcher] gate="):
             match = re.search(
-                r"gate=(\d+/5).*temp=([^ ]+) mem=([^ ]+) runnable=(\d+).*"
+                r"gate=(\d+/\d+).*temp=([^ ]+) mem=([^ ]+) runnable=(\d+).*"
                 r"psi=([^ ]+)", line
             )
             if match:

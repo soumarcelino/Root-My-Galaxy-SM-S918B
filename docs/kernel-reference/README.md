@@ -102,7 +102,7 @@ Ghidra address = file offset + `0x100000` (its default ELF load base);
 r2/objdump addresses used elsewhere this session = raw file offset, no
 bias. `FUN_00106288`+`FUN_001061ac` (mm_struct spray + fake-waiter
 builder) and `FUN_0010597c`/`FUN_0010757c` (tracefs KASLR leak) are the
-two functions actually ported into `oss-clone-afzh3/` so far
+two functions actually ported into `afzh3-open-payload-engine/` so far
 (`src/groom.c`, `src/fops_install.c`, `src/kaslr.c`). Known BOLT
 decompiler bug: Ghidra silently drops reachable blocks as "unreachable"
 in some functions (confirmed on `FUN_00103e18`/`FUN_00104300` via
@@ -153,7 +153,7 @@ after `.fops` in the struct is untouched -- confirmed safe).
 Net effect: after the corruption fires, `ashmem_misc->fops` becomes
 `page_base + 0x1180`. Every subsequent `/dev/ashmem` open on the WHOLE
 SYSTEM (not just our own process) then dereferences THAT address as
-the live `file_operations` table. `oss-clone-afzh3/src/fops_install.c`
+the live `file_operations` table. `afzh3-open-payload-engine/src/fops_install.c`
 originally only populated a fake fops table at `page_base+FOPS_OFF
 (0x2000)` -- `page_base+0x1180` was left zeroed by the page-wide
 `memset`, i.e. a NULL-deref waiting for the next `/dev/ashmem` open by
@@ -171,7 +171,7 @@ SIMPLE primitive: open a fresh `/dev/ashmem` fd, `pread64`/`pwrite64`
 through it (`FUN_00107138`/`FUN_00107058`, confirmed via raw r2 disasm
 -- thin `__pread_chk`/`__pwrite_chk` wrappers, signature `(fd,
 target_kernel_addr, buf, len)`). Ported verbatim as
-`oss-clone-afzh3/src/aar_aaw.c`. **Never yet proven to reach real
+`afzh3-open-payload-engine/src/aar_aaw.c`. **Never yet proven to reach real
 kernel memory on-device** -- every read attempt so far (9 real device
 runs) returned `EINVAL`, which is normal/expected ashmem behavior for
 an uncorrupted fd (ashmem requires `ioctl(ASHMEM_SET_SIZE)` before
@@ -721,7 +721,7 @@ yet a live concern.
 
 Directly resolves whether `root_umh.c`'s substitution of the simple
 ashmem-based primitive for the real pipe_buffer-based one is viable
-long-term. It is not -- see `oss-clone-afzh3/STATUS.md`'s "CORRECTION
+long-term. It is not -- see `afzh3-open-payload-engine/STATUS.md`'s "CORRECTION
 to items 5/3" section for the full writeup (kept there to avoid
 duplicating the same evidence in two places): `FUN_00108320` resets
 `DAT_0010daa0 = 0` before every retry, it starts at 0 on the very first
@@ -749,12 +749,12 @@ trampolines with no clean function boundaries
 byte-exact, twice-verified standard as `groom.c`/`fops_install.c`/
 `futex_trigger.c` (which ARE complete and on-device tested, 8/9 clean)
 is a multi-session-scale task, not a same-session continuation.
-`oss-clone-afzh3/src/root_umh.c` remains a verified-equivalent-purpose
+`afzh3-open-payload-engine/src/root_umh.c` remains a verified-equivalent-purpose
 substitute (confirmed via exact `target.h` offset matches inside
 `FUN_00108fa4`'s decompile) rather than a literal port of this
 subsystem.
 
-`oss-clone-afzh3/src/root_umh.c` currently substitutes a
+`afzh3-open-payload-engine/src/root_umh.c` currently substitutes a
 verified-equivalent-purpose (same `CALL_USERMODEHELPER_EXEC_WORK_OFF`/
 `SYSTEM_UNBOUND_WQ_OFF`/`WQ_DFL_PWQ_OFF`/etc. `target.h` constants,
 cross-confirmed via exact hex match inside `FUN_00108fa4`'s decompile)
@@ -766,7 +766,7 @@ end-to-end (blocked on the ashmem primitive's `EINVAL`s above).
 
 ## v3 second-order-deadlock kprobe trace: full decode (2026-09-17, device disconnected)
 
-`test_root_v3` fired once on-device (see `oss-clone-afzh3/STATUS.md`
+`test_root_v3` fired once on-device (see `afzh3-open-payload-engine/STATUS.md`
 for the raw output and the hypothesis it tested) right before the
 device was disconnected for the night. This is the follow-up decode of
 the kprobe trace it produced, done statically (hex conversion + cross-
@@ -1128,7 +1128,7 @@ BOLT-fragmented `FUN_00108eec`-`FUN_00108f98` trampoline cluster, or
 from `app_main` itself after all three threads join, neither
 decoded this session.
 
-**Practical port decision made from this evidence**: `oss-clone-afzh3`'s
+**Practical port decision made from this evidence**: `afzh3-open-payload-engine`'s
 `v10` futex-trigger variant (see `STATUS.md`, "v10: real SIGUSR1
 handoff protocol, no landing confirmed") stopped calling its
 verify+root_umh callback from inside the waiter thread (matching the
