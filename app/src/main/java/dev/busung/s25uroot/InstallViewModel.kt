@@ -414,9 +414,11 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         } else {
             val source = shellQuote(payloads.kernelSu.absolutePath)
             val stageCommand =
-                "/system/bin/cp $source /data/local/tmp/ksud-s25u-kdp && " +
+                "/system/bin/cp $source /data/local/tmp/ksud-selected && " +
+                    "/system/bin/cp $source /data/local/tmp/ksud-s25u-kdp && " +
                     "/system/bin/cp $source /data/local/tmp/.ksud-stage && " +
-                    "/system/bin/chmod 755 /data/local/tmp/ksud-s25u-kdp /data/local/tmp/.ksud-stage"
+                    "/system/bin/chmod 755 /data/local/tmp/ksud-selected " +
+                    "/data/local/tmp/ksud-s25u-kdp /data/local/tmp/.ksud-stage"
             val stage = runHelper(helper, "-c", stageCommand)
             require(stage.code == 0) { app.getString(R.string.error_ksu_stage, stage.output) }
             appendLog(app.getString(R.string.log_ksu_staged))

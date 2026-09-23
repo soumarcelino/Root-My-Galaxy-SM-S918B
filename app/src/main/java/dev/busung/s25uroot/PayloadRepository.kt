@@ -47,12 +47,16 @@ class PayloadRepository(private val context: Context) {
         val helper = bundledAssetFor(profile.helper, directory, onProgress,
             context.getString(R.string.artifact_helper_bundled))
             ?: error("bundled helper missing: ${profile.helper.url}")
-        val launcher = bundledAsset(
+        val launcherLabel = context.getString(R.string.artifact_launcher_bundled)
+        val launcher = profile.launcher?.let { artifact ->
+            bundledAssetFor(artifact, directory, onProgress, launcherLabel)
+                ?: error("bundled launcher missing: ${artifact.url}")
+        } ?: bundledAsset(
             LAUNCHER_ASSET,
             LAUNCHER_SIZE,
             directory,
             onProgress,
-            context.getString(R.string.artifact_launcher_bundled),
+            launcherLabel,
         ) ?: error("bundled launcher missing: $LAUNCHER_ASSET")
         Os.chmod(exploit.absolutePath, 0b100100100)
         Os.chmod(kernelSu.absolutePath, 0b100100100)
