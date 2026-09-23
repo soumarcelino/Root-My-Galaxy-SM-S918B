@@ -10,11 +10,12 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 from html import escape
 from pathlib import Path
 
 from PyQt6.QtCore import QProcess, QTimer
-from PyQt6.QtGui import QCloseEvent, QFont
+from PyQt6.QtGui import QCloseEvent, QFont, QTextCursor
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QMainWindow, QMessageBox, QProgressBar, QPushButton, QStyleFactory,
@@ -101,10 +102,15 @@ class RootWindow(QMainWindow):
         self.stage_index = 0
         self._stdout_buffer = ""
         self._stderr_buffer = ""
+        self._last_log_time: float | None = None
         self.setWindowTitle("Root My Galaxy · AFZH3 Open Source")
         self.resize(980, 680)
         self.setMinimumSize(780, 520)
         self._build_ui()
+        self.log_timer = QTimer(self)
+        self.log_timer.setInterval(100)
+        self.log_timer.timeout.connect(self.update_log_timer)
+        self.log_timer.start()
         self.root_timer = QTimer(self)
         self.root_timer.setInterval(2000)
         self.root_timer.timeout.connect(self.check_root_status)
@@ -554,6 +560,7 @@ class RootWindow(QMainWindow):
             return
 
         self.output.clear()
+        self._last_log_time = None
         self.progress.setValue(0)
         self.stage_index = 0
         self.runner_exit_code = None
@@ -711,6 +718,9 @@ class RootWindow(QMainWindow):
         clean = ANSI_ESCAPE.sub("", line).strip("\r")
         if not clean:
             return
+        now = time.monotonic()
+        self.update_log_timer(now)
+        self._last_log_time = now
         self.update_stage(clean)
         lowered = clean.lower()
         adb_progress = "file pushed" in lowered or "file pulled" in lowered
@@ -722,9 +732,31 @@ class RootWindow(QMainWindow):
         color = "#ef4444" if semantic_error else (
             "#22c55e" if "[+]" in clean or ROOT_RE.search(clean) else "#fffaf3"
         )
-        self.output.append(f'<span style="color:{color}">{escape(clean)}</span>')
+        self.output.append(f'<span style="color:{color}">[00:00:00.000] {escape(clean)}</span>')
         bar = self.output.verticalScrollBar()
         bar.setValue(bar.maximum())
+
+    def update_log_timer(self, now: float | None = None) -> None:
+        if self._last_log_time is None:
+            return
+        block = self.output.document().lastBlock()
+        match = re.match(r"\[\d+:\d{2}:\d{2}\.\d{3}\]", block.text())
+        if not match:
+            return
+        elapsed_ms = int(((now if now is not None else time.monotonic()) - self._last_log_time) * 1000)
+        hours, remainder = divmod(elapsed_ms, 3_600_000)
+        minutes, remainder = divmod(remainder, 60_000)
+        seconds, milliseconds = divmod(remainder, 1000)
+        timestamp = f"[{hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:03d}]"
+        if match.group() == timestamp:
+            return
+        cursor = QTextCursor(block)
+        cursor.movePosition(
+            QTextCursor.MoveOperation.Right,
+            QTextCursor.MoveMode.KeepAnchor,
+            len(match.group()),
+        )
+        cursor.insertText(timestamp)
 
     def update_stage(self, line: str) -> None:
         lowered = line.lower()
@@ -739,13 +771,13 @@ class RootWindow(QMainWindow):
                     f"{match.group(3)} livres · {match.group(4)} tarefas · "
                     f"PSI {match.group(5)}"
                 )
-        elif "[launcher] estabilidade máxima confirmada" in lowered:
+        elif "[launcher] estabilidade confirmada" in lowered:
             self.stage_description.setText(
-                "Métricas, slab, capacidade de pipes e cooldown foram aprovados."
+                "Métricas, slab e capacidade de pipes foram aprovados."
             )
         elif "[launcher] pipe-gate=pass" in lowered:
             self.stage_description.setText(
-                "Capacidade de 480 pipes aprovada; iniciando cooldown do allocator."
+                "Capacidade de 480 pipes aprovada; iniciando payload."
             )
         if "stage=kernel-mutation-pending" in lowered:
             self.mutation_possible = True

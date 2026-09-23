@@ -391,7 +391,6 @@ int main(int argc, char **argv) {
     return 1;
   }
   int stable = 0;
-  int pipe_verified = 0;
   while (!stopped && elapsed_seconds(&started) < MAX_WAIT_SEC) {
     struct metrics m;
     int valid = collect_metrics(&m);
@@ -402,8 +401,7 @@ int main(int argc, char **argv) {
               "[launcher] gate=%d/%d phase=%s temp=%.1fC mem=%ldMB runnable=%d "
               "load=%.2f psi=%.2f/%.2f/%.2f mm=%ld/%ld slabs=%ld "
               "uptime=%.0fs boot=%d\n",
-              stable, gate.stable_samples,
-              pipe_verified ? "cooldown" : "baseline", m.temp_mc / 1000.0,
+              stable, gate.stable_samples, "baseline", m.temp_mc / 1000.0,
               m.mem_kb / 1024,
               m.runnable, m.load1, m.cpu_psi, m.mem_psi, m.io_psi,
               m.mm_active, m.mm_total, m.mm_slabs, m.uptime,
@@ -413,12 +411,8 @@ int main(int argc, char **argv) {
               gate.stable_samples);
     }
     if (stable >= gate.stable_samples) {
-      if (pipe_verified) break;
       if (pipe_capacity_probe()) {
-        pipe_verified = 1;
-        fprintf(stderr,
-                "[launcher] cooldown: exigindo mais %d amostras após pipe-gate\n",
-                gate.stable_samples);
+        break;
       }
       stable = 0;
     }
@@ -433,7 +427,7 @@ int main(int argc, char **argv) {
     return 1;
   }
   fprintf(stderr,
-          "[launcher] estabilidade máxima confirmada: métricas+slab+pipe+cooldown\n");
+          "[launcher] estabilidade confirmada: métricas+slab+pipe\n");
   if (check_only) return 0;
 
   /* A futex/rtmutex attempt can mutate kernel PI state even when userspace

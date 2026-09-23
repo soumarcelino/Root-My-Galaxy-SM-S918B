@@ -1,6 +1,7 @@
 package dev.busung.s25uroot
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -22,7 +23,7 @@ class ExecutionStageTest {
         val progress = parseExecutionProgress(log)
 
         assertEquals(ExecutionStage.VerifyingRoot, progress.stage)
-        assertTrue(progress.detail.orEmpty().contains("pipe"))
+        assertEquals("Canal de controle do KernelSU confirmado.", progress.detail)
     }
 
     @Test
@@ -34,6 +35,49 @@ class ExecutionStageTest {
         )
 
         assertEquals(ExecutionStage.BuildingPipeBridge, progress.stage)
+        assertNull(progress.detail)
+    }
+
+    @Test
+    fun replaysLatestDeviceRunInOrder() {
+        val log = checkNotNull(javaClass.getResource("/afzh3-last-success.log")).readText()
+        var progress = ExecutionProgress(ExecutionStage.Preparing)
+        val stages = linkedSetOf(progress.stage)
+        log.lineSequence().forEach { line ->
+            progress = parseExecutionProgress(line, progress.stage, progress.detail)
+            stages.add(progress.stage)
+            when {
+                "gate=0/3 phase=baseline" in line ->
+                    assertTrue(progress.detail.orEmpty().startsWith("Estabilização 0/3"))
+                "gate=3/3 phase=cooldown" in line ->
+                    assertTrue(progress.detail.orEmpty().startsWith("Cooldown 3/3"))
+                "pipe-gate=pass" in line ->
+                    assertTrue(progress.detail.orEmpty().contains("aguardando liberação"))
+                "stage=locating-kernel" in line || "stage=temporary-root-ready" in line ->
+                    assertNull(progress.detail)
+            }
+        }
+        assertEquals(ExecutionStage.entries.toList(), stages.toList())
+        assertEquals(parseExecutionProgress(log), progress)
+        assertEquals("Canal de controle do KernelSU confirmado.", progress.detail)
+    }
+
+    @Test
+    fun oldLogCannotReplaceCurrentDetail() {
+        val progress = parseExecutionProgress(
+            "[launcher] pipe-gate=pass pipes=480 target_pages=32",
+            ExecutionStage.VerifyingRoot,
+            "Canal de controle do KernelSU confirmado.",
+        )
+        assertEquals(ExecutionStage.VerifyingRoot, progress.stage)
+        assertEquals("Canal de controle do KernelSU confirmado.", progress.detail)
+    }
+
+    @Test
+    fun acceptsLauncherWithoutCooldown() {
+        val progress = parseExecutionProgress("[launcher] estabilidade confirmada: métricas+slab+pipe")
+        assertEquals(ExecutionStage.Stabilizing, progress.stage)
+        assertTrue(progress.detail.orEmpty().contains("aprovadas"))
     }
 
     @Test

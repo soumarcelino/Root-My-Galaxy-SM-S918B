@@ -18,7 +18,7 @@ data class ExecutionProgress(
 )
 
 private val launcherGatePattern = Regex(
-    "gate=(\\d+/5).*temp=([^ ]+) mem=([^ ]+) runnable=(\\d+).*" +
+    "gate=(\\d+/\\d+).*temp=([^ ]+) mem=([^ ]+) runnable=(\\d+).*" +
         "psi=([^ ]+).*mm=([^ ]+) slabs=([^ ]+)",
 )
 private val exploitAttemptPattern = Regex("exploit attempt=(\\d+)/(\\d+)")
@@ -26,12 +26,21 @@ private val exploitAttemptPattern = Regex("exploit attempt=(\\d+)/(\\d+)")
 internal fun parseExecutionProgress(
     rawLog: String,
     initial: ExecutionStage = ExecutionStage.Preparing,
+    initialDetail: String? = null,
 ): ExecutionProgress {
     var stage = initial
-    var detail: String? = null
+    var detail: String? = initialDetail
 
     fun advance(candidate: ExecutionStage) {
-        if (candidate.ordinal > stage.ordinal) stage = candidate
+        if (candidate.ordinal > stage.ordinal) {
+            stage = candidate
+            detail = null
+        }
+    }
+
+    fun describe(candidate: ExecutionStage, message: String) {
+        advance(candidate)
+        if (stage == candidate) detail = message
     }
 
     rawLog.lineSequence().forEach { rawLine ->
@@ -41,45 +50,63 @@ internal fun parseExecutionProgress(
             lowered.startsWith("[launcher] gate=") -> {
                 advance(ExecutionStage.Stabilizing)
                 launcherGatePattern.find(line)?.let { match ->
-                    detail = "Estável ${match.groupValues[1]} · ${match.groupValues[2]} · " +
+                    val phase = if ("phase=cooldown" in lowered) "Cooldown" else "Estabilização"
+                    describe(ExecutionStage.Stabilizing, "$phase ${match.groupValues[1]} · ${match.groupValues[2]} · " +
                         "${match.groupValues[3]} livres · ${match.groupValues[4]} tarefas · " +
                         "PSI ${match.groupValues[5]} · mm ${match.groupValues[6]} · " +
-                        "${match.groupValues[7]} slabs"
+                        "${match.groupValues[7]} slabs")
                 }
             }
             "[launcher] pipe-gate=pass" in lowered -> {
-                advance(ExecutionStage.Stabilizing)
-                detail = "Capacidade de 480 pipes aprovada; confirmando cooldown."
+                describe(ExecutionStage.Stabilizing, "Capacidade dos pipes aprovada; aguardando liberação do launcher.")
             }
-            "[launcher] estabilidade máxima confirmada" in lowered -> {
-                advance(ExecutionStage.Stabilizing)
-                detail = "Temperatura, pressão, slab, pipes e cooldown aprovados."
+            "[launcher] cooldown:" in lowered -> {
+                describe(ExecutionStage.Stabilizing, "Confirmando estabilidade após o teste dos pipes.")
             }
+            "[launcher] estabilidade confirmada" in lowered ||
+                "[launcher] estabilidade máxima confirmada" in lowered ->
+                describe(ExecutionStage.Stabilizing, "Verificações do launcher aprovadas; aguardando início do payload.")
+            "[launcher] execve:" in lowered || "stage=preparing-kernel-access" in lowered ->
+                advance(ExecutionStage.StartingExploit)
             "starting exploit" in lowered -> advance(ExecutionStage.StartingExploit)
             "exploit attempt=" in lowered -> {
                 advance(ExecutionStage.StartingExploit)
                 exploitAttemptPattern.find(lowered)?.let { match ->
-                    detail = "Tentativa ${match.groupValues[1]} de ${match.groupValues[2]}."
+                    describe(ExecutionStage.StartingExploit, "Tentativa ${match.groupValues[1]} de ${match.groupValues[2]}.")
                 }
             }
             "verify callback never invoked" in lowered -> {
                 detail = "Callback ainda não acionado; repetindo antes de qualquer mutação."
             }
             "stage=locating-kernel" in lowered -> advance(ExecutionStage.LocatingKernel)
+            "stage=kernel-location-ready" in lowered ->
+                describe(ExecutionStage.LocatingKernel, "Kernel localizado; preparando acesso.")
+            "[groom]" in lowered ->
+                describe(ExecutionStage.LocatingKernel, "Kernel localizado; preparando memória para acesso.")
             "stage=verifying-kernel-access" in lowered ->
                 advance(ExecutionStage.VerifyingKernelAccess)
             "stage=starting-temporary-root" in lowered ->
                 advance(ExecutionStage.StartingTemporaryRoot)
+            "stage=kernel-mutation-pending" in lowered ->
+                describe(ExecutionStage.StartingTemporaryRoot, "Etapa crítica em andamento. Não interrompa a execução.")
             "[pipe_rw]" in lowered -> {
                 advance(ExecutionStage.BuildingPipeBridge)
-                detail = when {
-                    "selection accept" in lowered -> "Candidato de pipe validado no mesmo spray."
-                    "ready attempt=" in lowered -> "Ponte de leitura e escrita física comprovada."
-                    else -> detail
+                val message = when {
+                    "selection accept" in lowered -> "Candidato de pipe validado."
+                    "ready attempt=" in lowered -> "Leitura e escrita comprovadas; preparando root temporário."
+                    "candidate test" in lowered -> "Testando acesso pelo candidato selecionado."
+                    "selection" in lowered -> "Procurando um pipe adequado para acesso à memória."
+                    else -> null
                 }
+                if (message != null) describe(ExecutionStage.BuildingPipeBridge, message)
             }
+            "[root_umh] queued" in lowered ->
+                describe(ExecutionStage.BuildingPipeBridge, "Solicitando início do serviço de root temporário.")
+            "[root_umh] result" in lowered ->
+                describe(ExecutionStage.BuildingPipeBridge, "Aguardando confirmação do root temporário.")
             "temporary-root-ready" in lowered -> advance(ExecutionStage.LoadingKernelSu)
-            "kernelsu control verified" in lowered -> advance(ExecutionStage.VerifyingRoot)
+            "kernelsu control verified" in lowered ->
+                describe(ExecutionStage.VerifyingRoot, "Canal de controle do KernelSU confirmado.")
         }
     }
     return ExecutionProgress(stage, detail)

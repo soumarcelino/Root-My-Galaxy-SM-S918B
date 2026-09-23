@@ -370,7 +370,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun publishExploitLog(prefix: String, rawLog: String, persist: Boolean) {
-        val progress = parseExecutionProgress(rawLog, mutableState.value.executionStage)
+        val progress = parseExecutionProgress(rawLog, mutableState.value.executionStage, mutableState.value.executionDetail)
         val completeLog = listOf(prefix, stripAnsi(rawLog))
             .filter(String::isNotBlank)
             .joinToString("\n")
@@ -378,7 +378,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         mutableState.value = mutableState.value.copy(
             log = logTail(completeLog),
             executionStage = progress.stage,
-            executionDetail = progress.detail ?: mutableState.value.executionDetail,
+            executionDetail = progress.detail,
         )
         if (persist) updateHistoryLog()
     }
@@ -580,6 +580,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             phase = phase,
             message = message,
             executionStage = stage,
+            executionDetail = mutableState.value.executionDetail.takeIf { stage == mutableState.value.executionStage },
             rootActive = phase == InstallPhase.Installed || mutableState.value.rootActive,
             bootAllocatorRemainingMillis = null,
             bootAllocatorTotalMillis = null,
@@ -590,12 +591,12 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     private fun appendLog(line: String) {
         val cleanLine = stripAnsi(line).trim()
         if (cleanLine.isBlank()) return
-        val progress = parseExecutionProgress(cleanLine, mutableState.value.executionStage)
+        val progress = parseExecutionProgress(cleanLine, mutableState.value.executionStage, mutableState.value.executionDetail)
         fullRunLog = (fullRunLog + "\n" + cleanLine).trim()
         mutableState.value = mutableState.value.copy(
             log = logTail(fullRunLog),
             executionStage = progress.stage,
-            executionDetail = progress.detail ?: mutableState.value.executionDetail,
+            executionDetail = progress.detail,
         )
         updateHistoryLog()
     }

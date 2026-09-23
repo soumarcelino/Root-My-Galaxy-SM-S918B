@@ -351,7 +351,8 @@ private fun ExecutionJourneyCard(installState: InstallUiState) {
                         style = MaterialTheme.typography.titleMedium,
                     )
                     Text(
-                        text = installState.executionDetail ?: executionStageDetail(stage),
+                        text = installState.executionDetail?.let { localizedExecutionDetail(it) }
+                            ?: executionStageDetail(stage),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -387,6 +388,41 @@ private fun ExecutionJourneyCard(installState: InstallUiState) {
             }
         }
     }
+}
+
+@Composable
+private fun localizedExecutionDetail(detail: String): String {
+    val gate = Regex("^(Estabilização|Cooldown) (\\d+/\\d+) · (.+?) · (.+?) livres · (\\d+) tarefas · PSI (.+?) · mm (.+?) · (\\d+) slabs$")
+        .matchEntire(detail)
+    if (gate != null) {
+        val phase = if (gate.groupValues[1] == "Cooldown")
+            stringResource(R.string.execution_gate_cooldown) else stringResource(R.string.execution_gate_stabilizing)
+        return stringResource(
+            R.string.execution_gate_progress, phase, gate.groupValues[2], gate.groupValues[3],
+            gate.groupValues[4], gate.groupValues[5], gate.groupValues[6],
+            gate.groupValues[7], gate.groupValues[8],
+        )
+    }
+    val attempt = Regex("^Tentativa (\\d+) de (\\d+)\\.$").matchEntire(detail)
+    if (attempt != null) return stringResource(R.string.execution_attempt, attempt.groupValues[1], attempt.groupValues[2])
+    val resource = when (detail) {
+        "Capacidade dos pipes aprovada; aguardando liberação do launcher." -> R.string.execution_pipe_capacity_passed
+        "Confirmando estabilidade após o teste dos pipes." -> R.string.execution_pipe_cooldown
+        "Verificações do launcher aprovadas; aguardando início do payload." -> R.string.execution_launcher_passed
+        "Callback ainda não acionado; repetindo antes de qualquer mutação." -> R.string.execution_callback_retry
+        "Kernel localizado; preparando acesso." -> R.string.execution_kernel_located
+        "Kernel localizado; preparando memória para acesso." -> R.string.execution_memory_preparing
+        "Etapa crítica em andamento. Não interrompa a execução." -> R.string.execution_critical_step
+        "Candidato de pipe validado." -> R.string.execution_pipe_validated
+        "Leitura e escrita comprovadas; preparando root temporário." -> R.string.execution_pipe_ready
+        "Testando acesso pelo candidato selecionado." -> R.string.execution_pipe_testing
+        "Procurando um pipe adequado para acesso à memória." -> R.string.execution_pipe_searching
+        "Solicitando início do serviço de root temporário." -> R.string.execution_root_requesting
+        "Aguardando confirmação do root temporário." -> R.string.execution_root_waiting
+        "Canal de controle do KernelSU confirmado." -> R.string.execution_root_verified
+        else -> return detail
+    }
+    return stringResource(resource)
 }
 
 @Composable
