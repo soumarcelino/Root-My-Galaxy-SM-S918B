@@ -79,11 +79,7 @@ def locate_runner() -> Path:
     if override:
         return Path(override).expanduser().resolve()
     app_dir = Path(__file__).resolve().parent
-    candidates = (
-        app_dir.parent.parent / "ksu-payload-functional" / "simple-root",
-        app_dir.parent / "ksu-payload-functional" / "simple-root",
-    )
-    return next((path for path in candidates if path.is_file()), candidates[0])
+    return app_dir.parent / "simple-root" / "simple-root.sh"
 
 
 class RootWindow(QMainWindow):
@@ -571,7 +567,7 @@ class RootWindow(QMainWindow):
         )
         self.set_result("EXECUTANDO", "#d97706", "Validando runner e dispositivo…")
         self.append_log(f"[GUI] Runner: {self.runner}")
-        payload = self.runner.parent / "assets" / "ksu-payload"
+        payload = self.runner.parent / "assets" / "payload.so"
         if payload.is_file():
             digest = hashlib.sha256(payload.read_bytes()).hexdigest()
             self.append_log(f"[GUI] Payload SHA-256: {digest}")
