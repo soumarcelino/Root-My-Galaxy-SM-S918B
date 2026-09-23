@@ -27,7 +27,7 @@
 #define BOOTSTRAP_SOCK_PATH "/data/local/tmp/temp_su.sock"
 #define HOLD_READY_SOCKET "cve43499_roothold"
 #define SH_PATH "/system/bin/sh"
-#define KSU_LOADER_PATH "/data/local/tmp/ksud-s25u-kdp"
+#define KSU_LOADER_PATH "/data/local/tmp/ksud-selected"
 #define LOGCAT_PATH "/system/bin/logcat"
 
 static uid_t allowed_client_uid = 2000;
@@ -417,9 +417,15 @@ struct ksu_get_info_cmd {
 
 static int verify_kernelsu_control(void) {
   int fd = -1;
-  syscall(SYS_reboot, 0xDEADBEEF, 0xCAFEBABE, 0, &fd);
+  for (unsigned int attempt = 0; attempt < 100 && fd < 0; attempt++) {
+    syscall(SYS_reboot, 0xDEADBEEF, 0xCAFEBABE, 0, &fd);
+    if (fd < 0) {
+      usleep(100000);
+    }
+  }
   if (fd < 0) {
-    dprintf(STDERR_FILENO, "late-load: KernelSU driver fd unavailable\n");
+    dprintf(STDERR_FILENO,
+            "late-load: KernelSU driver fd unavailable after 10s\n");
     return 13;
   }
 
@@ -479,8 +485,9 @@ static int run_kernelsu_late_load(struct su_request *request, int conn) {
       /* Let the downloaded target-specific ksud select its embedded module
        * from the running kernel.  Hard-coding android15-6.6 made the shared
        * loader path unusable for exact 6.1 payloads such as E2S. */
-      execl(LOGCAT_PATH, "logcat", "late-load", "--package-name",
-            "me.weishu.kernelsu", (char *)NULL);
+      execl(LOGCAT_PATH, "logcat", "late-load", "--kmi",
+            "android13-5.15", "--package-name", "com.resukisu.resukisu",
+            (char *)NULL);
       dprintf(STDERR_FILENO, "late-load: exec: %s\n", strerror(errno));
       _exit(12);
     }

@@ -12,6 +12,11 @@ local.properties
 *.tar
 *.tar.*
 *.bin
+kernelsu-next/out/
+simple-root/evidence/
+simple-root/assets/*
+!simple-root/assets/ksud-selected
+!simple-root/assets/android13-5.15_kernelsu.ko
 
 # Local secrets and signing material
 *.jks

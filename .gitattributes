@@ -1,0 +1,2 @@
+# Unified diff context lines require a leading space.
+kernelsu-next/patches/*.patch -whitespace
