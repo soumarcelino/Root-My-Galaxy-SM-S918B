@@ -259,7 +259,7 @@ private val languageOptions = listOf(
 )
 
 private const val KERNEL_SU_MANAGER_URL =
-    "https://github.com/KernelSU-Next/KernelSU-Next/releases/download/v3.3.0/KernelSU_Next_v3.3.0_33214-release.apk"
+    "https://github.com/KernelSU-Next/KernelSU-Next/releases/download/v3.4.0/KernelSU_Next_v3.4.0_33294-release.apk"
 private const val KERNEL_SU_MANAGER_PACKAGE = "com.rifsxd.ksunext"
 private const val KERNEL_SU_HOME_URL = "https://github.com/KernelSU-Next/KernelSU-Next"
 private const val SHIZUKU_MANAGER_PACKAGE = "moe.shizuku.manager"
