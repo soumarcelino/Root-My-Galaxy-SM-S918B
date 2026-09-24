@@ -68,9 +68,10 @@ if [[ ! -x "$LAUNCHER_CC" ]]; then
 fi
 printf '[*] Compilando stability-launcher para Android ARM64/API 35\n'
 mkdir -p "$LAUNCHER_DIR/build" "$ASSET_DIR"
-"$LAUNCHER_CC" -O2 -Wall -Wextra -fPIE -pie \
+"$LAUNCHER_CC" -O2 -Wall -Wextra -Werror -fPIE \
+  -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
   "$LAUNCHER_DIR/stability-launcher.c" \
-  -o "$LAUNCHER_DIR/build/stability-launcher"
+  -pie -Wl,-z,relro,-z,now -o "$LAUNCHER_DIR/build/stability-launcher"
 install -m 755 "$LAUNCHER_DIR/build/stability-launcher" "$ASSET_DIR/stability-launcher"
 
 if [[ ! -f "$ENGINE_DIR/Makefile" ]]; then
@@ -129,9 +130,10 @@ if root_identity="$("${adb_cmd[@]}" shell "/system/bin/su -c 'id'" 2>/dev/null)"
 fi
 
 stage() {
-  local name="$1" target="$2" magic
+  local name="$1" target="$2" source magic
+  source="$REMOTE_ASSETS/$name"
   "${adb_cmd[@]}" shell rm -f "$target"
-  "${adb_cmd[@]}" push "$ASSET_DIR/$name" "$target" >/dev/null
+  "${adb_cmd[@]}" shell cp "$source" "$target"
   "${adb_cmd[@]}" shell chmod 755 "$target"
   magic="$("${adb_cmd[@]}" shell "head -c 4 '$target' | od -An -tx1 | tr -d ' \\n\\r'")"
   if [[ "$magic" != 7f454c46 ]]; then
@@ -206,7 +208,7 @@ while :; do
   if (( SECONDS >= root_deadline )); then
     break
   fi
-  sleep 1
+  sleep 0.25
 done
 if ! grep -q 'uid=0(root)' <<<"$root_identity"; then
   if (( root_command_ok == 0 )); then
