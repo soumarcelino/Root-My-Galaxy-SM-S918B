@@ -8,6 +8,36 @@ laboratory research. Matching open kernel source is under
 `/home/matias/Projects/SM-S918B_16_Opensource/`; closed reference payload is
 `/home/matias/Projects/ksu-payload-functional/assets/ksu-payload`.
 
+## Optimization validation — 2026-09-24
+
+Payload `c8004cdbfcafe68ea59fd2ccbcaebc932bab6b33e5b644ab6c6e0715b6d1d557`
+and launcher `1353437dc6eb504d9c70cb776048c37d80cffe3747d279330276afd971656b53`
+passed campaign `evidence/reliability/20260924T101735Z-soak-10/`: 10/10
+distinct clean boots, zero failures, durations 88/85/89/86/86/89/88/87/87/89
+s (mean 87.4 s, median 87.5 s including reboot), and 55.4–58.9 s from launcher
+start to external root proof. Every run preserved its boot ID, used one payload
+attempt, reached temporary root, verified KernelSU control, and returned
+external `uid=0(root)`.
+
+This campaign validates the complete optimization set. The launcher reads
+boot/uptime/memory/load/PSI first and defers thermal/slab scans until cheap
+thresholds pass; all 10 boots logged 21 deferred samples during boot pressure.
+Sampling uses absolute `CLOCK_MONOTONIC` deadlines at the 2 s baseline cadence.
+The 480-pipe probe runs after one full precheck and before final post-probe
+confirmation; every boot recorded exactly one pass in that order. Wide-margin
+conditions then used the 2×1 s fast confirmation. Early KASLR completed in
+0–3 ms. `KSNITCH_REPEAT=32` remained stable across 10/10 boots.
+
+Pipe preparation now emits machine-readable per-stage telemetry, also parsed
+by `tools/analyze-run-log.py`. All 10 logs parsed as `PASS_ROOT`, with telemetry
+present in 10/10. Prepare time was 5013–5817 ms (mean 5434.9 ms); dominant
+means were pinned-mm 2129.2 ms and collisions 2733.2 ms, followed by cleanup
+387.8 ms. The runner polls `su` every 250 ms; observed confirmation latency was
+50–336 ms. Desktop metrics use shell built-ins rather than spawning `awk`/`cat`
+per field and thermal zone. ARM64 builds with warnings fatal, focused AAR test,
+Python/Bash syntax checks, hardening checks, repository diff checks, parser
+checks, and synchronized CLI/desktop/APK/runtime asset hashes all pass.
+
 ## Current summary — 2026-09-21
 
 Campaign `20260922T003522Z-soak-3` ran the runtime payload
