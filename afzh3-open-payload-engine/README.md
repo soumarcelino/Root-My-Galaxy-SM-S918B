@@ -35,10 +35,13 @@ Complete source chain is connected:
    late-loads KernelSU.
 
 Android app and shared-object variants compile. Host geometry test passes. The
-current artifact `bf41c36892a8fa69eddb761e3bbf7ab2a61b887c213e1aa53686bf92cde33a3f`
-passed a 5/5 clean-boot soak with the screen left on and a load/thermal/PSI gate.
-Every run reached `temporary-root-ready`, verified KernelSU control, and
-returned `uid=0(root)` from `/system/bin/su -c id`.
+current artifact `57436eb603f56e02d02c25c9101a18141b857f4216ec018491d2db1bf70f7204`
+passed a 4/4 clean-boot soak with the screen left on and a load/thermal/PSI gate.
+Every run reached `temporary-root-ready`, verified KernelSU control, returned
+`uid=0(root)` from `/system/bin/su -c id`, and restored SELinux enforcing. The
+gate deferred execution through observed thermal spikes up to 79.6 C. This is
+evidence for the tested artifact and device, not a guarantee against every
+kernel state.
 
 ## Method
 

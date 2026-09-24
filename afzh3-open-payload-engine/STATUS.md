@@ -8,6 +8,43 @@ laboratory research. Matching open kernel source is under
 `/home/matias/Projects/SM-S918B_16_Opensource/`; closed reference payload is
 `/home/matias/Projects/ksu-payload-functional/assets/ksu-payload`.
 
+## Stability hardening and final campaign — 2026-09-24
+
+Final payload `57436eb603f56e02d02c25c9101a18141b857f4216ec018491d2db1bf70f7204`,
+launcher `fe4d48083df4110b02c992fdea919d364ad50fde26a80eed7f3dcdf259194c8b`
+and helper `ed436f77ad30296e773c906cfaddf1539d3f18bf45cb74b8c353c9ebd435bb1b`
+passed campaign `evidence/reliability/20260924-afzh3-validatedhotpath-4boots/`:
+4/4 distinct clean boots, zero final-artifact failures, durations 91/95/96/117
+s (mean 99.75 s, median 95.5 s including reboot). Every boot used one payload
+attempt, preserved its boot ID, restored the global FOPS pointer, proved pipe
+R/W, completed the UMH socket, verified KernelSU control, returned external
+`uid=0(root)`, and ended with SELinux enforcing.
+
+The campaign exercised the gate under real boot pressure. Boot 3 rejected a
+62.9 C sample. Boot 4 rejected runnable=11 and thermal samples up to 79.6 C,
+waited 30.5 s after the pipe pre-probe, then required three safe samples before
+`execve`. This validates defer-until-safe behavior; it does not claim the
+exploit is safe to run while arbitrary high load continues.
+
+Production keeps `KSNITCH_REPEAT=64`. An exploratory 32-repeat run reached a
+false pipe candidate and failed its proof; the supervisor preserved holders,
+refused same-boot retry, collected evidence, and rebooted. Two additional
+experimental hardening routes were rejected before final validation: direct
+`struct cred` mutation rebooted immediately because AFZH3 uses Samsung KDP
+read-only credentials, and extra configfs readbacks in the live pipe/workqueue
+hot path caused a reboot at publication. Both changes were removed. The final
+pipe/workqueue hot path is the previously hardware-validated implementation;
+new fail-closed helper/CPU/slab gates, KASLR fast sampling, groom/futex error
+handling, launcher cheap-first checks, absolute cadence, thermal/slab deltas,
+pipe telemetry, 250 ms `su` polling, and post-KernelSU SELinux restoration
+remain.
+
+The manual workqueue publication is still a residual architectural risk:
+three snapshots reduce exposure but cannot replace `worker_pool.lock`.
+`CONFIG_STATIC_USERMODEHELPER_PATH=""` blocks the safer modprobe route. The
+validated policy is therefore: refuse unsuitable load, one mutation attempt
+per boot, never retry after mutation, and reboot on any partial result.
+
 ## Optimization validation — 2026-09-24
 
 Payload `c8004cdbfcafe68ea59fd2ccbcaebc932bab6b33e5b644ab6c6e0715b6d1d557`
