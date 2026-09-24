@@ -8,6 +8,34 @@ laboratory research. Matching open kernel source is under
 `/home/matias/Projects/SM-S918B_16_Opensource/`; closed reference payload is
 `/home/matias/Projects/ksu-payload-functional/assets/ksu-payload`.
 
+## Reclaim hardening and 3-boot validation — 2026-09-24
+
+Payload `94b6b79ed338bb50abbdcf17dca9c48ef2f7517b414df0249dc6a9566bc27ced`
+passed `evidence/reliability/20260924-afzh3-reclaim-hardening-3boots/`: 3/3
+distinct clean boots, zero failures, durations 98/97/97 s (mean 97.33 s,
+median 97 s including reboot). Boot IDs were `7f73a06e`, `0a0b7a3e`, and
+`d6c5894d`. Each run restored the global FOPS pointer, proved pipe R/W,
+completed UMH, verified KernelSU control, and returned external root. Campaign
+ended after boot 3 by operator request; two remaining tests are reserved for
+manual app execution. The first manual app execution subsequently reached
+root, reported by the operator; final ADB-side capture was unavailable because
+the device disconnected before verification.
+
+This build addresses the repeated `misc_open -> try_module_get` panic whose
+corrupted fake-FOPS owner was `0x1270`. Grooming now requires two independent
+KernelSnitch oracles to resolve the same aligned `mm_struct`, three timing
+confirmations per oracle, canonical object-index checks, local fake-FOPS
+layout/owner validation, effective socket-buffer validation, at least 48/64
+successful reclaim sends, and a three-sample quiet window over `mm_struct`,
+`skbuff_head_cache`, and `kmalloc-4k` before global pointer mutation. All three
+boots passed these gates with 57/64 sends. Failure before mutation cleans up
+and aborts closed.
+
+APK embedded assets use the same payload plus launcher
+`fe4d48083df4110b02c992fdea919d364ad50fde26a80eed7f3dcdf259194c8b`.
+Installed APK hash is
+`2c43c532325a4b6cb8ac18f4a74163f7ee1288ccb8d3a048ca69f1f5451bdce5`.
+
 ## Stability hardening and final campaign — 2026-09-24
 
 Final payload `57436eb603f56e02d02c25c9101a18141b857f4216ec018491d2db1bf70f7204`,

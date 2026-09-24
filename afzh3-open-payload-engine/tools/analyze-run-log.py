@@ -30,6 +30,20 @@ PIPE_FAILURE = re.compile(
 PIPE_TELEMETRY = re.compile(
     r"\[pipe_rw\] telemetry stage_ms (?P<stages>.*?) total=(?P<total>\d+)ms"
 )
+KS_ORACLE = re.compile(
+    r"\[groom\] ksnitch oracle=(primary|verify) baseline=(\d+) "
+    r"threshold=(\d+) min=(\d+) confirmed=(\d+) pass=(\d+)"
+)
+RECLAIM_BATCH = re.compile(
+    r"\[groom\] mm drain triggers=(\d+) sk_buff reclaim sends=(\d+)/(\d+)"
+)
+RECLAIM_QUIET = re.compile(
+    r"\[groom\] reclaim quiet pass samples=(\d+) streak=(\d+) "
+    r"mm=(\d+)/(\d+) skb=(\d+)/(\d+) kmalloc4k=(\d+)/(\d+)"
+)
+FOPS_LOCAL = re.compile(
+    r"\[groom\] local fake fops owner=0 layout=pass hash=([0-9a-f]+)"
+)
 
 
 def analyze(path: pathlib.Path) -> dict[str, object]:
@@ -78,6 +92,41 @@ def analyze(path: pathlib.Path) -> dict[str, object]:
             })
     result["pipe_attempts"] = pipe_attempts
     result["pipe_telemetry"] = pipe_telemetry
+    result["groom_safety"] = {
+        "oracles": [
+            {
+                "name": name,
+                "baseline": int(baseline),
+                "threshold": int(threshold),
+                "minimum": int(minimum),
+                "confirmed": int(confirmed),
+                "pass": passed == "1",
+            }
+            for name, baseline, threshold, minimum, confirmed, passed
+            in KS_ORACLE.findall(text)
+        ],
+        "reclaim_batch": (
+            {
+                "drain_triggers": int(match.group(1)),
+                "sent": int(match.group(2)),
+                "limit": int(match.group(3)),
+            }
+            if (match := RECLAIM_BATCH.search(text)) else None
+        ),
+        "quiet_window": (
+            {
+                "samples": int(match.group(1)),
+                "streak": int(match.group(2)),
+                "mm": [int(match.group(3)), int(match.group(4))],
+                "skb": [int(match.group(5)), int(match.group(6))],
+                "kmalloc4k": [int(match.group(7)), int(match.group(8))],
+            }
+            if (match := RECLAIM_QUIET.search(text)) else None
+        ),
+        "local_fops_hash": (
+            match.group(1) if (match := FOPS_LOCAL.search(text)) else None
+        ),
+    }
     result["mutation"] = {
         "kernel_pending": "stage=kernel-mutation-pending" in text,
         "credential_pending": "stage=credential-mutation-pending" in text,

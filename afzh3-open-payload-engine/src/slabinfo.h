@@ -22,5 +22,6 @@ struct mm_slabinfo {
 };
 
 int read_mm_slabinfo(struct mm_slabinfo *out);
+int read_named_slabinfo(const char *name, struct mm_slabinfo *out);
 
 #endif

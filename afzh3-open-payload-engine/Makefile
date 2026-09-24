@@ -17,7 +17,7 @@ endif
 BIN := $(OUTDIR)/app_main
 SOBIN := $(OUTDIR)/payload.so
 
-.PHONY: all so tests test-aar-read-plan clean
+.PHONY: all so tests test-aar-read-plan test-fops-layout clean
 all: $(BIN)
 so: $(SOBIN)
 
@@ -48,13 +48,17 @@ test-aar-read-plan: | $(TEST_OUTDIR)
 	$(or $(HOST_CC),cc) -O2 -Wall -Wextra -Wno-format-truncation tests/test_aar_read_plan.c -o $(TEST_OUTDIR)/test_aar_read_plan_host
 	$(TEST_OUTDIR)/test_aar_read_plan_host
 
+test-fops-layout: | $(TEST_OUTDIR)
+	$(or $(HOST_CC),cc) -O2 -Wall -Wextra -Werror -Isrc tests/test_fops_layout.c src/fops_install.c -o $(TEST_OUTDIR)/test_fops_layout_host
+	$(TEST_OUTDIR)/test_fops_layout_host
+
 $(TEST_OUTDIR):
 	mkdir -p $@
 
-$(TEST_OUTDIR)/test_groom: tests/test_groom.c src/groom.c src/fops_install.c src/fops_spray.c | $(TEST_OUTDIR)
+$(TEST_OUTDIR)/test_groom: tests/test_groom.c src/groom.c src/fops_install.c src/fops_spray.c src/slabinfo.c | $(TEST_OUTDIR)
 	$(TARGET_CC) $(TEST_CFLAGS) $^ -o $@
 
-$(TEST_OUTDIR)/test_futex_trigger: tests/test_futex_trigger.c src/groom.c src/fops_install.c src/fops_spray.c src/futex_trigger.c src/sigusr1_payload.c src/pipe_physrw.c src/aar_aaw.c | $(TEST_OUTDIR)
+$(TEST_OUTDIR)/test_futex_trigger: tests/test_futex_trigger.c src/groom.c src/fops_install.c src/fops_spray.c src/slabinfo.c src/futex_trigger.c src/sigusr1_payload.c src/pipe_physrw.c src/aar_aaw.c | $(TEST_OUTDIR)
 	$(TARGET_CC) $(TEST_CFLAGS) $^ -o $@
 
 $(TEST_OUTDIR)/test_mm_leak: tests/test_mm_leak.c tests/support/mm_leak.c | $(TEST_OUTDIR)
