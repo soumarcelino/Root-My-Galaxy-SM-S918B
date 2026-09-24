@@ -26,6 +26,9 @@ PIPE_FAILURE = re.compile(
     r"\[pipe_rw\] (setup miss|terminal failure) attempt=(\d+)/(\d+) "
     r"reason=(\S+) stage=(\S+) errno=(-?\d+) elapsed_ms=(\d+)"
 )
+PIPE_TELEMETRY = re.compile(
+    r"\[pipe_rw\] telemetry stage_ms (?P<stages>.*?) total=(?P<total>\d+)ms"
+)
 
 
 def analyze(path: pathlib.Path) -> dict[str, object]:
@@ -42,7 +45,18 @@ def analyze(path: pathlib.Path) -> dict[str, object]:
             result[name] = match.groups()
 
     pipe_attempts = []
+    pipe_telemetry = []
     for line in lines:
+        telemetry = PIPE_TELEMETRY.search(line)
+        if telemetry:
+            stages = {
+                name: int(value)
+                for name, value in re.findall(r"([a-z-]+)=(\d+)ms", telemetry["stages"])
+            }
+            pipe_telemetry.append({
+                "stage_ms": stages,
+                "total_ms": int(telemetry["total"]),
+            })
         match = PIPE_READY.search(line)
         if match:
             attempt, limit, pipe, prepare, establish, total = map(int, match.groups())
@@ -62,6 +76,7 @@ def analyze(path: pathlib.Path) -> dict[str, object]:
                 "elapsed_ms": int(elapsed),
             })
     result["pipe_attempts"] = pipe_attempts
+    result["pipe_telemetry"] = pipe_telemetry
     result["mutation"] = {
         "kernel_pending": "stage=kernel-mutation-pending" in text,
         "workqueue_pending": ("stage=workqueue-mutation-pending" in text or

