@@ -23,6 +23,7 @@ STAGE_EMOJI = {
     "starting-temporary-root": "🚀",
     "kernel-mutation-pending": "⚠️",
     "workqueue-mutation-pending": "⚠️",
+    "credential-mutation-pending": "⚠️",
     "temporary-root-ready": "✅",
     "exploit-start": "💥",
 }

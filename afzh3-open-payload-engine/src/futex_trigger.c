@@ -284,11 +284,11 @@ static int futex_env_int_clamped(const char *name, int fallback, int lo,
  * action, before any futex call -- not previously ported. Cheap,
  * strictly a scheduling hint, safe to add regardless of whether it
  * turns out to matter for the actual race timing. */
-static void pin_to_cpu(int cpu) {
+static int pin_to_cpu(int cpu) {
   cpu_set_t set;
   CPU_ZERO(&set);
   CPU_SET(cpu, &set);
-  sched_setaffinity(0, sizeof(set), &set);
+  return sched_setaffinity(0, sizeof(set), &set) == 0;
 }
 
 static void *waiter_thread_fn(void *arg) {
@@ -829,7 +829,9 @@ int run_futex_trigger_v4_cb(futex_post_trigger_cb post_trigger_cb, void *ctx) {
   atomic_store(&route_done, 0);
   atomic_store(&waiter_tid_g, 0);
 
-  pin_to_cpu(1);
+  if (!pin_to_cpu(1)) {
+    return 0;
+  }
 
   pthread_t waiter, owner;
   if (pthread_create(&waiter, NULL, waiter_thread_fn, NULL) != 0) {
@@ -1078,7 +1080,9 @@ static atomic_int g_cb_result;
 
 static void *waiter_thread_fn_v6(void *arg) {
   (void)arg;
-  pin_to_cpu(3);
+  if (!pin_to_cpu(3)) {
+    return NULL;
+  }
   int tid = (int)syscall(SYS_gettid);
   atomic_store(&waiter_tid_g, tid);
 
@@ -2694,7 +2698,11 @@ int run_futex_trigger_v13_full(uint64_t page_base,
  * are evaluated only after a new positive state is observed. */
 static void *consumer_thread_fn_v14(void *arg) {
   (void)arg;
-  pin_to_cpu(1);
+  if (!pin_to_cpu(1)) {
+    atomic_store(&g_v14_state.stop, 1);
+    atomic_store(&g_v14_state.route_done, 1);
+    return NULL;
+  }
 
   int previous_state = 0;
   while (!atomic_load(&g_v14_state.stop)) {
@@ -2770,7 +2778,11 @@ static void *consumer_thread_fn_v14(void *arg) {
  * separate consumer finishes sched_setattr. */
 static void *waiter_thread_fn_v14(void *arg) {
   (void)arg;
-  pin_to_cpu(3);
+  if (!pin_to_cpu(3)) {
+    atomic_store(&g_v14_state.stop, 1);
+    atomic_store(&g_v14_state.route_done, 1);
+    return NULL;
+  }
   int tid = (int)syscall(SYS_gettid);
   atomic_store(&g_v14_state.waiter_tid, tid);
 
@@ -2790,8 +2802,13 @@ static void *waiter_thread_fn_v14(void *arg) {
   }
 
   atomic_store(&g_v14_state.waiter_ready, 1);
-  while (!atomic_load(&g_v14_state.owner_started)) {
+  while (!atomic_load(&g_v14_state.owner_started) &&
+         !atomic_load(&g_v14_state.stop)) {
     usleep(1000);
+  }
+  if (atomic_load(&g_v14_state.stop)) {
+    atomic_store(&g_v14_state.route_done, 1);
+    return NULL;
   }
 
   struct timespec timeout;
@@ -2922,21 +2939,44 @@ int run_futex_trigger_v14_cb(futex_post_trigger_cb post_trigger_cb,
   g_post_cb = post_trigger_cb;
   g_post_cb_ctx = ctx;
 
-  pin_to_cpu(0);
+  if (!pin_to_cpu(0)) {
+    fprintf(stderr, "[futex-v14] CPU-0 affinity failed errno=%d\n", errno);
+    return 0;
+  }
 
   pthread_t waiter, owner, consumer;
-  if (pthread_create(&waiter, NULL, waiter_thread_fn_v14, NULL) != 0) {
+  int thread_error =
+      pthread_create(&waiter, NULL, waiter_thread_fn_v14, NULL);
+  if (thread_error != 0) {
+    fprintf(stderr, "[futex-v14] waiter pthread_create failed error=%d\n",
+            thread_error);
     return 0;
   }
-  if (pthread_create(&owner, NULL, owner_thread_fn_v14, NULL) != 0) {
+  thread_error = pthread_create(&owner, NULL, owner_thread_fn_v14, NULL);
+  if (thread_error != 0) {
+    fprintf(stderr, "[futex-v14] owner pthread_create failed error=%d\n",
+            thread_error);
+    atomic_store(&g_v14_state.stop, 1);
     return 0;
   }
-  if (pthread_create(&consumer, NULL, consumer_thread_fn_v14, NULL) != 0) {
+  thread_error =
+      pthread_create(&consumer, NULL, consumer_thread_fn_v14, NULL);
+  if (thread_error != 0) {
+    fprintf(stderr, "[futex-v14] consumer pthread_create failed error=%d\n",
+            thread_error);
+    atomic_store(&g_v14_state.stop, 1);
     return 0;
   }
 
+  uint64_t ready_deadline = futex_now_ms() + 5000;
   while (!atomic_load(&g_v14_state.waiter_waiting) ||
          !atomic_load(&g_v14_state.owner_started)) {
+    if (atomic_load(&g_v14_state.stop) ||
+        futex_now_ms() >= ready_deadline) {
+      fprintf(stderr, "[futex-v14] thread readiness timeout\n");
+      atomic_store(&g_v14_state.stop, 1);
+      return 0;
+    }
     usleep(1000);
   }
   futex_v14_dbg("threads-ready");

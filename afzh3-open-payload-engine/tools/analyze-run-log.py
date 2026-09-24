@@ -14,6 +14,7 @@ PATTERNS = {
     "groom": re.compile(r"\[groom\] mm leaked=([0-9a-f]+) aligned_base=([0-9a-f]+)"),
     "pipe": re.compile(r"\[pipe_rw\] ready attempt=(\d+)/(\d+).*pipe=(\d+)"),
     "umh": re.compile(r"\[root_umh\] result wake=(\d+) complete=(\d+) socket=(\d+)"),
+    "root_cred": re.compile(r"\[root_cred\] result pid=(\d+) helper=(\d+) uid=(\d+) socket=(\d+)"),
     "attempt": re.compile(r"exploit completed attempt=(\d+)/(\d+)"),
     "ksu": re.compile(r"KernelSU control verified version=(\d+) flags=(\S+) uapi=(\d+) features=(\S+)"),
     "uid": re.compile(r"uid=(\d+)\(root\).*context=(\S+)"),
@@ -79,6 +80,7 @@ def analyze(path: pathlib.Path) -> dict[str, object]:
     result["pipe_telemetry"] = pipe_telemetry
     result["mutation"] = {
         "kernel_pending": "stage=kernel-mutation-pending" in text,
+        "credential_pending": "stage=credential-mutation-pending" in text,
         "workqueue_pending": ("stage=workqueue-mutation-pending" in text or
                               "[root_umh] queued" in text),
     }

@@ -257,7 +257,7 @@ run_one_boot() {
     set -e
     "$script_dir/analyze-run-log.py" "$log" --output \
       "$campaign/boot${number}-attempt${attempt}-analysis.json"
-    if grep -Eq 'stage=(kernel-mutation-pending|workqueue-mutation-pending|verifying-kernel-access|starting-temporary-root)' "$log"; then
+    if grep -Eq 'stage=(kernel-mutation-pending|credential-mutation-pending|workqueue-mutation-pending|verifying-kernel-access|starting-temporary-root)' "$log"; then
       mutation_pending=1
     fi
     (( runner_rc == 0 )) && break
