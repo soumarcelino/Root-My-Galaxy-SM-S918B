@@ -12,19 +12,24 @@ Root acquisition is performed by the payload and its helper.
 1. Reject a nonempty inherited `LD_PRELOAD` environment variable.
 2. Parse arguments and, unless running with `--check-only`, check the first
    four ELF magic bytes of both payload and helper.
-3. Collect device metrics every three seconds. Require consecutive samples
-   that satisfy all thresholds in the selected profile.
-4. Create 480 pipes, set each capacity to 8 KiB, then resize each to 128 KiB.
-   Close every pipe after the probe, including on failure.
-5. After a successful pipe probe, configure the payload environment and
+3. Read cheap metrics first: boot state, uptime, memory, load/runnable tasks,
+   and PSI. Read thermal zones and `mm_struct` slab data only when every cheap
+   threshold passes.
+4. After one complete stable precheck, create 480 pipes, set each capacity to
+   8 KiB, then resize each to 128 KiB. Close every pipe after the probe,
+   including on failure.
+5. Discard the precheck and require consecutive full samples after the pipe
+   probe. A device clearing all thresholds with wide margin uses an adaptive
+   fast path: two samples one second apart.
+6. After final confirmation, configure the payload environment and
    replace the launcher process with `/system/bin/true`. Android's dynamic
    linker loads the payload from `LD_PRELOAD`; the payload must support
    execution through a constructor.
 
-An unstable or unreadable sample resets the consecutive-sample counter.
-A failed pipe probe resets the counter; the launcher waits for another stable
-sequence before retrying the pipe probe. A successful probe proceeds directly
-to payload loading.
+An unstable or unreadable sample resets the post-probe consecutive-sample
+counter. The pipe probe runs exactly once, between the stable precheck and
+final confirmation. A failed probe is terminal for the run (exit code 1).
+After any payload attempt, retry policy remains one attempt per clean boot.
 
 ## Profiles
 
@@ -45,9 +50,12 @@ the `conservador` profile. Values below are source defaults.
 | Maximum estimated `mm_struct` slabs | 48 | 32 |
 | Consecutive samples per phase | 3 | 5 |
 
-Both profiles use a three-second sampling interval and a 300-second gate
-wait budget, shared by stable sampling and pipe probes. Blocking reads
-or system calls are not separately timed out.
+Both profiles use a two-second baseline interval and a 300-second gate wait
+budget. The adaptive fast path uses two samples one second apart only while
+memory, temperature, runnable tasks and PSI retain wide margins. Sampling is
+scheduled against absolute `CLOCK_MONOTONIC` deadlines, so metric collection
+time does not accumulate as drift. Blocking reads or system calls are not
+separately timed out.
 
 `REL_MAX_MM_SLABS` and `REL_GATE_NAME` can be overridden at compile time.
 
@@ -64,10 +72,11 @@ or system calls are not separately timed out.
 - `/proc/slabinfo`: active and total `mm_struct` object counts. Slab count is
   estimated as total objects divided by objects per slab, rounded up.
 
-All metric readers must succeed for a sample to be accepted. The launching
-user must therefore have permission to read these interfaces, including
-`/proc/slabinfo`. Before probing pipes, the launcher attempts to raise its
-soft file-descriptor limit to the existing hard limit.
+All metric readers must succeed for a sample to be accepted. Thermal and slab
+readers are deliberately deferred until every cheap metric passes. The
+launching user must therefore have permission to read these interfaces,
+including `/proc/slabinfo`. Before probing pipes, the launcher attempts to
+raise its soft file-descriptor limit to the existing hard limit.
 
 ## Usage
 
@@ -112,7 +121,7 @@ Immediately before `execve`, the launcher sets:
 | `EXPLOIT_ATTEMPT_TIMEOUT_SEC` | `180` | Preserved if already set |
 | `BOOT_QUIET_SEC` | `0` | Preserved if already set |
 | `FUTEX_WAIT_SEC` | `1` | Preserved if already set |
-| `KSNITCH_REPEAT` | `64` | Preserved if already set |
+| `KSNITCH_REPEAT` | `32` | Preserved if already set |
 | `LD_PRELOAD` | Supplied payload path | Overwritten after initial rejection check |
 
 Timeout variables are interpreted by the payload; the launcher does not
@@ -120,9 +129,9 @@ supervise execution after `execve`.
 
 ## Logs and exit codes
 
-Logs are written to standard error with a `[launcher]` prefix. Sample logs
-include the `baseline` phase, accepted-sample count, and measured values. Pipe
-probes emit `pipe-gate=pass` or `pipe-gate=fail`.
+Logs are written to standard error with a `[launcher]` prefix. Sample logs use
+`cheap`, `baseline`, or `fast`; deferred fields are explicit. Pipe probes emit
+`pipe-gate=pass` or terminal `pipe-gate=fail`.
 
 | Exit code | Meaning before payload execution |
 | --- | --- |
@@ -141,8 +150,9 @@ Requires the Android NDK. Example for Linux hosts, ARM64, Android API 35:
 ```sh
 mkdir -p build
 "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang" \
-  -O2 -Wall -Wextra -fPIE -pie \
-  stability-launcher.c -o build/stability-launcher
+  -O2 -Wall -Wextra -Werror -fPIE -fstack-protector-strong \
+  -D_FORTIFY_SOURCE=2 stability-launcher.c \
+  -pie -Wl,-z,relro,-z,now -o build/stability-launcher
 ```
 
 Run from this directory with `ANDROID_NDK_HOME` pointing to the installed NDK.
