@@ -27,21 +27,25 @@ ANSI_ESCAPE = re.compile(r"(?:\x1b|␛)\[[0-?]*[ -/]*[@-~]")
 ROOT_RE = re.compile(r"uid=0(?:\(root\))?")
 METRIC_RE = re.compile(r"^metric (.+)$", re.MULTILINE)
 
-# Mesmas fontes e awk do gate do launcher (read_device_metrics em
-# tools/validate-two-boots.sh): MemAvailable, temperatura de thermal_zone,
+# Mesmas fontes do gate do launcher (read_device_metrics em
+# tools/validate-two-boots.sh), lidas com built-ins do shell para evitar um
+# processo por arquivo/campo: MemAvailable, temperatura de thermal_zone,
 # loadavg, tarefas executáveis e PSI some/avg10 de cpu/memory/io. Emite uma
 # linha "metric k=v ..." consumida por update_metrics; roda dentro do mesmo
 # adb shell do probe de root, sem abrir conexão concorrente.
 METRICS_SH = (
-    "mem=$(awk '/^MemAvailable:/{print $2;exit}' /proc/meminfo); "
+    "mem=0; while read key amount unit; do "
+    "[ \"$key\" = 'MemAvailable:' ] && { mem=$amount; break; }; "
+    "done < /proc/meminfo; "
     "read up _rest < /proc/uptime; "
-    "load=$(awk '{print $1}' /proc/loadavg); "
-    "run=$(awk '{split($4,a,\"/\");print a[1]}' /proc/loadavg); "
-    "cpu=$(awk '/^some /{for(i=1;i<=NF;i++)if($i~/^avg10=/){sub(\"avg10=\",\"\",$i);print $i;exit}}' /proc/pressure/cpu); "
-    "mp=$(awk '/^some /{for(i=1;i<=NF;i++)if($i~/^avg10=/){sub(\"avg10=\",\"\",$i);print $i;exit}}' /proc/pressure/memory); "
-    "io=$(awk '/^some /{for(i=1;i<=NF;i++)if($i~/^avg10=/){sub(\"avg10=\",\"\",$i);print $i;exit}}' /proc/pressure/io); "
+    "read load _load5 _load15 runfield _rest < /proc/loadavg; "
+    "run=${runfield%%/*}; "
+    "read _ cpu_field _ < /proc/pressure/cpu; cpu=${cpu_field#avg10=}; "
+    "read _ mp_field _ < /proc/pressure/memory; mp=${mp_field#avg10=}; "
+    "read _ io_field _ < /proc/pressure/io; io=${io_field#avg10=}; "
     "temp=0; for z in /sys/class/thermal/thermal_zone*/temp; do "
-    "v=$(cat $z 2>/dev/null||true); case $v in *[!0-9]*|'')continue;; esac; "
+    "read v < \"$z\" 2>/dev/null || continue; "
+    "case $v in *[!0-9]*|'')continue;; esac; "
     "[ $v -lt 200000 ]&&[ $v -gt $temp ]&&temp=$v; done; "
     "printf 'metric mem=%s temp=%s load=%s run=%s cpu=%s mp=%s io=%s up=%s\\n' "
     "$mem $temp $load $run $cpu $mp $io $up"
@@ -461,7 +465,8 @@ class RootWindow(QMainWindow):
         self.root_probe_process.errorOccurred.connect(self.root_probe_error)
         script = (
             "printf 'boot=%s\\n' \"$(getprop sys.boot_completed)\"; "
-            "printf 'boot_id=%s\\n' \"$(cat /proc/sys/kernel/random/boot_id)\"; "
+            "read boot_id < /proc/sys/kernel/random/boot_id; "
+            "printf 'boot_id=%s\\n' \"$boot_id\"; "
             + METRICS_SH + "; "
             "/system/bin/su -c id 2>/dev/null || true"
         )
@@ -777,7 +782,7 @@ class RootWindow(QMainWindow):
             )
         elif "[launcher] pipe-gate=pass" in lowered:
             self.stage_description.setText(
-                "Capacidade de 480 pipes aprovada; iniciando payload."
+                "Capacidade de 480 pipes aprovada; confirmando estabilidade final."
             )
         if "stage=kernel-mutation-pending" in lowered:
             self.mutation_possible = True
