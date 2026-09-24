@@ -66,6 +66,12 @@ static int sample(long *mem_kb, long *temp_mc, int *runnable,
          read_psi("/proc/pressure/io", io);
 }
 
+static void sleep_interval(time_t seconds) {
+  struct timespec remaining = {.tv_sec = seconds};
+  while (nanosleep(&remaining, &remaining) != 0 && errno == EINTR) {
+  }
+}
+
 int oss_stage_stability_gate(const char *stage) {
   int stable = 0;
   for (int elapsed = 0; elapsed <= 300 && stable < 3; elapsed += 3) {
@@ -82,8 +88,8 @@ int oss_stage_stability_gate(const char *stage) {
             stage, stable, temp_mc / 1000.0, mem_kb / 1024, runnable,
             cpu, mem, io);
     if (stable == 3) return 1;
-    struct timespec pause = {.tv_sec = 3};
-    nanosleep(&pause, NULL);
+    if (elapsed == 300) break;
+    sleep_interval(3);
   }
   fprintf(stderr, "[safe-stop] stage=%s stability gate timeout\n", stage);
   return 0;
