@@ -193,6 +193,11 @@ if ! "${adb_cmd[@]}" shell "$REMOTE_HELPER" --late-load; then
   printf 'KernelSU --late-load falhou.\n' >&2
   exit 1
 fi
+selinux_enforce="$("${adb_cmd[@]}" shell 'cat /sys/fs/selinux/enforce' 2>/dev/null | tr -d '\r\n')"
+if [[ "$selinux_enforce" != 1 ]]; then
+  printf 'SELinux não retornou a enforcing após KernelSU: %s\n' "$selinux_enforce" >&2
+  exit 1
+fi
 
 printf '[*] Aguardando su (até 30s)\n'
 root_identity=

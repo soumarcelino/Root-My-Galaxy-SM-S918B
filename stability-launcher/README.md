@@ -121,7 +121,7 @@ Immediately before `execve`, the launcher sets:
 | `EXPLOIT_ATTEMPT_TIMEOUT_SEC` | `180` | Preserved if already set |
 | `BOOT_QUIET_SEC` | `0` | Preserved if already set |
 | `FUTEX_WAIT_SEC` | `1` | Preserved if already set |
-| `KSNITCH_REPEAT` | `32` | Preserved if already set |
+| `KSNITCH_REPEAT` | `64` | Preserved if already set; validated stability profile |
 | `LD_PRELOAD` | Supplied payload path | Overwritten after initial rejection check |
 
 Timeout variables are interpreted by the payload; the launcher does not

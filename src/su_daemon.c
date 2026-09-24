@@ -450,6 +450,25 @@ static int verify_kernelsu_control(void) {
   return 0;
 }
 
+static int restore_selinux_enforcing(void) {
+  int fd = open("/sys/fs/selinux/enforce", O_RDWR | O_CLOEXEC);
+  if (fd < 0) {
+    return 0;
+  }
+  char enforcing = '1';
+  ssize_t wrote;
+  do {
+    wrote = pwrite(fd, &enforcing, sizeof(enforcing), 0);
+  } while (wrote < 0 && errno == EINTR);
+  char readback = '0';
+  ssize_t got;
+  do {
+    got = pread(fd, &readback, sizeof(readback), 0);
+  } while (got < 0 && errno == EINTR);
+  int close_ok = close(fd) == 0;
+  return wrote == 1 && got == 1 && readback == '1' && close_ok;
+}
+
 static int run_kernelsu_late_load(struct su_request *request, int conn) {
   pid_t pid = fork();
   if (pid < 0) {
@@ -499,7 +518,15 @@ static int run_kernelsu_late_load(struct su_request *request, int conn) {
     _exit(verify_kernelsu_control());
   }
   close_request_fds(request);
-  return wait_status(pid);
+  int status = wait_status(pid);
+  int enforcing = restore_selinux_enforcing();
+  if (!enforcing) {
+    dprintf(STDERR_FILENO,
+            "late-load: failed to restore SELinux enforcing\n");
+    return status == 0 ? 15 : status;
+  }
+  dprintf(STDOUT_FILENO, "SELinux enforcing restored\n");
+  return status;
 }
 
 static void send_response(int conn, int status) {
