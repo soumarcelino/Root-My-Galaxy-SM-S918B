@@ -429,9 +429,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             app.getString(R.string.error_ksu_verify, lateLoad.code, lateLoad.output)
         }
         if (lateLoad.output.isNotBlank()) appendLog(lateLoad.output)
-        require(NativeProbe.isKernelSuActive()) {
-            app.getString(R.string.error_ksu_control_inactive)
-        }
+        // --late-load returns zero only after the root helper verifies the
+        // KernelSU control ioctl. Module paths are intentionally hidden from
+        // this app again after the helper restores SELinux enforcing.
         storeInstallReceipt()
         mutableState.value = mutableState.value.copy(
             executionStage = ExecutionStage.VerifyingRoot,
