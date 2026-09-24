@@ -8,6 +8,32 @@ laboratory research. Matching open kernel source is under
 `/home/matias/Projects/SM-S918B_16_Opensource/`; closed reference payload is
 `/home/matias/Projects/ksu-payload-functional/assets/ksu-payload`.
 
+## Bounded automatic pre-mutation retry — 2026-09-24
+
+App testing exposed KP601 and KP602 on clean boots with the current payload.
+Both match KP599/KP600 exactly: `misc_open -> try_module_get` dereferenced fake
+FOPS owner `0x1270`. Artifact hashes on device matched the intended payload,
+launcher, and helper. After KP601, one run safely rejected divergent
+KernelSnitch leaks before reclaim (`ffffff8007fa4000` versus
+`ffffff8a0f08a800`); the following manual run reached root on boot
+`982ae697-04f9-4bea-9dfa-cd2792d1fbfb`. A clean run after KP602 also reached
+root and verified KernelSU on boot `fa2193c4-1f75-428b-aefb-4a90ebaa5f0a`.
+
+The launcher now permits three total payload-supervisor attempts. A failed
+attempt is retried after five seconds only while shared state remains
+`ATTEMPT_PRE_MUTATION`. Any futex/global-FOPS/pipe/workqueue mutation marker
+stops retries and requires reboot. This automates recovery from transient
+pre-mutation allocator/oracle misses; it does not retry across a panic and
+does not claim the `0x1270` landing risk is fixed. The Android app also waits
+up to ten seconds for Shizuku, polling every two seconds before staging or
+executing anything.
+
+The updated APK was then validated through the app on clean boot
+`2382de98-d03a-437c-a8f0-f656f76f3e5a`. Its durable history recorded
+`starting exploit attempts=3`, success on attempt `1/3`, verified FOPS
+restoration, pipe R/W, UMH completion, KernelSU control, and installation
+success. Payload execution reached temporary root in 59.208 seconds.
+
 ## Reclaim hardening and 3-boot validation — 2026-09-24
 
 Payload `94b6b79ed338bb50abbdcf17dca9c48ef2f7517b414df0249dc6a9566bc27ced`
@@ -32,9 +58,9 @@ boots passed these gates with 57/64 sends. Failure before mutation cleans up
 and aborts closed.
 
 APK embedded assets use the same payload plus launcher
-`fe4d48083df4110b02c992fdea919d364ad50fde26a80eed7f3dcdf259194c8b`.
-Installed APK hash is
-`2c43c532325a4b6cb8ac18f4a74163f7ee1288ccb8d3a048ca69f1f5451bdce5`.
+`6b191e40d4029b40e43314144f36296d94f5068a6cb5d98eb95632953d742855`.
+APK `5af3ac4fc2a6329114215c0da5ac55ebdbbe5b8804b81a63e05138f088cc6f49`
+installed successfully and matched a post-reboot pull from the device.
 
 ## Stability hardening and final campaign — 2026-09-24
 

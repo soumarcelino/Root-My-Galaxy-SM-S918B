@@ -26,13 +26,19 @@ object ShizukuController {
      * The binder is delivered to the app asynchronously after the Shizuku service starts.
      * Wait a short while in case the service is already up but the binder has not arrived yet.
      */
-    suspend fun pingUntilRunning(timeoutMillis: Long = 3_000): Boolean {
+    suspend fun pingUntilRunning(
+        timeoutMillis: Long = SHIZUKU_START_TIMEOUT_MILLIS,
+        pollIntervalMillis: Long = SHIZUKU_START_POLL_MILLIS,
+    ): Boolean {
+        require(timeoutMillis >= 0)
+        require(pollIntervalMillis > 0)
         val deadline = SystemClock.elapsedRealtime() + timeoutMillis
-        while (SystemClock.elapsedRealtime() < deadline) {
+        while (true) {
             if (isRunning()) return true
-            delay(100)
+            val remaining = deadline - SystemClock.elapsedRealtime()
+            if (remaining <= 0) return false
+            delay(minOf(pollIntervalMillis, remaining))
         }
-        return isRunning()
     }
 
     fun isGranted(): Boolean = try {
@@ -123,4 +129,7 @@ object ShizukuController {
 
         override fun isAlive(): Boolean = remote.alive()
     }
+
+    private const val SHIZUKU_START_TIMEOUT_MILLIS = 10_000L
+    private const val SHIZUKU_START_POLL_MILLIS = 2_000L
 }

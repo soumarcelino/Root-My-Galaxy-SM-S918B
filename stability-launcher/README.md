@@ -29,7 +29,9 @@ Root acquisition is performed by the payload and its helper.
 An unstable or unreadable sample resets the post-probe consecutive-sample
 counter. The pipe probe runs exactly once, between the stable precheck and
 final confirmation. A failed probe is terminal for the run (exit code 1).
-After any payload attempt, retry policy remains one attempt per clean boot.
+The payload may make up to three attempts. Its supervisor retries only after a
+confirmed pre-mutation failure; any kernel-mutation marker ends the run and
+requires a clean reboot.
 
 ## Profiles
 
@@ -116,7 +118,7 @@ Immediately before `execve`, the launcher sets:
 | Variable | Value | Existing value |
 | --- | --- | --- |
 | `CVE43499_ROOT_HELPER` | Supplied helper path | Overwritten |
-| `EXPLOIT_ATTEMPTS` | `1` | Overwritten |
+| `EXPLOIT_ATTEMPTS` | `3` | Overwritten |
 | `P0_ATTEMPT_TIMEOUT_SEC` | `45` | Preserved if already set |
 | `EXPLOIT_ATTEMPT_TIMEOUT_SEC` | `180` | Preserved if already set |
 | `BOOT_QUIET_SEC` | `0` | Preserved if already set |
@@ -168,7 +170,8 @@ ELF validation checks only the magic bytes; it does not verify architecture,
 hash, firmware compatibility, or executable permissions. Paths should be
 absolute and compatible with `LD_PRELOAD` syntax.
 
-`EXPLOIT_ATTEMPTS=1` limits one payload invocation. The launcher keeps no
-persistent boot history and does not prevent a caller from launching it again
-in the same boot. Firmware matching, cross-run retry policy, staging, and
+`EXPLOIT_ATTEMPTS=3` permits two retries inside the payload supervisor only
+while its shared state proves no kernel mutation occurred. A panic ends the
+process through reboot; the launcher does not retry across boots. It keeps no
+persistent boot history. Firmware matching, cross-boot policy, staging, and
 post-execution root verification belong to the surrounding workflow.

