@@ -14,5 +14,4 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "RootMyGalaxy"
-include(":app")
+rootProject.name = "app"

@@ -20,7 +20,7 @@ app/build/outputs/apk/debug/app-debug.apk
 Manual Gradle build:
 
 ```sh
-./gradlew :app:assembleDebug
+cd app && ./gradlew assembleDebug
 ```
 
 ## Install The APK
