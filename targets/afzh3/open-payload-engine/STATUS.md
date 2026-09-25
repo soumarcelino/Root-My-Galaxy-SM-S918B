@@ -8,6 +8,96 @@ laboratory research. Matching open kernel source is under
 `/home/matias/Projects/SM-S918B_16_Opensource/`; closed reference payload is
 `/home/matias/Projects/ksu-payload-functional/assets/ksu-payload`.
 
+## Pipe preparation with 2048 waiters — 2026-09-25
+
+The 512-waiter pipe oracle repeatedly exited during the collision stage in
+app runs (9/11 and 3/4 early attempts). Each restart repeated roughly 2.2–2.7 s
+of pinned `mm_struct` setup. Grooming still uses 512 waiters, while the pipe
+oracle now defaults to 2048; the pipe's allocation and reclaim order is
+unchanged. Collision-stage failures now record whether spawning, post-context
+memfds, the leak memfd, or collision search caused the exit.
+
+Payload `0e211b4d45bce7da91960efaa3f9cdb3fb673cde53fc3fdfd9ecd04fce903429`
+passed `evidence/reliability/20260925-pipe-2048-two-boots/`: 2/2 distinct
+clean boots (`115126ca-00da-422e-9b16-a6009f60b89e` and
+`2c2e5a85-3155-4164-a8eb-8f2698db6101`), each with one runner attempt,
+unchanged boot ID, temporary root, KernelSU control and external `uid=0(root)`.
+Pipe R/W was ready on its first preparation attempt in 4.7 s and 3.6 s;
+runner durations were 54.2 s and 55.0 s, mostly the launcher stability wait.
+The successful pipe preparation itself still requires about 2.2 s to pin
+`mm_struct` contexts and about 0.4 s for cleanup. These are kernel allocation
+and safety-critical ordering costs; this source change does not make the
+entire root flow instantaneous or establish long-run reliability.
+
+The AFZH3 app exploit asset was replaced with this tested payload (133216
+bytes), `targets-v3.json` was updated, and `app:assembleDebug` succeeded. The
+installed APK was pulled back and matched the build hash
+`c1d6d09fe126ad9cdb9e76af62304b745059da02d22ab6bad7e95e552bab04bf`;
+its embedded AFZH3 payload matches `0e211b4d45bce7da91960efaa3f9cdb3fb673cde53fc3fdfd9ecd04fce903429`.
+The optimized payload has been validated through the two-boot runner; an app
+execution with this exact APK has not yet been measured.
+
+## KernelSnitch collision-search integration — 2026-09-25
+
+The isolated `poc-kernel-access` benchmark reported three collision candidates
+in 50/50 AFZH3 runs with 512 waiters, averaging 174 ms; the
+original serial search was about 3.4 s. The parallel search and shared waiter
+stacks are now wired into both groom oracles and the pipe preparation oracle.
+An isolated harness compiled against the integrated header reported three
+candidates in 20/20 runs on the device, averaging 160 ms. `make -B all so tests`
+built the source without compiler warnings, and `tools/check-repo.py` passed.
+Source build hashes: `build/app_main`
+`ba4267ac4367cc6a2069b886793951d78416aa8d16b53e9d12ea267d4ddde118`,
+`build/payload.so`
+`13aa2391631f6eb374d518643e0691c33b16d3c115cca719c2a21de8845ada78`.
+Their existing repeat/confirmation settings remain in place. The default
+waiter count is 512, with `KSNITCH_APPENDED` still allowing 256..4096 for
+diagnostics. Teardown closes the futex gate before waking waiters, preventing
+late starters from blocking a join.
+
+Two clean-boot runs then passed with this exact payload hash under
+`evidence/reliability/20260925-kernelsnitch-512-two-boots/`. Distinct boot IDs
+were `0ef5ec02-5347-4e00-b34e-242262d1cfd7` and
+`20c7632e-d30e-49c1-8621-aed53ecba28b`; each stayed unchanged during its
+run. Both runners succeeded on their first attempt, resolved the same
+`mm_struct` with two oracles, reached temporary root, verified KernelSU
+control, and returned external `uid=0(root)`. Runner times were 55.8 s and
+68.6 s. Groom's two-oracle collision phase took 618 ms on each boot; the pipe
+oracle's successful collision phases took 248 ms and 272 ms. On boot 2, three
+earlier pipe preparation attempts missed at the collision stage before the
+fifth attempt succeeded; 2/2 boot success does not establish broader
+reliability. The runtime bundle asset matches the tested source payload.
+
+The AFZH3 app asset `cve-2026-43499-app-afzh3.so` was updated to the same
+payload hash, with its size changed to 132984 bytes in `targets-v3.json`.
+`app:assembleDebug` succeeded. The installed APK was pulled back from the
+device and matched the build SHA-256
+`f1e408873d2700beba6e806c32198a2c4c4badd45d19839942ed4f9a8c61ff74`;
+its embedded AFZH3 exploit asset matches the tested payload hash. The helper,
+launcher, and KernelSU daemon assets for AFZH3 were unchanged. A later
+device boot ID `2060c754-3a20-48bd-bdbf-877e4fdd384a` was observed around
+APK installation, with reported reason `reboot,userrequested`; installation
+was verified on that boot. A subsequent app run succeeded at 09:05:57–09:07:19
+(81.7 s wall time, 80.2 s to temporary root). Its persistent history is in
+`evidence/reliability/20260925-kernelsnitch-512-two-boots/app-20260925-090557-history.json`
+and the extracted readable log is beside it. The launcher waited about 39 s
+for temperature to fall from 74.8 C to three stable samples below 48 C. Pipe
+setup then took 36.4 s over 11 attempts: nine stopped in the collision stage,
+one passed that stage but missed cache selection, and attempt 11 succeeded.
+Across those attempts, pinned-mm setup totaled 28.0 s and the collision stage
+6.3 s. The repeated collision-stage exits with ~0.63 s scans suggest the
+512-waiter signal is unreliable in the pipe preparation context; the existing
+log does not identify the exact failing branch within that stage. KernelSU Next
+control was verified and the app marked installation successful.
+
+A second app run on boot `5f842906-0945-49b8-828a-d05aecf7a8dc` also
+succeeded (09:11:36–09:12:58, 80.2 s to root). Its raw history, readable log,
+and time-window logcat are saved in the same evidence directory as
+`app-20260925-091136-*`. The launcher waited from uptime 34 s to 97 s for the
+boot/load and thermal gates. Pipe preparation needed four attempts (three
+collision-stage exits), taking 12.9 s. KernelSU Next control verification and
+the app's installation completion marker were present.
+
 ## Bounded automatic pre-mutation retry — 2026-09-24
 
 App testing exposed KP601 and KP602 on clean boots with the current payload.

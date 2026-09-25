@@ -90,7 +90,7 @@
       "kernelVersionInfos": ["#1 SMP PREEMPT Tue Aug 11 06:33:52 UTC 2026"],
       "exploit": {
         "url": "asset://cve-2026-43499-app-afzh3.so",
-        "size": 127336
+        "size": 133216
       },
       "kernelsu": {
         "url": "asset://ksud-next-v3.4.0-afzh3",
