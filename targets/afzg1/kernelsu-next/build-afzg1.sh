@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)
 ksu_src=${KSU_NEXT_SRC:?set KSU_NEXT_SRC to a clean KernelSU Next v3.3.0 checkout}
 kernel_src=${SAMSUNG_KERNEL_SRC:?set SAMSUNG_KERNEL_SRC}
 kernel_out=${KERNEL_OUT:?set KERNEL_OUT to a prepared Samsung output}
 clang_root=${CLANG_ROOT:?set CLANG_ROOT to clang-r450784e}
 ndk_root=${ANDROID_NDK_HOME:?set ANDROID_NDK_HOME}
-out_dir="$repo_dir/kernelsu-next/out/kernelsu-next-afzg1"
-patch_file="$repo_dir/kernelsu-next/patches/KernelSU-Next-v3.3.0-samsung-afzg1-kdp-rkp-defex.patch"
+out_dir="$repo_dir/targets/afzg1/kernelsu-next/out/kernelsu-next-afzg1"
+patch_file="$repo_dir/targets/afzg1/kernelsu-next/patches/KernelSU-Next-v3.3.0-samsung-afzg1-kdp-rkp-defex.patch"
 expected_commit=3b18216f71df189ab3d1b1ce0bdb21be1268e771
 expected_release=5.15.189-android13-8-33413713-abS918BXXSAFZG1
 
@@ -53,10 +53,10 @@ install -D -m 0644 "$out_dir/android13-5.15_kernelsu.ko" \
 
 cc="$ndk_root/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
 "$cc" -fPIE -pie -O2 -g0 -Wall -Wextra \
-  -Wno-unused-parameter -Wno-sign-compare -I"$repo_dir" -I"$repo_dir/src" \
-  -DTARGET_HEADER='"kernelsu-next/helper/target-afzg1.h"' \
-  "$repo_dir/kernelsu-next/helper/su_daemon-next.c" \
-  "$repo_dir/kernelsu-next/helper/target_guard.c" \
+  -Wno-unused-parameter -Wno-sign-compare -I"$repo_dir" \
+  -DTARGET_HEADER='"targets/afzg1/kernelsu-next/helper/target-afzg1.h"' \
+  "$repo_dir/targets/afzg1/kernelsu-next/helper/su_daemon-next.c" \
+  "$repo_dir/targets/afzg1/kernelsu-next/helper/target_guard.c" \
   -ldl -o "$out_dir/ksu-helper-next"
 "$ndk_root/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-all \
   "$out_dir/ksu-helper-next"

@@ -30,11 +30,11 @@ PROJECTS_DIR="${PROJECTS_DIR:-${HOME}/Projects}"
 UPSTREAM_REPO="${UPSTREAM_REPO:-${PROJECTS_DIR}/rmg-f731u}"
 
 PATCHER="${PATCHER:-${REPO_ROOT}/tools/patch_payload.py}"
-SPEC="${SPEC:-${REPO_ROOT}/tools/f731u-to-dm3q-s918b-afzf5.spec.json}"
+SPEC="${SPEC:-${REPO_ROOT}/targets/afzf5/specs/f731u-to-dm3q-s918b-afzf5.spec.json}"
 BASE_PAYLOAD="${BASE_PAYLOAD:-${UPSTREAM_REPO}/app-src/app/src/main/assets/cve-2026-43499-app.so}"
 KSUD_PATH="${KSUD_PATH:-${REPO_ROOT}/app/src/main/assets/ksud-f731u-kdp}"
-HELPER_PATH="${HELPER_PATH:-${REPO_ROOT}/app/src/main/jniLibs/arm64-v8a/libcve43499root.so}"
-OUT_DIR="${OUT_DIR:-${REPO_ROOT}/out/${PROFILE_ID}}"
+HELPER_PATH="${HELPER_PATH:-${REPO_ROOT}/targets/afzf5/helper/libcve43499root.so}"
+OUT_DIR="${OUT_DIR:-${REPO_ROOT}/targets/afzf5/payload/build}"
 PATCHED_PAYLOAD="${OUT_DIR}/cve-2026-43499-app.so"
 
 DO_ADB_CHECK=1
@@ -210,9 +210,9 @@ JSON
 }
 
 build_apk() {
-  test -x "${REPO_ROOT}/gradlew" || die "gradlew is missing or not executable"
+  test -x "${REPO_ROOT}/app/gradlew" || die "gradlew is missing or not executable"
   info "building debug APK"
-  (cd "$REPO_ROOT" && ./gradlew :app:assembleDebug)
+  (cd "$REPO_ROOT/app" && ./gradlew assembleDebug)
   assert_file "${REPO_ROOT}/app/build/outputs/apk/debug/app-debug.apk"
   info "APK ready: ${REPO_ROOT}/app/build/outputs/apk/debug/app-debug.apk"
 }

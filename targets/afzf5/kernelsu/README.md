@@ -195,7 +195,7 @@ After `check_symbol`, audit the manual-relocation contract against the exact
 E3Q ELF and the target-derived symbol-version list:
 
 ```sh
-python3 kernelsu/tools/audit_module_against_target.py \
+python3 targets/afzf5/kernelsu/tools/audit_module_against_target.py \
   kernel/kernelsu.ko \
   /path/to/S928USQS6DZF2/vmlinux.elf \
   /path/to/S928USQS6DZF2/Module.symvers \
