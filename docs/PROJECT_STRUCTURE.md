@@ -7,7 +7,7 @@
 - `RootMyGalaxyDesktop/`: desktop runner and bundled runtime assets.
 - `Makefile`: native build entry point; it selects sources inside each
   firmware's `payload/src/` and `helper/` directories.
-- `tools/`, `support/`: shared porting tools and support profiles.
+- `tools/`: shared porting tools.
 - `targets/afzf5/kernelsu/`: classic KernelSU reference used by the AFZF5 port.
 - `targets/afzh3/kernelsu-next/`: AFZH3 KernelSU Next build and reference.
 - `targets/afzg1/kernelsu-next/`: AFZG1 KernelSU Next build, guard, and patch.

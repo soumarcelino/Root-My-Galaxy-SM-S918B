@@ -56,7 +56,7 @@ Steps:
 3. Apply targets/afzf5/specs/f731u-to-dm3q-s918b-afzf5.spec.json.
 4. Generate targets/afzf5/payload/build/cve-2026-43499-app.so.
 5. Verify the generated payload MD5 and size.
-6. Create app/src/main/assets/support/targets-v2.json.
+6. Update app/src/main/assets/targets-v3.json.
 7. Copy local runtime assets into app/src/main/assets/payloads/.
 8. Copy the native helper into app/src/main/jniLibs/arm64-v8a/.
 9. Print manual ADB test commands.

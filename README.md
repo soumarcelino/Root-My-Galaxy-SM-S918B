@@ -83,7 +83,6 @@ Upstream reference material is also kept in:
 - [PROJECT-MANIFEST.txt](PROJECT-MANIFEST.txt)
 - [targets/afzf5/kernelsu/README.md](targets/afzf5/kernelsu/README.md)
 - [KernelSU Next AFZG1](targets/afzg1/kernelsu-next/README.md)
-- [support/README.md](support/README.md)
 
 
 ## Quick Start

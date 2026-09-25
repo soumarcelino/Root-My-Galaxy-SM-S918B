@@ -95,23 +95,18 @@ path for this port.
 Make sure this file exists before building:
 
 ```text
-app/src/main/assets/support/targets-v2.json
+app/src/main/assets/targets-v3.json
 ```
 
 It should contain:
 
 ```text
-profileId: dm3q-S918BXXSAFZF5
-model: SM-S918B
-device: dm3q
-buildDisplay: BP4A.251205.006.S918BXXSAFZF5
+payloadId: dm3q-S918BXXSAFZF5
+models: [SM-S918B]
+buildDisplays: [BP4A.251205.006.S918BXXSAFZF5]
 ```
 
-Regenerate it with:
-
-```sh
-./tools/port-sm-s918b-afzf5.sh --no-adb-check
-```
+Check that its artifact names and sizes match the files in `app/src/main/assets/`.
 
 ## Shell Command Shows `syntax error: unexpected '&&'`
 
