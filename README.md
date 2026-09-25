@@ -81,8 +81,8 @@ Upstream reference material is also kept in:
 
 - [PORTING.md](PORTING.md)
 - [PROJECT-MANIFEST.txt](PROJECT-MANIFEST.txt)
-- [kernelsu/README.md](kernelsu/README.md)
-- [KernelSU Next AFZG1](kernelsu-next/README.md)
+- [targets/afzf5/kernelsu/README.md](targets/afzf5/kernelsu/README.md)
+- [KernelSU Next AFZG1](targets/afzg1/kernelsu-next/README.md)
 - [support/README.md](support/README.md)
 
 
@@ -90,7 +90,7 @@ Upstream reference material is also kept in:
 
 The Android app uses KernelSU Next v3.3.0 with a profile selected from the
 detected firmware. Both `S918BXXSAFZG1` and `S918BXXSAFZH3` have version-locked
-payloads and helpers; see [KernelSU Next AFZG1](kernelsu-next/README.md).
+payloads and helpers; see [KernelSU Next AFZG1](targets/afzg1/kernelsu-next/README.md).
 
 From the repository root:
 
@@ -115,12 +115,12 @@ Build, install, and stage local ADB files:
 
 ```text
 tools/port-sm-s918b-afzf5.sh
-tools/f731u-to-dm3q-s918b-afzf5.spec.json
+targets/afzf5/specs/f731u-to-dm3q-s918b-afzf5.spec.json
 tools/patch_payload.py
 app/src/main/assets/targets-v3.json
 RootMyGalaxyDesktop/assets/profiles.json
-src/targets/dm3q-S918BXXSAFZF5/target.h
-src/targets/dm3q-S918BXXSAFZF5/p0_fingerprint.h
+targets/afzf5/payload/src/targets/dm3q-S918BXXSAFZF5/target.h
+targets/afzf5/payload/src/targets/dm3q-S918BXXSAFZF5/p0_fingerprint.h
 ```
 
 ## Credits And Base Repository

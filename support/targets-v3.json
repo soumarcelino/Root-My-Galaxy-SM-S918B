@@ -44,7 +44,7 @@
         "size": 104128
       },
       "kernelsu": {
-        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/kernelsu/ksud-s25u-kdp",
+        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/targets/afzf5/kernelsu/ksud-s25u-kdp",
         "size": 6407096
       }
     },
@@ -58,7 +58,7 @@
         "size": 111216
       },
       "kernelsu": {
-        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/kernelsu/ksud-s25u-kdp",
+        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/targets/afzf5/kernelsu/ksud-s25u-kdp",
         "size": 6407096
       }
     },
@@ -72,7 +72,7 @@
         "size": 104128
       },
       "kernelsu": {
-        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/kernelsu/ksud-e3q-S928USQS6DZF2-kdp",
+        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/targets/afzf5/kernelsu/ksud-e3q-S928USQS6DZF2-kdp",
         "size": 4726416
       }
     },
@@ -87,7 +87,7 @@
         "size": 104128
       },
       "kernelsu": {
-        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/kernelsu/ksud-e2s-S926BXXUEDZDR-kdp",
+        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/targets/afzf5/kernelsu/ksud-e2s-S926BXXUEDZDR-kdp",
         "size": 4780056
       }
     },
@@ -102,7 +102,7 @@
         "size": 104128
       },
       "kernelsu": {
-        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/kernelsu/ksud-e1s-S921BXXSFDZE1-kdp",
+        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/targets/afzf5/kernelsu/ksud-e1s-S921BXXSFDZE1-kdp",
         "size": 4920520
       }
     },
@@ -116,7 +116,7 @@
         "size": 104128
       },
       "kernelsu": {
-        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/kernelsu/ksud-A566EXXSCCZG6-kdp",
+        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/targets/afzf5/kernelsu/ksud-A566EXXSCCZG6-kdp",
         "size": 4765336
       }
     },
@@ -130,7 +130,7 @@
         "size": 128688
       },
       "kernelsu": {
-        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/kernelsu/ksud-A366WVLS3AYG1-kdp",
+        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/targets/afzf5/kernelsu/ksud-A366WVLS3AYG1-kdp",
         "size": 4889120
       }
     },
@@ -144,7 +144,7 @@
         "size": 137728
       },
       "kernelsu": {
-        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/kernelsu/ksud-dm3q-S9180ZHS8FZF5-kdp",
+        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/targets/afzf5/kernelsu/ksud-dm3q-S9180ZHS8FZF5-kdp",
         "size": 4556352
       }
     },
@@ -159,7 +159,7 @@
         "size": 104128
       },
       "kernelsu": {
-        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/kernelsu/ksud-e1s-S921NKSSFDZF3-kdp",
+        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/targets/afzf5/kernelsu/ksud-e1s-S921NKSSFDZF3-kdp",
         "size": 4758872
       }
     }

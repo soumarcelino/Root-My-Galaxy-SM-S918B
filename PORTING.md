@@ -24,8 +24,8 @@
 app-src/app/src/main/assets/cve-2026-43499-app.so   # App 实际加载的 payload（闭源引擎 + F731U 偏移）
 app-src/app/src/main/assets/ksud-f731u-kdp           # KernelSU daemon（KDP 排除版）
 app-src/app/src/main/jniLibs/arm64-v8a/libcve43499root.so  # root helper（闭源 root 组件）
-kernelsu/ksud-f731u-kdp                              # 备份
-kernelsu/android13-5.15.189_kernelsu.ko              # KernelSU 内核模块
+targets/afzf5/kernelsu/ksud-f731u-kdp                              # 备份
+targets/afzf5/kernelsu/android13-5.15.189_kernelsu.ko              # KernelSU 内核模块
 support/cve-2026-43499-app.so                        # 备份
 artifacts/f731u-F731USQS8GZF1/cve-2026-43499-app.so # 备份
 artifacts/t870-T870XXS8DXH1/*                        # Tab S7（4.19）开源编译版（老架构，仅供对照）
@@ -96,7 +96,7 @@ python3 tools/patch_payload.py \
 
 ### 4.1 准备
 - 目标机型固件（AP 文件）→ boot.img → 内核 Image → vmlinux-to-elf 恢复符号
-- 参考仓库 `src/targets/<机型>/target.h`（开源符号偏移，可交叉验证）
+- 参考仓库 `targets/<firmware>/payload/src/targets/<机型>/target.h`（开源符号偏移，可交叉验证）
 
 ### 4.2 找基准引擎
 - 从 s9180-root-kit 包 `payloads/` 选**内核版本最接近**的机型 payload（5.15 系列选 q5q/dm3q，6.1 选 e3q 等）

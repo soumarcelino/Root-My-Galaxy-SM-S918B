@@ -1,8 +1,8 @@
 # Android/Gradle outputs
 **/.gradle/
 **/build/
-!/afzh3-open-payload-engine/build/
-!/zzhl-open-payload-engine/build/
+!/targets/afzh3/open-payload-engine/build/
+!/targets/zzhl-WIP/open-payload-engine/build/
 **/.cxx/
 local.properties
 
@@ -14,7 +14,8 @@ local.properties
 *.tar
 *.tar.*
 *.bin
-kernelsu-next/out/
+targets/afzh3/kernelsu-next/out/
+targets/afzg1/kernelsu-next/out/
 simple-root/evidence/
 simple-root/assets/*
 !simple-root/assets/ksud-selected

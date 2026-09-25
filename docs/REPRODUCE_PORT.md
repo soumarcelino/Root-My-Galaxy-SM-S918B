@@ -53,8 +53,8 @@ Steps:
 ```text
 1. Validate the connected ADB device against the SM-S918B target profile.
 2. Verify the MD5 of the F731U base payload.
-3. Apply tools/f731u-to-dm3q-s918b-afzf5.spec.json.
-4. Generate out/dm3q-S918BXXSAFZF5/cve-2026-43499-app.so.
+3. Apply targets/afzf5/specs/f731u-to-dm3q-s918b-afzf5.spec.json.
+4. Generate targets/afzf5/payload/build/cve-2026-43499-app.so.
 5. Verify the generated payload MD5 and size.
 6. Create app/src/main/assets/support/targets-v2.json.
 7. Copy local runtime assets into app/src/main/assets/payloads/.
@@ -68,7 +68,7 @@ Default input paths:
 
 ```text
 tools/patch_payload.py
-tools/f731u-to-dm3q-s918b-afzf5.spec.json
+targets/afzf5/specs/f731u-to-dm3q-s918b-afzf5.spec.json
 ~/Projects/rmg-f731u/app-src/app/src/main/assets/cve-2026-43499-app.so
 ~/Projects/rmg-f731u/app-src/app/src/main/assets/ksud-f731u-kdp
 ~/Projects/rmg-f731u/app-src/app/src/main/jniLibs/arm64-v8a/libcve43499root.so

@@ -1,16 +1,15 @@
 Target: Samsung SM-S918B (dm3q), firmware S918BXXSAFZF5
 
 app/       Root-My-Galaxy Android application adapted for the dm3q profile
-app-src/   Upstream app source snapshot kept for reference
-src/       Payload source tree snapshot
+targets/afzf5/payload/src/   Native AFZF5 payload source and target headers
 support/   Upstream support feed/schema examples
-kernelsu/  KernelSU notes, patch and helper scripts, without module binaries
+targets/afzf5/kernelsu/  KernelSU notes, patch and helper scripts, without module binaries
 tools/     Porting tools and the dm3q patch spec
 docs/      English documentation split out from the main README
 Makefile   Native payload build entry point from the payload source tree
 
 Primary patch spec:
-tools/f731u-to-dm3q-s918b-afzf5.spec.json
+targets/afzf5/specs/f731u-to-dm3q-s918b-afzf5.spec.json
 
 Reproducible port/build helper:
 tools/port-sm-s918b-afzf5.sh
@@ -19,8 +18,9 @@ Bundled app target profile:
 app/src/main/assets/support/targets-v2.json
 
 Patched payload:
-out/dm3q-S918BXXSAFZF5/cve-2026-43499-app.so
+targets/afzf5/payload/cve-2026-43499-app.so
 MD5 f6298194afb543d618b6f7015d1d08eb
+Regenerated output: targets/afzf5/payload/build/cve-2026-43499-app.so
 
 Bundled KernelSU loader:
 app/src/main/assets/payloads/dm3q-S918BXXSAFZF5/ksud-f731u-kdp

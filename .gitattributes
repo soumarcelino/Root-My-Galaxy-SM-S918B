@@ -1,2 +1,2 @@
 # Unified diff context lines require a leading space.
-kernelsu-next/patches/*.patch -whitespace
+targets/afzh3/kernelsu-next/patches/*.patch -whitespace
