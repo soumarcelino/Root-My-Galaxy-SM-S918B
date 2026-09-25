@@ -26,7 +26,7 @@ $(OUTDIR):
 
 SRCS := src/main.c src/kaslr.c src/slabinfo.c src/fops_install.c src/fops_spray.c src/groom.c src/futex_trigger.c src/sigusr1_payload.c src/aar_aaw.c src/pipe_physrw.c src/root_umh.c
 
-$(BIN) $(SOBIN): src/diag_checkpoint.h
+$(BIN) $(SOBIN): src/diag_checkpoint.h src/kernelsnitch/kernelsnitch.h
 
 $(BIN): $(SRCS) | $(OUTDIR)
 	$(TARGET_CC) -fPIE -pie -O2 -g0 -Wall -Wextra -Wno-unused-parameter -Isrc $(SRCS) -pthread -o $@

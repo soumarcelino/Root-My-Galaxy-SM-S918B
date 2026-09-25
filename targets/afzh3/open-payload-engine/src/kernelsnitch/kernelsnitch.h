@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <limits.h>
+#include <stdatomic.h>
 
 #define FUTEX_SZ (64ULL<<30)
 #define FUTEX_MMAP_SZ (1ULL<<30)
@@ -67,7 +68,7 @@ struct kernelsnitch_shared_state {
     size_t confirmed_collisions;
 
     volatile unsigned char *futexes;
-    volatile unsigned char inc_futex[KS_PAGE_SIZE];
+    _Alignas(4) volatile unsigned char inc_futex[KS_PAGE_SIZE];
 
     volatile size_t *futex_addrs;
     volatile size_t *times;
@@ -463,6 +464,264 @@ void kernelsnitch_find_collisions(struct kernelsnitch_shared_state *ks)
     }
     __decrease(ks);
 }
+/****************************************************************************************************************/
+/* Parallel multi-core collision search                                                                     */
+/*                                                                                                              */
+/* Same contract as kernelsnitch_find_collisions(): piles ks->appended_futexes waiters into bucket ID and      */
+/* fills ks->futex_addrs[1..collisions-1] with colliding user addresses, then sets ks->confirmed_collisions    */
+/* and ks->state. Differences:                                                                                 */
+/*   - the candidate scan is sharded (strided) across every online CPU, one worker pinned per core;            */
+/*   - each worker builds its OWN per-core timing baseline, so the prime/perf/efficiency cores of a big.LITTLE */
+/*     SoC each get a fair threshold;                                                                          */
+/*   - the estimator is min-of-K instead of avg-of-lowest-8-of-64: no qsort; a second sampling window           */
+/*     confirms candidates that exceed the per-core empty-bucket threshold;                                   */
+/*   - every worker early-exits through an atomic slot counter the instant `wanted` collisions are claimed.    */
+/****************************************************************************************************************/
+#ifndef KS_PAR_SCREEN_SAMPLES
+#define KS_PAR_SCREEN_SAMPLES 8
+#endif
+#ifndef KS_PAR_CONFIRM_SAMPLES
+#define KS_PAR_CONFIRM_SAMPLES 24
+#endif
+#ifndef KS_PAR_BASELINE_SAMPLES
+#define KS_PAR_BASELINE_SAMPLES 32
+#endif
+
+/* min-of-`samples` FUTEX_WAKE(val=0) latency: pure hash-bucket traversal cost.
+ * min is the robust timing estimator here - scheduling noise can only push a
+ * sample up, never below the true traversal cost, so the minimum is clean. */
+static size_t __measure_min(size_t futex_addr, size_t samples)
+{
+    size_t best = (size_t)-1;
+    for (size_t l = 0; l < samples; ++l) {
+        size_t t0 = rdtsc_begin();
+        SYSCHK(__futex((unsigned int *)futex_addr, FUTEX_WAKE_PRIVATE, 0, NULL, NULL, 0));
+        size_t t1 = rdtsc_end();
+        size_t d = t1 - t0;
+        if (d < best)
+            best = d;
+    }
+    return best;
+}
+
+struct ks_par_ctx {
+    struct kernelsnitch_shared_state *ks;
+    size_t nworkers;
+    size_t wanted;
+    size_t threshold_mult;
+    atomic_size_t next_slot;   /* claims into ks->futex_addrs[1..wanted]   */
+    atomic_int stop;           /* raised once `wanted` collisions are found */
+};
+
+struct ks_par_worker {
+    struct ks_par_ctx *ctx;
+    size_t id;
+    int cpu;
+};
+
+static void *__ks_par_worker(void *arg)
+{
+    struct ks_par_worker *w = (struct ks_par_worker *)arg;
+    struct ks_par_ctx *ctx = w->ctx;
+    struct kernelsnitch_shared_state *ks = ctx->ks;
+
+    /* dedicate this worker to a single core */
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    CPU_SET(w->cpu, &set);
+    sched_setaffinity(0, sizeof(set), &set);
+
+    /* per-core baseline: fastest wake of a couple of known-empty buckets */
+    size_t base = __measure_min((size_t)&ks->futexes[0], KS_PAR_BASELINE_SAMPLES);
+    size_t base2 = __measure_min((size_t)&ks->futexes[KS_PAGE_SIZE + 8], KS_PAR_BASELINE_SAMPLES);
+    if (base2 < base)
+        base = base2;
+    size_t threshold = base * ctx->threshold_mult;
+
+    for (size_t i = 2 + w->id; i < ks->total_futexes; i += ctx->nworkers) {
+        if (atomic_load_explicit(&ctx->stop, memory_order_relaxed))
+            break;
+        size_t id = (i * KS_PAGE_SIZE) | (i * 8 % KS_PAGE_SIZE);
+        if (id >= FUTEX_SZ)
+            break;
+        size_t futex_addr = (size_t)&ks->futexes[id];
+
+        if (__measure_min(futex_addr, KS_PAR_SCREEN_SAMPLES) <= threshold)
+            continue;
+        /* confirm with a longer min window; a fast bucket cannot survive it */
+        size_t tc = __measure_min(futex_addr, KS_PAR_CONFIRM_SAMPLES);
+        if (tc <= threshold)
+            continue;
+
+        size_t slot = atomic_fetch_add_explicit(&ctx->next_slot, 1, memory_order_relaxed);
+        if (slot >= ctx->wanted) {
+            atomic_store_explicit(&ctx->stop, 1, memory_order_relaxed);
+            break;
+        }
+        ks->futex_addrs[slot + 1] = futex_addr;
+        if (slot + 1 == ctx->wanted)
+            atomic_store_explicit(&ctx->stop, 1, memory_order_relaxed);
+    }
+    return NULL;
+}
+
+/* A shared mapping holds the waiter stacks. This reduces stack allocation
+ * overhead, but pthread lifecycle still dominates measured runtime on bionic.
+ * The caller selects the waiter count through the KernelSnitch profile. */
+#ifndef KS_WAITER_STACK
+#define KS_WAITER_STACK (128 * 1024)
+#endif
+struct ks_pile {
+    void *stacks;       /* single mmap backing every waiter stack */
+    size_t stacks_len;
+};
+static unsigned int *__ks_gate(struct kernelsnitch_shared_state *ks, size_t id)
+{
+    assert((id & 3) == 0);
+    return (unsigned int *)(void *)ks->inc_futex + id / 4;
+}
+static void *__do_increase_fast(void *arg)
+{
+    struct inc_arg *inc_arg = arg;
+    unsigned int *gate = __ks_gate(inc_arg->ks, inc_arg->id);
+    int ret = __futex(gate, FUTEX_WAIT_PRIVATE, 0, NULL, NULL, 0);
+    /* EAGAIN means teardown closed the gate before this thread waited. */
+    if (ret == -1 && errno != EAGAIN)
+        pr_error("futex waiter: %m\n");
+    free(inc_arg);
+    return NULL;
+}
+static void __increase_fast(struct kernelsnitch_shared_state *ks, size_t id,
+                            size_t amount, struct ks_pile *pile)
+{
+    /* A late starter must observe the closed gate instead of sleeping after
+     * the final wake. The futex word is four-byte aligned (ID is 128). */
+    __atomic_store_n(__ks_gate(ks, id), 0, __ATOMIC_RELEASE);
+    size_t slice = KS_WAITER_STACK;
+    pile->stacks_len = amount * slice;
+    pile->stacks = SYSCHK(mmap(0, pile->stacks_len, PROT_READ | PROT_WRITE,
+                               MAP_ANON | MAP_PRIVATE | MAP_NORESERVE, -1, 0));
+
+    ks->increase_tids = calloc(amount, sizeof(*ks->increase_tids));
+    ASSERT_pr((ks->increase_tids != NULL), "failed to allocate futex waiter ids\n");
+    ks->increase_count = amount;
+    ks->increase_id = id;
+
+    pthread_attr_t attr;
+    ASSERT_pr(pthread_attr_init(&attr) == 0, "pthread_attr_init failed\n");
+    ASSERT_pr(pthread_attr_setguardsize(&attr, 0) == 0,
+              "pthread_attr_setguardsize failed\n");
+
+    for (size_t i = 0; i < amount; ++i) {
+        void *stack = (unsigned char *)pile->stacks + i * slice;
+        ASSERT_pr(pthread_attr_setstack(&attr, stack, slice) == 0,
+                  "pthread_attr_setstack failed\n");
+        struct inc_arg *inc_arg = calloc(1, sizeof(struct inc_arg));
+        ASSERT_pr(inc_arg != NULL, "waiter argument allocation failed\n");
+        inc_arg->id = id;
+        inc_arg->ks = ks;
+        ASSERT_pr(pthread_create(&ks->increase_tids[i], &attr,
+                                 __do_increase_fast, inc_arg) == 0,
+                  "pthread_create failed\n");
+    }
+    pthread_attr_destroy(&attr);
+    WAIT();
+}
+
+/* Close the gate before waking so late starters cannot sleep past the wake. */
+static void __decrease_fast(struct kernelsnitch_shared_state *ks, struct ks_pile *pile)
+{
+    if (!ks->increase_tids)
+        return;
+    __atomic_store_n(__ks_gate(ks, ks->increase_id), 1,
+                     __ATOMIC_RELEASE);
+    SYSCHK(__futex((unsigned int *)&ks->inc_futex[ks->increase_id],
+                   FUTEX_WAKE_PRIVATE, INT_MAX, NULL, NULL, 0));
+    for (size_t i = 0; i < ks->increase_count; ++i)
+        ASSERT_pr(pthread_join(ks->increase_tids[i], NULL) == 0,
+                  "pthread_join failed\n");
+    free(ks->increase_tids);
+    ks->increase_tids = NULL;
+    ks->increase_count = 0;
+    if (pile->stacks)
+        munmap(pile->stacks, pile->stacks_len);
+    pile->stacks = NULL;
+}
+
+void kernelsnitch_find_collisions_parallel(struct kernelsnitch_shared_state *ks)
+{
+    ASSERT_pr((ks->state == KERNELSNITCH_INIT), "wrong state\n");
+    ASSERT_pr((ks->collisions >= 2), "need at least one collision\n");
+
+    long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+    if (ncpu < 1)
+        ncpu = 1;
+    size_t nworkers = (size_t)ncpu;
+    size_t wanted = ks->collisions - 1;
+
+    ks->confirmed_collisions = 0;
+    ks->collision_min_time = (size_t)-1;
+
+    int ks_timing = (getenv("KS_TIMING") != NULL);
+    size_t __t_pile0 = ks_timing ? gettime_ns() : 0;
+
+    /* pile the target bucket (shared-stack waiters for a cheap create/join) */
+    struct ks_pile pile = {0};
+    ks->futex_addrs[0] = (size_t)&ks->inc_futex[ID];
+    __increase_fast(ks, ID, ks->appended_futexes, &pile);
+    size_t __t_pile1 = ks_timing ? gettime_ns() : 0;
+    if (ks->verbose) pr_info("start finding collisisons (parallel, %zd workers)\n", nworkers);
+
+    struct ks_par_ctx ctx;
+    ctx.ks = ks;
+    ctx.nworkers = nworkers;
+    ctx.wanted = wanted;
+    ctx.threshold_mult = KERNELSNITCH_THRESHOLD_MULT;
+    atomic_init(&ctx.next_slot, 0);
+    atomic_init(&ctx.stop, 0);
+
+    pthread_t *wt = (pthread_t *)calloc(nworkers, sizeof(*wt));
+    struct ks_par_worker *wa = (struct ks_par_worker *)calloc(nworkers, sizeof(*wa));
+    ASSERT_pr((wt != NULL && wa != NULL), "failed to allocate parallel workers\n");
+    for (size_t i = 0; i < nworkers; ++i) {
+        wa[i].ctx = &ctx;
+        wa[i].id = i;
+        wa[i].cpu = (int)(i % nworkers);
+        SYSCHK(pthread_create(&wt[i], NULL, __ks_par_worker, &wa[i]));
+    }
+    for (size_t i = 0; i < nworkers; ++i)
+        pthread_join(wt[i], NULL);
+    free(wt);
+    free(wa);
+
+    size_t __t_scan1 = ks_timing ? gettime_ns() : 0;
+
+    size_t count = atomic_load(&ctx.next_slot);
+    if (count > wanted)
+        count = wanted;
+    for (size_t i = 1; i <= count; ++i) {
+        size_t measured = __measure_min(ks->futex_addrs[i],
+                                        KS_PAR_CONFIRM_SAMPLES);
+        if (measured < ks->collision_min_time)
+            ks->collision_min_time = measured;
+    }
+    ks->confirmed_collisions = count;
+    if (count == wanted) {
+        if (ks->verbose) pr_info("found %zd collisisons\n", count);
+        ks->state = KERNELSNITCH_COLLISIONS_FOUND;
+    } else {
+        pr_warning("only found %zd collisions -> cannot continue\n", count);
+        ks->state = KERNELSNITCH_COLLISIONS_NOT_FOUND;
+    }
+    __decrease_fast(ks, &pile);
+    if (ks_timing) {
+        size_t __t_dec1 = gettime_ns();
+        fprintf(stderr, "    [timing] pile=%.1f ms  scan=%.1f ms  decrease=%.1f ms\n",
+                (__t_pile1 - __t_pile0) / 1.0e6, (__t_scan1 - __t_pile1) / 1.0e6,
+                (__t_dec1 - __t_scan1) / 1.0e6);
+    }
+}
+
 size_t kernelsnitch_found_collisions(struct kernelsnitch_shared_state *ks)
 {
     ASSERT_pr((ks->state == KERNELSNITCH_COLLISIONS_FOUND || ks->state == KERNELSNITCH_COLLISIONS_NOT_FOUND), "wrong state\n");
