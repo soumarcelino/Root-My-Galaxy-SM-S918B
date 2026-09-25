@@ -4,6 +4,9 @@
 assets on an Android device, runs the launcher gate, loads the payload through
 `LD_PRELOAD`, loads KernelSU, and checks `su -c id`.
 
+The runner always uses `targets/afzh3/` for the payload engine, helper, and
+KernelSU artifacts. It does not select a firmware target from the environment.
+
 ## Build and assets
 
 At each run, the script:
@@ -14,9 +17,9 @@ At each run, the script:
    The helper starts `ksud-selected`, which contains the module for late-load.
 2. Compiles `../stability-launcher/stability-launcher.c` for Android ARM64/API
    35 and copies the binary to `assets/stability-launcher`.
-3. Builds only the shared-library target in `../afzh3-open-payload-engine/`
+3. Builds only the shared-library target in `../targets/afzh3/open-payload-engine/`
    and copies `build/payload.so` to `assets/payload.so`.
-4. Builds the AFZH3 helper from `src/su_daemon.c` for Android ARM64/API 35 and
+4. Builds the AFZH3 helper in `targets/afzh3/helper/` for Android ARM64/API 35 and
    copies it to `assets/ksu-helper`.
 
 The payload itself is produced by the open payload engine. `app_main` is not
@@ -29,11 +32,11 @@ The resulting asset set is:
 
 | Asset | Source |
 | --- | --- |
-| `assets/payload.so` | `afzh3-open-payload-engine/build/payload.so` |
+| `assets/payload.so` | `targets/afzh3/open-payload-engine/build/payload.so` |
 | `assets/stability-launcher` | `stability-launcher/build/stability-launcher` |
-| `assets/ksu-helper` | `src/su_daemon.c` via `simple-root/build/cve-2026-43499-root` |
-| `assets/ksud-selected` | `kernelsu-next/out/kernelsu-next-afzh3-v3.4.0/ksud-next-v3.4.0` |
-| `assets/android13-5.15_kernelsu.ko` | `kernelsu-next/out/kernelsu-next-afzh3-v3.4.0/android13-5.15_kernelsu.ko` |
+| `assets/ksu-helper` | `targets/afzh3/helper/su_daemon.c` via `targets/afzh3/helper/build/cve-2026-43499-root` |
+| `assets/ksud-selected` | `targets/afzh3/kernelsu-next/out/kernelsu-next-afzh3-v3.4.0/ksud-next-v3.4.0` |
+| `assets/android13-5.15_kernelsu.ko` | `targets/afzh3/kernelsu-next/out/kernelsu-next-afzh3-v3.4.0/android13-5.15_kernelsu.ko` |
 
 ## Run
 

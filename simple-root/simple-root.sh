@@ -26,7 +26,8 @@ if [[ $# -gt 1 ]]; then
 fi
 
 PROJECT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
-KSUD_DIR="$PROJECT_DIR/kernelsu-next/out/kernelsu-next-afzh3-v3.4.0"
+TARGET_DIR="$PROJECT_DIR/targets/afzh3"
+KSUD_DIR="$TARGET_DIR/kernelsu-next/out/kernelsu-next-afzh3-v3.4.0"
 KSUD_SOURCE="$KSUD_DIR/ksud-next-v3.4.0"
 KSUD_MODULE="$KSUD_DIR/android13-5.15_kernelsu.ko"
 KSUD_ASSET=ksud-selected
@@ -53,9 +54,9 @@ install -m 755 "$KSUD_SOURCE" "$ASSET_DIR/$KSUD_ASSET"
 install -m 644 "$KSUD_MODULE" "$ASSET_DIR/$KSUD_MODULE_ASSET"
 
 LAUNCHER_DIR="$PROJECT_DIR/stability-launcher"
-ENGINE_DIR="$PROJECT_DIR/afzh3-open-payload-engine"
-HELPER_BUILD_DIR="$SCRIPT_DIR/build"
-HELPER_BINARY="$HELPER_BUILD_DIR/cve-2026-43499-root"
+ENGINE_DIR="$TARGET_DIR/open-payload-engine"
+HELPER_DIR="$TARGET_DIR/helper"
+HELPER_BINARY="$HELPER_DIR/build/cve-2026-43499-root"
 NDK_DIR="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-$HOME/Android/Sdk/ndk/28.2.13676358}}"
 LAUNCHER_CC="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
 if [[ ! -x "$LAUNCHER_CC" ]]; then
@@ -83,12 +84,8 @@ make -C "$ENGINE_DIR" -B -j2 so
 install -m 755 "$ENGINE_DIR/build/payload.so" "$ASSET_DIR/payload.so"
 
 # Build the open-source helper used for both UMH and KernelSU late-load.
-printf '[*] Compilando helper AFZH3 de src/su_daemon.c\n'
-make -B -C "$PROJECT_DIR" \
-  "ANDROID_NDK_HOME=$NDK_DIR" \
-  TARGET=dm3q-S918BXXSAFZH3 \
-  "OUTDIR=$HELPER_BUILD_DIR" \
-  "$HELPER_BINARY"
+printf '[*] Compilando helper AFZH3 de targets/afzh3/helper/su_daemon.c\n'
+make -B -C "$HELPER_DIR" "ANDROID_NDK_HOME=$NDK_DIR"
 install -m 755 "$HELPER_BINARY" "$ASSET_DIR/ksu-helper"
 
 assets=(ksu-helper payload.so "$KSUD_ASSET" "$KSUD_MODULE_ASSET" stability-launcher)
