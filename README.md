@@ -52,18 +52,14 @@ kernel build: #1 SMP PREEMPT Tue Aug 11 06:33:52 UTC 2026
 Before running the port, make sure the phone is ready:
 
 1. **Enable Developer options and USB debugging**.
-2. **Enable "Disable child process restrictions"** in Developer options
-   (wording varies by One UI version; it sits next to the USB debugging
-   toggles). Shizuku needs this to spawn the helper processes the port
-   relies on.
-3. **Install [Shizuku](https://shizuku.rikka.app/).** It performs the
+2. **Install [Shizuku](https://shizuku.rikka.app/).** It performs the
    privileged operations this app needs, without a full root shell.
-4. **Reboot the phone.** A clean boot avoids stale permission/service state
+3. **Reboot the phone.** A clean boot avoids stale permission/service state
    and makes the whole flow work on the first try.
-5. **Close every other app and background process.** Keep only Shizuku and
+4. **Close every other app and background process.** Keep only Shizuku and
    Root My Galaxy running.
-6. **Start the Shizuku service**
-7. **Open Root My Galaxy** and grant it permission when Shizuku prompts.
+5. **Start the Shizuku service**
+6. **Open Root My Galaxy** and grant it permission when Shizuku prompts.
 
 The script prints the manual ADB test commands at the end. It does not open a
 root shell automatically.
@@ -110,16 +106,21 @@ Build, install, and stage local ADB files:
 ```
 
 
-## Important Files
+## Repository Structure
 
 ```text
-tools/port-sm-s918b-afzf5.sh
-targets/afzf5/specs/f731u-to-dm3q-s918b-afzf5.spec.json
-tools/patch_payload.py
-app/src/main/assets/targets-v3.json
-RootMyGalaxyDesktop/assets/profiles.json
-targets/afzf5/payload/src/targets/dm3q-S918BXXSAFZF5/target.h
-targets/afzf5/payload/src/targets/dm3q-S918BXXSAFZF5/p0_fingerprint.h
+app/                    Android app, Gradle build, and bundled target profiles
+RootMyGalaxyDesktop/    Desktop runner and its runtime assets
+simple-root/            ADB runner for the AFZH3 open payload
+stability-launcher/     Launcher used by the AFZH3 root flow
+targets/
+  afzf5/                AFZF5 native payload, helper, KernelSU, and specs
+  afzg1/                AFZG1 payload, helper, and KernelSU Next
+  afzh3/                AFZH3 open payload engine, helper, and KernelSU Next
+  zzhl-WIP/             ZZHL firmware references and work-in-progress payload
+tools/                  Porting and payload patch tools
+docs/                   Project guides and screenshots
+Makefile                Native payload build entry point
 ```
 
 ## Credits And Base Repository
