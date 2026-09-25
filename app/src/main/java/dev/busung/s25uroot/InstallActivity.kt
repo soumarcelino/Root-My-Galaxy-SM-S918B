@@ -1,8 +1,12 @@
 package dev.busung.s25uroot
 
+import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.WindowManager
@@ -13,21 +17,47 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Error
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material3.Button
@@ -35,7 +65,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.LocalContentColor
@@ -46,20 +75,33 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.busung.s25uroot.ui.theme.ColorScheme_success
 import dev.busung.s25uroot.ui.theme.RootMyGalaxyTheme
 import kotlinx.coroutines.delay
 
@@ -123,6 +165,24 @@ internal val installerSteps = listOf(
     InstallerStep(R.string.step_ksu_title, R.string.step_ksu_detail, Icons.Rounded.Check),
 )
 
+private fun vibrateSuccess(context: Context) {
+    val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        context.getSystemService(VibratorManager::class.java)?.defaultVibrator
+    } else {
+        @Suppress("DEPRECATION")
+        context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+    } ?: return
+    if (!vibrator.hasVibrator()) return
+    // Crisp iOS-style double tap.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_DOUBLE_CLICK))
+    } else {
+        val timings = longArrayOf(0, 22, 55, 22)
+        val amplitudes = intArrayOf(0, 255, 0, 255)
+        vibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, -1))
+    }
+}
+
 private fun clickHaptic(view: View) {
     view.performHapticFeedback(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -140,10 +200,38 @@ private fun InstallScreen(
     onRetry: () -> Unit,
     onClose: () -> Unit,
 ) {
-    val logScrollState = rememberScrollState()
     val view = LocalView.current
-    LaunchedEffect(installState.log) {
-        logScrollState.scrollTo(logScrollState.maxValue)
+    val context = LocalContext.current
+    val scrollState = rememberScrollState()
+    var viewportCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var activeStepCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+
+    // Celebrate a freshly acquired root with a vibration (not on a screen that
+    // simply opens already rooted).
+    var previousPhase by remember { mutableStateOf<InstallPhase?>(null) }
+    LaunchedEffect(installState.phase) {
+        if (installState.phase == InstallPhase.Installed &&
+            previousPhase != null &&
+            previousPhase != InstallPhase.Installed
+        ) {
+            vibrateSuccess(context)
+        }
+        previousPhase = installState.phase
+    }
+
+    // Smoothly keep the active step centred as execution advances.
+    LaunchedEffect(installState.executionStage, installState.phase) {
+        delay(90)
+        val viewport = viewportCoords ?: return@LaunchedEffect
+        val row = activeStepCoords ?: return@LaunchedEffect
+        if (!viewport.isAttached || !row.isAttached) return@LaunchedEffect
+        val rowTop = viewport.localPositionOf(row, Offset.Zero).y
+        val target = (scrollState.value + rowTop - (viewport.size.height - row.size.height) / 2f)
+            .coerceIn(0f, scrollState.maxValue.toFloat())
+        scrollState.animateScrollTo(
+            target.toInt(),
+            animationSpec = tween(durationMillis = 650, easing = FastOutSlowInEasing),
+        )
     }
 
     Scaffold { padding ->
@@ -152,39 +240,50 @@ private fun InstallScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Column(
-                modifier = Modifier.padding(top = 28.dp, bottom = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .onGloballyPositioned { viewportCoords = it }
+                    .verticalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Text(
-                    text = stringResource(R.string.install_title),
-                    style = MaterialTheme.typography.headlineLarge,
-                )
-                Text(
-                    text = if (installState.busy) {
-                        stringResource(R.string.install_keep_open)
-                    } else {
-                        installState.message
-                    },
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+                Column(
+                    modifier = Modifier.padding(top = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.install_title),
+                        style = MaterialTheme.typography.headlineLarge,
+                    )
+                    Text(
+                        text = if (installState.busy) {
+                            stringResource(R.string.install_keep_open)
+                        } else {
+                            installState.message
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
 
-            InstallerStatusCard(installState, uninstallRoot)
-            ExecutionJourneyCard(installState)
-            InstallerLog(
-                output = installState.log,
-                modifier = Modifier.weight(1f),
-                scrollState = logScrollState,
-            )
+                if (installState.phase == InstallPhase.Installed) {
+                    SuccessCard(installState, uninstallRoot)
+                } else {
+                    StatusProgressCard(installState, uninstallRoot)
+                }
+                ExecutionStepper(
+                    installState = installState,
+                    onActiveStepPositioned = { activeStepCoords = it },
+                )
+                InstallerLog(installState)
+                Spacer(Modifier.height(4.dp))
+            }
 
             if (!installState.busy) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 20.dp),
+                        .padding(top = 12.dp, bottom = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     if (installState.phase == InstallPhase.Failed) {
@@ -224,8 +323,68 @@ private fun InstallScreen(
 }
 
 @Composable
-private fun InstallerStatusCard(installState: InstallUiState, uninstallRoot: Boolean) {
+private fun SuccessCard(installState: InstallUiState, uninstallRoot: Boolean) {
+    val success = ColorScheme_success
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(),
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = CardDefaults.cardColors(
+            containerColor = success.container,
+            contentColor = success.onContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(76.dp)
+                    .clip(CircleShape)
+                    .background(success.color),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.Check,
+                    contentDescription = null,
+                    tint = success.onColor,
+                    modifier = Modifier.size(46.dp),
+                )
+            }
+            Text(
+                text = installState.message,
+                style = MaterialTheme.typography.headlineSmall,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = installPhaseDetail(installState, uninstallRoot),
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                color = success.onContainer.copy(alpha = 0.85f),
+            )
+            if (installState.rootActive) {
+                Surface(shape = CircleShape, color = success.color) {
+                    Text(
+                        text = stringResource(R.string.root_live_active),
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp),
+                        color = success.onColor,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusProgressCard(installState: InstallUiState, uninstallRoot: Boolean) {
     val context = LocalContext.current
+    val failed = installState.phase == InstallPhase.Failed
     var rootDurationMillis by remember { mutableStateOf(AppPreferences.lastRootDurationMillis(context)) }
     var phaseStartedAt by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     var nowMillis by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
@@ -249,13 +408,14 @@ private fun InstallerStatusCard(installState: InstallUiState, uninstallRoot: Boo
         modifier = Modifier
             .fillMaxWidth()
             .animateContentSize(),
-        shape = MaterialTheme.shapes.large,
+        shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(
-            containerColor = when (installState.phase) {
-                InstallPhase.Failed -> MaterialTheme.colorScheme.errorContainer
-                else -> MaterialTheme.colorScheme.primaryContainer
+            containerColor = if (failed) {
+                MaterialTheme.colorScheme.errorContainer
+            } else {
+                MaterialTheme.colorScheme.primaryContainer
             },
-            contentColor = if (installState.phase == InstallPhase.Failed) {
+            contentColor = if (failed) {
                 MaterialTheme.colorScheme.onErrorContainer
             } else {
                 MaterialTheme.colorScheme.onPrimaryContainer
@@ -270,18 +430,14 @@ private fun InstallerStatusCard(installState: InstallUiState, uninstallRoot: Boo
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                AnimatedContent(targetState = installState.phase, label = "install-status-icon") { phase ->
-                    when {
-                        installState.busy -> LoadingIndicator(
+                AnimatedContent(targetState = installState.busy, label = "install-status-icon") { busy ->
+                    if (busy) {
+                        LoadingIndicator(
                             modifier = Modifier.size(44.dp),
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                         )
-                        phase == InstallPhase.Installed -> Icon(
-                            Icons.Rounded.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(44.dp),
-                        )
-                        else -> Icon(
+                    } else {
+                        Icon(
                             Icons.Rounded.Error,
                             contentDescription = null,
                             modifier = Modifier.size(44.dp),
@@ -299,20 +455,138 @@ private fun InstallerStatusCard(installState: InstallUiState, uninstallRoot: Boo
                     )
                 }
             }
-            if (installState.phase == InstallPhase.Checking ||
-                installState.phase == InstallPhase.Downloading
+            if (!failed) {
+                if (installState.phase == InstallPhase.Checking ||
+                    installState.phase == InstallPhase.Downloading
+                ) {
+                    LinearWavyProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = LocalContentColor.current,
+                        trackColor = LocalContentColor.current.copy(alpha = 0.2f),
+                    )
+                } else {
+                    LinearWavyProgressIndicator(
+                        progress = { phaseProgress },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = LocalContentColor.current,
+                        trackColor = LocalContentColor.current.copy(alpha = 0.2f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private enum class StepStatus { Completed, Active, Pending, Failed }
+
+@Composable
+private fun ExecutionStepper(
+    installState: InstallUiState,
+    onActiveStepPositioned: (LayoutCoordinates) -> Unit,
+) {
+    val current = installState.executionStage
+    val installed = installState.phase == InstallPhase.Installed
+    val failed = installState.phase == InstallPhase.Failed
+    val stages = ExecutionStage.entries
+    val lastStage = stages.last()
+
+    // Per-step timing. Each stage records when it first became current and when
+    // execution moved past it; the active stage keeps counting against `now`.
+    val starts = remember { mutableStateMapOf<ExecutionStage, Long>() }
+    val ends = remember { mutableStateMapOf<ExecutionStage, Long>() }
+    var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    LaunchedEffect(installState.busy) {
+        while (installState.busy) {
+            now = SystemClock.elapsedRealtime()
+            delay(500)
+        }
+        now = SystemClock.elapsedRealtime()
+    }
+    LaunchedEffect(installState.phase, current) {
+        val t = SystemClock.elapsedRealtime()
+        if (installState.phase == InstallPhase.Checking) {
+            starts.clear()
+            ends.clear()
+        }
+        if (starts[current] == null) starts[current] = t
+        stages.forEach { s ->
+            if (s.ordinal < current.ordinal && starts[s] != null && ends[s] == null) {
+                ends[s] = t
+            }
+        }
+        if ((installed || failed) && ends[current] == null) ends[current] = t
+    }
+
+    fun durationText(stage: ExecutionStage): String? {
+        val start = starts[stage] ?: return null
+        val end = ends[stage] ?: now
+        val seconds = (end - start).coerceAtLeast(0L) / 1_000L
+        return "%d:%02d".format(seconds / 60, seconds % 60)
+    }
+
+    // Total time from the start of the run until root is confirmed (or now).
+    val totalSeconds = starts[stages.first()]?.let { first ->
+        val end = ends[lastStage] ?: now
+        ((end - first).coerceAtLeast(0L) / 1_000L).toInt()
+    } ?: 0
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(),
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 4.dp)) {
+            Row(
+                modifier = Modifier.padding(bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                LinearWavyProgressIndicator(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = LocalContentColor.current,
-                    trackColor = LocalContentColor.current.copy(alpha = 0.2f),
+                Text(
+                    text = stringResource(R.string.execution_journey_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
                 )
-            } else {
-                LinearWavyProgressIndicator(
-                    progress = { phaseProgress },
-                    modifier = Modifier.fillMaxWidth(),
-                    color = LocalContentColor.current,
-                    trackColor = LocalContentColor.current.copy(alpha = 0.2f),
+                Text(
+                    text = stringResource(
+                        R.string.execution_stage_counter,
+                        (current.ordinal + 1).coerceAtMost(stages.size),
+                    ),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            stages.forEachIndexed { index, stage ->
+                val status = when {
+                    installed -> StepStatus.Completed
+                    failed && stage == current -> StepStatus.Failed
+                    stage.ordinal < current.ordinal -> StepStatus.Completed
+                    stage.ordinal == current.ordinal -> StepStatus.Active
+                    else -> StepStatus.Pending
+                }
+                val isLast = index == stages.lastIndex
+                val attach = status == StepStatus.Active || (installed && isLast)
+                StepRow(
+                    modifier = if (attach) {
+                        Modifier.onGloballyPositioned { onActiveStepPositioned(it) }
+                    } else {
+                        Modifier
+                    },
+                    stage = stage,
+                    stepNumber = index + 1,
+                    status = status,
+                    busy = installState.busy,
+                    isFirst = index == 0,
+                    isLast = isLast,
+                    durationText = durationText(stage),
+                    titleOverride = if (isLast) {
+                        stringResource(R.string.execution_root_activated_in, totalSeconds)
+                    } else {
+                        null
+                    },
                 )
             }
         }
@@ -320,70 +594,216 @@ private fun InstallerStatusCard(installState: InstallUiState, uninstallRoot: Boo
 }
 
 @Composable
-private fun ExecutionJourneyCard(installState: InstallUiState) {
-    val stage = installState.executionStage
-    val stageNumber = stage.ordinal + 1
-    val progress = stageNumber.toFloat() / ExecutionStage.entries.size
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-        ),
-    ) {
+private fun StepRow(
+    stage: ExecutionStage,
+    stepNumber: Int,
+    status: StepStatus,
+    busy: Boolean,
+    isFirst: Boolean,
+    isLast: Boolean,
+    durationText: String?,
+    titleOverride: String? = null,
+    modifier: Modifier = Modifier,
+) {
+    val success = ColorScheme_success
+    val title = titleOverride ?: executionStageTitle(stage)
+    val colorSpec = tween<Color>(durationMillis = 500, easing = FastOutSlowInEasing)
+    val incomingColor by animateColorAsState(
+        targetValue = if (status == StepStatus.Pending) {
+            MaterialTheme.colorScheme.outlineVariant
+        } else {
+            success.color
+        },
+        animationSpec = colorSpec,
+        label = "incoming",
+    )
+    val outgoingColor by animateColorAsState(
+        targetValue = if (status == StepStatus.Completed) {
+            success.color
+        } else {
+            MaterialTheme.colorScheme.outlineVariant
+        },
+        animationSpec = colorSpec,
+        label = "outgoing",
+    )
+    Row(modifier = modifier.height(IntrinsicSize.Min)) {
+        // The dot is vertically centered in the item: equal-weight segments
+        // above and below push it to the middle, and the segments join the
+        // neighbouring dots to form the timeline.
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier
+                .fillMaxHeight()
+                .width(30.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                Text(text = executionStageIcon(stage), fontSize = 30.sp)
-                Column(modifier = Modifier.weight(1f)) {
+            Box(
+                modifier = Modifier
+                    .width(2.dp)
+                    .weight(1f)
+                    .background(if (isFirst) Color.Transparent else incomingColor),
+            )
+            StepIndicator(stage, stepNumber, status, busy)
+            Box(
+                modifier = Modifier
+                    .width(2.dp)
+                    .weight(1f)
+                    .background(if (isLast) Color.Transparent else outgoingColor),
+            )
+        }
+        Column(
+            modifier = Modifier
+                .padding(start = 14.dp, top = 10.dp, bottom = 10.dp)
+                .weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(modifier = Modifier.weight(1f)) {
+                    if (status == StepStatus.Active) {
+                        ShimmerTitle(title)
+                    } else {
+                        val titleColor by animateColorAsState(
+                            targetValue = when (status) {
+                                StepStatus.Completed -> success.color
+                                StepStatus.Failed -> MaterialTheme.colorScheme.error
+                                else -> MaterialTheme.colorScheme.onSurface
+                            },
+                            animationSpec = colorSpec,
+                            label = "title",
+                        )
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = titleColor,
+                        )
+                    }
+                }
+                if (!isLast) {
+                    // Started steps that finish instantly read as 0:00; only
+                    // steps that never ran show the empty placeholder.
+                    val notStarted = durationText == null && status == StepStatus.Pending
                     Text(
-                        text = stringResource(R.string.execution_stage_counter, stageNumber),
+                        text = if (notStarted) "–:––" else durationText ?: "0:00",
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Text(
-                        text = executionStageTitle(stage),
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text(
-                        text = installState.executionDetail?.let { localizedExecutionDetail(it) }
-                            ?: executionStageDetail(stage),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                            alpha = if (notStarted) 0.4f else 1f,
+                        ),
+                        modifier = Modifier.padding(start = 8.dp),
                     )
                 }
             }
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier.fillMaxWidth(),
-                drawStopIndicator = {},
+            Text(
+                text = executionStageDetail(stage),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                    alpha = if (status == StepStatus.Pending) 0.55f else 0.85f,
+                ),
             )
-            Surface(
-                shape = MaterialTheme.shapes.small,
-                color = if (installState.rootActive) {
-                    MaterialTheme.colorScheme.tertiaryContainer
+        }
+    }
+}
+
+@Composable
+private fun ShimmerTitle(text: String) {
+    // White title with a gray spotlight sweeping across it.
+    val base = MaterialTheme.colorScheme.onSurface
+    val spotlight = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+    var widthPx by remember { mutableFloatStateOf(0f) }
+    val transition = rememberInfiniteTransition(label = "shimmer")
+    val progress by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1500, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "shimmer-progress",
+    )
+    val brush = if (widthPx > 0f) {
+        val band = widthPx * 0.4f
+        val startX = -band + (widthPx + band) * progress
+        Brush.linearGradient(
+            colors = listOf(base, spotlight, base),
+            start = Offset(startX, 0f),
+            end = Offset(startX + band, 0f),
+        )
+    } else {
+        SolidColor(base)
+    }
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleMedium.copy(brush = brush),
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.onGloballyPositioned { widthPx = it.size.width.toFloat() },
+    )
+}
+
+@Composable
+private fun StepIndicator(
+    stage: ExecutionStage,
+    stepNumber: Int,
+    status: StepStatus,
+    busy: Boolean,
+) {
+    val success = ColorScheme_success
+    val size = 30.dp
+    val backgroundColor by animateColorAsState(
+        targetValue = when (status) {
+            StepStatus.Completed -> success.color
+            StepStatus.Failed -> MaterialTheme.colorScheme.error
+            StepStatus.Active -> MaterialTheme.colorScheme.outline
+            StepStatus.Pending -> Color.Transparent
+        },
+        animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing),
+        label = "dot-bg",
+    )
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(backgroundColor)
+            .then(
+                if (status == StepStatus.Pending) {
+                    Modifier.border(2.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
                 } else {
-                    MaterialTheme.colorScheme.surfaceContainer
+                    Modifier
                 },
-            ) {
-                Text(
-                    text = if (installState.rootActive) {
-                        stringResource(R.string.root_live_active)
-                    } else {
-                        stringResource(R.string.root_live_waiting)
-                    },
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    color = if (installState.rootActive) {
-                        MaterialTheme.colorScheme.onTertiaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    style = MaterialTheme.typography.labelLarge,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        AnimatedContent(
+            targetState = status,
+            transitionSpec = {
+                (fadeIn(tween(240)) + scaleIn(initialScale = 0.5f, animationSpec = tween(240)))
+                    .togetherWith(fadeOut(tween(160)) + scaleOut(targetScale = 0.5f, animationSpec = tween(160)))
+            },
+            label = "dot-content",
+        ) { current ->
+            when (current) {
+                StepStatus.Completed -> Icon(
+                    Icons.Rounded.Check,
+                    contentDescription = null,
+                    tint = success.onColor,
+                    modifier = Modifier.size(18.dp),
+                )
+                StepStatus.Failed -> Icon(
+                    Icons.Rounded.Error,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onError,
+                    modifier = Modifier.size(18.dp),
+                )
+                StepStatus.Active -> if (busy) {
+                    LoadingIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                    )
+                } else {
+                    Box(Modifier.size(18.dp))
+                }
+                StepStatus.Pending -> Text(
+                    text = stepNumber.toString(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -468,33 +888,70 @@ private fun executionStageIcon(stage: ExecutionStage): String = when (stage) {
 }
 
 @Composable
-private fun InstallerLog(
-    output: String,
-    modifier: Modifier,
-    scrollState: androidx.compose.foundation.ScrollState,
-) {
+private fun InstallerLog(installState: InstallUiState) {
+    val view = LocalView.current
+    var expanded by remember { mutableStateOf(false) }
+    LaunchedEffect(installState.phase) {
+        if (installState.phase == InstallPhase.Failed) expanded = true
+    }
+    val logScrollState = rememberScrollState()
+    LaunchedEffect(installState.log, expanded) {
+        if (expanded) logScrollState.scrollTo(logScrollState.maxValue)
+    }
+    val chevronRotation by animateFloatAsState(if (expanded) 180f else 0f, label = "log-chevron")
+
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(stringResource(R.string.install_live_progress), style = MaterialTheme.typography.titleMedium)
-            Text(
-                text = output.ifBlank { stringResource(R.string.install_preparing) },
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
-                    .verticalScroll(scrollState),
-                fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp,
-                lineHeight = 18.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+                    .clickable {
+                        clickHaptic(view)
+                        expanded = !expanded
+                    }
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.install_live_progress),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = stringResource(R.string.install_log_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    )
+                }
+                Icon(
+                    Icons.Rounded.ExpandMore,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.rotate(chevronRotation),
+                )
+            }
+            AnimatedVisibility(visible = expanded) {
+                Text(
+                    text = installState.log.ifBlank { stringResource(R.string.install_preparing) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                        .heightIn(max = 240.dp)
+                        .verticalScroll(logScrollState),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                )
+            }
         }
     }
 }

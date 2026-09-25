@@ -8,10 +8,13 @@ import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -22,6 +25,38 @@ import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.rememberDynamicColorScheme
 import dev.busung.s25uroot.AccentColor
 import dev.busung.s25uroot.AppThemeMode
+
+/**
+ * Success (green) roles kept independent from the accent color so a completed
+ * install always reads as a pronounced green, regardless of the chosen accent.
+ * Values are Material tonal-green pairs tuned for light and dark surfaces.
+ */
+data class SuccessColors(
+    val color: Color,
+    val onColor: Color,
+    val container: Color,
+    val onContainer: Color,
+)
+
+private val LightSuccess = SuccessColors(
+    color = Color(0xFF2E6B39),
+    onColor = Color(0xFFFFFFFF),
+    container = Color(0xFFB2F1BB),
+    onContainer = Color(0xFF00210C),
+)
+
+private val DarkSuccess = SuccessColors(
+    color = Color(0xFF7EDB8B),
+    onColor = Color(0xFF00391A),
+    container = Color(0xFF105223),
+    onContainer = Color(0xFF9BF6A6),
+)
+
+/** Success palette matching the active theme brightness. */
+val ColorScheme_success: SuccessColors
+    @Composable
+    @ReadOnlyComposable
+    get() = if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) DarkSuccess else LightSuccess
 
 private val AppTypography = Typography(
     displaySmall = TextStyle(fontSize = 38.sp, lineHeight = 44.sp, fontWeight = FontWeight.Light),
