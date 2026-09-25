@@ -110,7 +110,7 @@ Build, install, and stage local ADB files:
 
 ```text
 app/                    Android app, Gradle build, and bundled target profiles
-RootMyGalaxyDesktop/    Desktop runner and its runtime assets
+RootMyGalaxyDesktop/    Desktop GUI and helper source
 simple-root/            ADB runner for the AFZH3 open payload
 stability-launcher/     Launcher used by the AFZH3 root flow
 targets/

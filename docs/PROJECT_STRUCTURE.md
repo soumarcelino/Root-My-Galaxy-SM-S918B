@@ -4,7 +4,7 @@
 
 - `app/`: standalone Android Gradle project, including wrapper, settings,
   source, assets, and build output.
-- `RootMyGalaxyDesktop/`: desktop runner and bundled runtime assets.
+- `RootMyGalaxyDesktop/`: desktop GUI and helper source; the GUI runs `simple-root/`.
 - `Makefile`: native build entry point; it selects sources inside each
   firmware's `payload/src/` and `helper/` directories.
 - `tools/`: shared porting tools.
@@ -12,7 +12,7 @@
 - `targets/afzh3/kernelsu-next/`: AFZH3 KernelSU Next build and reference.
 - `targets/afzg1/kernelsu-next/`: AFZG1 KernelSU Next build, guard, and patch.
 - `targets/afzg1/payload/`, `targets/afzg1/helper/`: AFZG1 payload and root
-  helper copies; app and desktop retain their packaging copies.
+  helper copies; the app retains its packaging copies.
 - `stability-launcher/`, `simple-root/`: launcher and root helper.
 - `docs/`: shared guides and screenshots.
 
