@@ -146,7 +146,7 @@ def encode_field(old_word, new_imm16):
 
 
 def main():
-    src = Path("/home/matias/Projects/Root-My-Galaxy-SM-S918B/payload.ZZHL.so")
+    src = Path(__file__).resolve().parent.parent / "targets/zzhl-WIP/firmware/payload.ZZHL.so"
     dst = Path("/tmp/claude-1000/-home-matias/8fd10a41-c9c3-4dff-a688-4ee3cb41e363/scratchpad/payload.ZZHL.extended.so")
     data = bytearray(src.read_bytes())
     if len(data) != 131072:
