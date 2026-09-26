@@ -1,142 +1,112 @@
-# Root My Galaxy SM-S918B
+# Root My Galaxy · SM-S918B
 
-Root My Galaxy v0.4.0 brings KernelSU Next support and exact firmware-profile
-selection to the Samsung Galaxy S23 Ultra `SM-S918B` (`dm3q`). This repository
-contains the Android app, target configuration, porting sources, patches, and
-build tools for the project.
+**Version 0.6.0** · Samsung Galaxy S23 Ultra (`SM-S918B`, `dm3q`)
+
+Root My Galaxy provides an Android app and a command-line runner for loading
+KernelSU on specific SM-S918B firmware builds. The app selects a bundled payload
+using the device's exact build and kernel identity. The AFZH3 path uses the open
+payload engine, a stability launcher, and KernelSU Next **v3.4.0**.
 
 [Releases](https://github.com/soumarcelino/Root-My-Galaxy-SM-S918B/releases) ·
 [Documentation](docs/README.md)
 
-Use this only on devices you own or are explicitly authorized to test.
+Use this project only on devices you own or are authorized to test. A matching
+model alone is insufficient: payloads and kernel modules are tied to a specific
+firmware build.
 
-# Root My Galaxy v0.4.0 is here
+## App screenshots
 
-## Firmware support added in v0.4.0
-
-- New support for firmware `S918BXXSAFZH3`.
-- Security patch level: `05/08/2026`.
-- The previous `S918BXXSAFZG1` payload remains bundled for older compatible
-  devices.
-
-## Now with KernelSU Next support
+AFZH3 installation flow: stabilization checks, the app's root verification
+screen, and the KernelSU Next v3.4.0 manager.
 
 <table>
   <tr>
-    <td align="center"><strong>Root My Galaxy app</strong></td>
-    <td align="center"><strong>KernelSU Next</strong></td>
+    <th>Stability readings</th>
+    <th>Root active</th>
+    <th>KernelSU Next v3.4.0</th>
   </tr>
   <tr>
-    <td align="center">
-      <img src="docs/assets/screenshots/root-my-galaxy-v0.3.0.jpg" alt="Root My Galaxy running on the SM-S918B" width="360">
-    </td>
-    <td align="center">
-      <img src="docs/assets/screenshots/kernelsu-next-v3.3.0.jpg" alt="KernelSU Next v3.3.0 working on the SM-S918B" width="360">
-    </td>
+    <td><img src="docs/assets/screenshots/root-my-galaxy-2026-09-25-222857.jpg" alt="Root My Galaxy displaying temperature and available memory during stabilization" width="280"></td>
+    <td><img src="docs/assets/screenshots/root-my-galaxy-2026-09-25-223609.jpg" alt="Root My Galaxy showing Root Active and KernelSU Next verified" width="280"></td>
+    <td><img src="docs/assets/screenshots/kernelsu-next-2026-09-25-223940.jpg" alt="KernelSU Next manager showing v3.4.0 working on the AFZH3 kernel" width="280"></td>
   </tr>
 </table>
 
-## Validated Target
+## Firmware profiles
+
+| Firmware | Root integration | Project files |
+| --- | --- | --- |
+| `S918BXXSAFZF5` | KernelSU | [`targets/afzf5/`](targets/afzf5/) |
+| `S918BXXSAFZG1` | KernelSU Next v3.3.0 | [`targets/afzg1/`](targets/afzg1/) |
+| `S918BXXSAFZH3` | KernelSU Next v3.4.0 | [`targets/afzh3/`](targets/afzh3/) |
+
+The app's [target manifest](app/src/main/assets/targets-v3.json) contains the
+exact build, fingerprint, kernel release, and artifacts for each profile. The
+`zzhl-WIP` directory is work in progress; it is not part of the AFZH3 flow.
+
+## AFZH3 target
+
+The current AFZH3 integration targets Android 16 and this exact device build:
 
 ```text
 model: SM-S918B
 device: dm3q
 build display: BP4A.251205.006.S918BXXSAFZH3
-fingerprint: samsung/dm3qxxx/dm3q:16/BP4A.251205.006/S918BXXSAFZH3:user/release-keys
 kernel release: 5.15.189-android13-8-33413713-abS918BXXSAFZH3
 kernel build: #1 SMP PREEMPT Tue Aug 11 06:33:52 UTC 2026
 ```
 
-## Prerequisites
+The AFZH3 KernelSU Next v3.4.0 module is built for Samsung's AFZH3 kernel.
+The generic v3.4.0 module is incompatible with this target; see the
+[AFZH3 KernelSU guide](targets/afzh3/kernelsu-next/README.md) for build and
+compatibility details.
 
-Before running the port, make sure the phone is ready:
+## Build and use
 
-1. **Enable Developer options and USB debugging**.
-2. **Install [Shizuku](https://shizuku.rikka.app/).** It performs the
-   privileged operations this app needs, without a full root shell.
-3. **Reboot the phone.** A clean boot avoids stale permission/service state
-   and makes the whole flow work on the first try.
-4. **Close every other app and background process.** Keep only Shizuku and
-   Root My Galaxy running.
-5. **Start the Shizuku service**
-6. **Open Root My Galaxy** and grant it permission when Shizuku prompts.
-
-The script prints the manual ADB test commands at the end. It does not open a
-root shell automatically.
-
-## Documentation
-
-- [Documentation Index](docs/README.md): all detailed project docs.
-- [Target Profile](docs/TARGET.md): exact device and firmware values expected by this port.
-- [Project Structure](docs/PROJECT_STRUCTURE.md): what each directory contains.
-- [Reproduce The Port](docs/REPRODUCE_PORT.md): full payload generation flow.
-- [Build, Install, And ADB](docs/BUILD_INSTALL_ADB.md): app build, install, staging, and manual test commands.
-- [Troubleshooting](docs/TROUBLESHOOTING.md): common failures and how to diagnose them.
-
-Upstream reference material is also kept in:
-
-- [PORTING.md](PORTING.md)
-- [PROJECT-MANIFEST.txt](PROJECT-MANIFEST.txt)
-- [targets/afzf5/kernelsu/README.md](targets/afzf5/kernelsu/README.md)
-- [KernelSU Next AFZG1](targets/afzg1/kernelsu-next/README.md)
-
-
-## Quick Start
-
-The Android app uses KernelSU Next v3.3.0 with a profile selected from the
-detected firmware. Both `S918BXXSAFZG1` and `S918BXXSAFZH3` have version-locked
-payloads and helpers; see [KernelSU Next AFZG1](targets/afzg1/kernelsu-next/README.md).
-
-From the repository root:
+To build the Android debug APK, install the Android SDK and JDK, then run:
 
 ```sh
-./tools/port-sm-s918b-afzf5.sh
+cd app
+./gradlew assembleDebug
 ```
 
-Build the debug APK:
+The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. After
+installing it, check that the detected firmware matches a bundled profile
+before starting the root flow. Shizuku is optional and is used only when its
+mode is enabled in the app.
 
-```sh
-./tools/port-sm-s918b-afzf5.sh --build-apk
-```
+For the AFZH3 command-line flow, use the
+[simple-root runner](simple-root/README.md). It builds and stages the AFZH3
+payload and launcher, then checks temporary root and KernelSU. Start from a
+clean boot and follow the runner's device checks before attempting a run.
 
-Build, install, and stage local ADB files:
-
-```sh
-./tools/port-sm-s918b-afzf5.sh --all
-```
-
-
-## Repository Structure
+## Repository layout
 
 ```text
-app/                    Android app, Gradle build, and bundled target profiles
+app/                    Android app and bundled target profiles
 RootMyGalaxyDesktop/    Desktop GUI and helper source
-simple-root/            ADB runner for the AFZH3 open payload
-stability-launcher/     Launcher used by the AFZH3 root flow
-targets/
-  afzf5/                AFZF5 native payload, helper, KernelSU, and specs
-  afzg1/                AFZG1 payload, helper, and KernelSU Next
-  afzh3/                AFZH3 open payload engine, helper, and KernelSU Next
-  zzhl-WIP/             ZZHL firmware references and work-in-progress payload
-tools/                  Porting and payload patch tools
+simple-root/            AFZH3 command-line runner
+stability-launcher/     AFZH3 launcher and stability gates
+targets/afzf5/          AFZF5 payload, helper, and KernelSU files
+targets/afzg1/          AFZG1 payload, helper, and KernelSU Next files
+targets/afzh3/          AFZH3 open payload, helper, and KernelSU Next files
+targets/zzhl-WIP/       Work in progress for another firmware build
+tools/                  Porting and development utilities
 docs/                   Project guides and screenshots
-Makefile                Native payload build entry point
 ```
 
-## Credits And Base Repository
+For implementation details, see the [AFZH3 open payload engine](targets/afzh3/open-payload-engine/README.md),
+the [KernelSU Next v3.4.0 guide](targets/afzh3/kernelsu-next/README.md), and
+the [documentation index](docs/README.md). The older porting guides under
+`docs/` describe the AFZF5/AFZG1 workflows and should not be used to prepare
+AFZH3 app assets.
 
-This SM-S918B port is based on
-[youyoudezhuzhu/rmg-f731u](https://github.com/youyoudezhuzhu/rmg-f731u), the
-Root-My-Galaxy F731U Z Flip5 payloads + APK repository.
+## Credits
 
-Credit goes to that project for the F731U app/payload baseline, closed helper
-flow, KernelSU late-load packaging, support manifest structure, and the porting
-procedure used as the starting point for this SM-S918B adaptation.
+This SM-S918B adaptation builds on
+[youyoudezhuzhu/rmg-f731u](https://github.com/youyoudezhuzhu/rmg-f731u).
 
-This repository is an adaptation for `SM-S918B` / `dm3q` with profiles for
-`S918BXXSAFZG1` and `S918BXXSAFZH3`, not the original F731U target.
-
-## 🇧🇷 É Brazuca também? 
+## 🇧🇷 É Brazuca também?
 
 Deixe um apoio usando Pix 💙
 
