@@ -8,6 +8,73 @@ laboratory research. Matching open kernel source is under
 `/home/matias/Projects/SM-S918B_16_Opensource/`; closed reference payload is
 `/home/matias/Projects/ksu-payload-functional/assets/ksu-payload`.
 
+## Direct pipe resolution with hardened-usercopy guard — 2026-09-26
+
+The deterministic pipe resolver is enabled by default. It walks
+`init_task.tasks` backward to reach the freshly exec'd payload quickly, then
+temporarily substitutes a synthetic `kmem_cache` descriptor only on each SLUB
+page whose protected fields must be read. Every substitution is restored and
+read back before continuing; an uncertain restoration is terminal. A safely
+restored resolution miss still falls back to the legacy pipe preparation.
+
+The isolated pipe PoC passed on two distinct clean boots in 12 ms and 15 ms,
+with the current task found after three and one reverse-list reads. Both runs
+proved pipe read/write without a hardened-usercopy panic or restore failure.
+Logs are under `/home/matias/Projects/poc_improve_etapa_lenta/logs/` as
+`20260926T094217Z-39f9b6bf-8e76-4258-8301-c66447d2e396.log` and
+`20260926T094344Z-6980e07c-be02-4a8f-9673-1e4ed3073031.log`.
+
+The integrated engine builds without warnings and passes `make tests`, the two
+host checks, `git diff --check`, and `tools/check-repo.py`. Build hashes are
+`c53bbd7192ea2c7301b222c6d23c6afc857b9149253d38958fc1de5ff91be28b`
+for `build/app_main` and
+`ff99f535c7b010bf854dfe5fc88a3908745638cd435ac900ac37f3607a0d9611`
+for `build/payload.so`.
+
+The AFZH3 app asset and `targets-v3.json` now contain this payload at 140848
+bytes. `app:assembleDebug` succeeded and version 0.6.0 (`versionCode` 35) was
+installed on `RXCX602E20X`. The APK pulled back from `/data/app` matches the
+built APK byte-for-byte with SHA-256
+`3a6694628b5cded771b6fe18c26e72097cb9eb4c3cdb74b297701be94a93d1ee`;
+its embedded AFZH3 payload matches the engine hash above.
+
+The app route subsequently passed 3/3 runs separated by reboot, with persistent
+history results `Succeeded`. Direct pipe resolution passed on attempt 1 in 11,
+11, and 12 ms, found the current task in one reverse-list read every time, and
+never used the legacy fallback. All runs restored global fops, completed UMH,
+reached temporary root, verified KernelSU control, and finished installation.
+No guard, restore, usercopy, panic, retry, or timeout marker appeared. Total app
+times were 18.451, 44.415, and 56.394 s; the difference came from launcher
+gates of about 12, 38, and 50 s. Evidence and detailed analysis are in
+`evidence/reliability/20260926-direct-app-3runs/`. External root is confirmed
+on the final boot (`19f7dc12-57c4-4576-9b3e-a945f48853a0`). SELinux was
+Enforcing immediately after the runs and was manually changed by the user to
+Permissive during later analysis. Earlier exact boot IDs were not persisted by
+the app, while the launcher uptime resets confirm separate boots.
+
+## Pipe descriptor fail-closed validation — 2026-09-26
+
+The local build with terminal handling for uncertain `pipe_buffer` forge and
+restore failures (`payload.so` SHA-256
+`6675ed4cd4e7b7c4a552a0c25a92fcfbf18e89144be52c1acc58fb7dc8a8e885`)
+passed 3/3 distinct clean boots with one runner attempt per boot. Evidence is
+in `evidence/reliability/20260926T074900Z-pipe-restore-3boots/`. Boot IDs were
+`c4f38d99-b183-4247-8b76-63c5f4b171dc`,
+`ca8208b3-b9a2-4293-94e8-92361a95b866`, and
+`df5a26cc-e642-45dc-b164-20ef06dafa81`; each remained unchanged during
+its run. All three runs reached temporary root, verified KernelSU control,
+and returned external `uid=0(root)`. Durations were 85, 84, and 86 s,
+including launcher boot-stability waits. No descriptor-forge or restore
+failure occurred, so this campaign validates the normal path but does not
+exercise the new terminal-error branch.
+
+The AFZH3 app asset and `targets-v3.json` were updated for this payload
+(135368 bytes). `app:assembleDebug` succeeded; the version 0.6.0 debug APK was
+installed on `RXCX602E20X` and pulled back byte-for-byte. Built and installed
+APK SHA-256: `48ad12dce4c3afc9761dc7495b39f1909c2b7c822c63f8affcb34a75ee41edc7`.
+The embedded AFZH3 payload matches the tested source hash above. The app's
+root flow has not been executed with this APK.
+
 ## Pipe preparation with 2048 waiters — 2026-09-25
 
 The 512-waiter pipe oracle repeatedly exited during the collision stage in
