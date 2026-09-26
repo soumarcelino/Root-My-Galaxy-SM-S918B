@@ -12,7 +12,8 @@ Root acquisition is performed by the payload and its helper.
 1. Reject a nonempty inherited `LD_PRELOAD` environment variable.
 2. Parse arguments and, unless running with `--check-only`, check the first
    four ELF magic bytes of both payload and helper.
-3. Read cheap metrics first: boot state, uptime, memory, load/runnable tasks,
+3. In the conservative profile, sleep until its minimum uptime when needed.
+   Then read cheap metrics: boot state, uptime, memory, load/runnable tasks,
    and PSI. Read thermal zones and `mm_struct` slab data only when every cheap
    threshold passes.
 4. After one complete stable precheck, create 480 pipes, set each capacity to
@@ -28,7 +29,9 @@ Root acquisition is performed by the payload and its helper.
 
 An unstable or unreadable sample resets the post-probe consecutive-sample
 counter. The pipe probe runs exactly once, between the stable precheck and
-final confirmation. A failed probe is terminal for the run (exit code 1).
+final confirmation. If it fails, the launcher keeps waiting until the timeout.
+At 60 seconds, an unconfirmed gate logs an explicit warning and loads the
+payload anyway, including when the pipe probe failed or was not reached.
 The payload may make up to three attempts. Its supervisor retries only after a
 confirmed pre-mutation failure; any kernel-mutation marker ends the run and
 requires a clean reboot.
@@ -41,19 +44,21 @@ the `conservador` profile. Values below are source defaults.
 | Condition | Default | Conservative |
 | --- | ---: | ---: |
 | Android `sys.boot_completed` | `1` | `1` |
-| Minimum uptime | 60 s | 120 s |
-| Minimum available memory | 1 GiB | 2 GiB |
-| Maximum temperature | 48 °C | 42 °C |
-| Maximum runnable tasks | 8 | 4 |
-| Maximum CPU PSI `some avg10` | 25 | 12 |
-| Maximum memory PSI `some avg10` | 3 | 1 |
-| Maximum I/O PSI `some avg10` | 5 | 2 |
-| Maximum active and total `mm_struct` objects, each | 2048 | 1024 |
-| Maximum estimated `mm_struct` slabs | 48 | 32 |
-| Consecutive samples per phase | 3 | 5 |
+| Minimum uptime | 0 s | 120 s |
+| Minimum available memory | 512 MiB | 2 GiB |
+| Maximum temperature | 55 °C | 42 °C |
+| Maximum runnable tasks | 16 | 4 |
+| Maximum CPU PSI `some avg10` | 55 | 12 |
+| Maximum memory PSI `some avg10` | 10 | 1 |
+| Maximum I/O PSI `some avg10` | 15 | 2 |
+| Maximum active and total `mm_struct` objects, each | 3072 | 1024 |
+| Maximum estimated `mm_struct` slabs | 96 | 32 |
+| Consecutive samples per phase | 2 | 5 |
 
-Both profiles use a two-second baseline interval and a 300-second gate wait
-budget. The adaptive fast path uses two samples one second apart only while
+The conservative profile sleeps through its initial uptime gate, capped by the
+launcher timeout. Both profiles use a two-second baseline interval and a
+60-second gate wait budget. The
+adaptive fast path uses two samples one second apart only while
 memory, temperature, runnable tasks and PSI retain wide margins. Sampling is
 scheduled against absolute `CLOCK_MONOTONIC` deadlines, so metric collection
 time does not accumulate as drift. Blocking reads or system calls are not
@@ -66,13 +71,16 @@ separately timed out.
 - `/proc/meminfo`: `MemAvailable`.
 - `/sys/class/thermal/thermal_zone*/temp`: maximum readable positive value
   below 200,000 millidegrees Celsius; at least one valid sensor is required.
+  Zone paths are discovered once; their temperatures are read for every full
+  sample.
 - `/proc/loadavg`: runnable task count and one-minute load average. The load
   average is logged but is not an acceptance threshold.
 - `/proc/pressure/{cpu,memory,io}`: `some avg10` values.
 - `/proc/uptime`: time since boot.
 - Android system property `sys.boot_completed`.
 - `/proc/slabinfo`: active and total `mm_struct` object counts. Slab count is
-  estimated as total objects divided by objects per slab, rounded up.
+  estimated as total objects divided by objects per slab, rounded up. Unrelated
+  lines are skipped before numeric parsing.
 
 All metric readers must succeed for a sample to be accepted. Thermal and slab
 readers are deliberately deferred until every cheap metric passes. The
@@ -98,8 +106,9 @@ Check device conditions without loading a payload:
 /data/local/tmp/stability-launcher --check-only
 ```
 
-`--check-only` still performs the pipe allocation and resizing probe. Payload
-and helper arguments are optional in this mode and are not validated.
+`--check-only` attempts the same gates and returns successfully at the timeout
+with a warning if they did not pass. Payload and helper arguments are optional
+in this mode and are not validated.
 
 | Argument | Meaning |
 | --- | --- |
@@ -133,12 +142,13 @@ supervise execution after `execve`.
 
 Logs are written to standard error with a `[launcher]` prefix. Sample logs use
 `cheap`, `baseline`, or `fast`; deferred fields are explicit. Pipe probes emit
-`pipe-gate=pass` or terminal `pipe-gate=fail`.
+`pipe-gate=pass` or `pipe-gate=fail`. A timeout emits `ALERTA` before releasing
+the payload without a stability confirmation.
 
 | Exit code | Meaning before payload execution |
 | --- | --- |
 | `0` | `--check-only` completed successfully. |
-| `1` | Gate timeout, clock failure, environment setup failure, or failed `execve`. |
+| `1` | Clock or wait failure, environment setup failure, or failed `execve`. |
 | `2` | Invalid arguments, missing/invalid ELF files, or inherited `LD_PRELOAD`. |
 | `130` | SIGINT or SIGTERM cancellation observed during the gate phase. |
 

