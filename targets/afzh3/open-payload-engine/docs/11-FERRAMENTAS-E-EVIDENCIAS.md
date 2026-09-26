@@ -177,7 +177,7 @@ Essas ferramentas não provam root isoladamente; aumentam rastreabilidade.
 
 ## kernelsnitch
 
-Código incorporado em `src/kernelsnitch/`.
+Código incorporado em `src/03_mm_address_sidechannel/`.
 
 ### Uso
 

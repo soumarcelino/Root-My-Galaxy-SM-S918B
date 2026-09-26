@@ -396,7 +396,7 @@ the exploit; the relaxed launcher gate correctly refused to fire while hot.
 ## Current summary — 2026-09-20
 
 This directory is a clean-room C reconstruction of the closed AFZH3 payload.
-The production path is no longer a harness or stub: `main.c` connects KASLR,
+The production path is no longer a harness or stub: `00_orchestrator.c` connects KASLR,
 groom/reclaim, FPSIMD futex trigger v14, immediate ashmem AAR/AAW verification,
 and `root_umh`.
 
@@ -475,28 +475,30 @@ Historical paths below describe the tree at the time of each experiment.
 
 | File | Current role | Validation/state |
 |---|---|---|
-| `src/main.c` | `_INIT_2`-style entry, bounded fork supervisor, attempt-level CPU affinity and `RLIMIT_NOFILE`/`RLIMIT_NPROC`, eager ashmem-path check, full chain wiring, and unsafe-retry suppression after observed kernel mutation. | Validated through executable-equivalent `.init_array` shared-object execution on four clean boots. |
-| `src/kaslr.c`/`.h`, `src/slabinfo.c`/`.h` | Tracefs kernel-base resolution and `mm_struct` slab telemetry. | Previously exercised on target; failures stop the attempt. |
-| `src/groom.c`/`.h` | KernelSnitch candidate leak, exact split order-3 drain, A/D geometry, `0x8e80` skb delivery, and up-to-64-send reclaim. | Success path baseline validated in four clean boots; new failure cleanup is build-validated, pending device revalidation. |
+| `src/00_orchestrator.c` | `_INIT_2`-style entry, bounded fork supervisor, attempt-level CPU affinity and `RLIMIT_NOFILE`/`RLIMIT_NPROC`, eager ashmem-path check, full chain wiring, and unsafe-retry suppression after observed kernel mutation. | Validated through executable-equivalent `.init_array` shared-object execution on four clean boots. |
+| `src/01_kernel_base_tracefs.c`/`.h`, `src/02_slab_cache_probe.c`/`.h` | Tracefs kernel-base resolution and `mm_struct` slab telemetry. | Previously exercised on target; failures stop the attempt. |
+| `src/03_mm_address_sidechannel/` | Futex-hash timing side channel used by `05_mm_slab_grooming.c` to obtain the candidate address. | Reused implementation; closed physical scan remains unported. |
+| `src/04_fake_kernel_objects.c`/`.h` | Builds closed waiter, lock, single FOPS table at scratch `+0x2000`, fake task, and rb nodes using A for every OR-derived pointer. | Focused geometry test passes; removed non-binary mirror at scratch `+0x1180`. |
+| `src/05_mm_slab_grooming.c`/`.h` | KernelSnitch candidate leak, exact split order-3 drain, A/D geometry, `0x8e80` skb delivery, and up-to-64-send reclaim. | Success path baseline validated in four clean boots; new failure cleanup is build-validated, pending device revalidation. |
+| `src/06_signal_frame_payload.c`/`.h` | Builds 512-byte payload and replaces the signal frame’s FPSIMD Q-register image. | Integrated into v14 and validated through four clean end-to-end boots. |
+| `src/07_futex_pi_trigger.c`/`.h` | Closed futex PI choreography and v14 two-phase FPSIMD/scheduler handshake; invokes callback immediately after successful trigger. | Trigger and immediate callback validated through four clean end-to-end boots. |
+| `src/08_ashmem_configfs_rw.c`/`.h` | Pre-exploit ashmem alias discovery, `pread64`/`pwrite64` kernel primitive wrappers, FOPS readback, and magic round trip. | Landing, readback, write round trip, and global FOPS restoration validated on four clean boots. |
+| `src/09_pipe_buffer_rw.c`/`.h` | Pipe-buffer backend for direct-map kernel read/write. | Part of the validated end-to-end root chain. |
+| `src/10_workqueue_umh_root.c`/`.h` | Verified workqueue/user-mode-helper root installation with 32-bit counter fields, 12 retries, completion, and root-socket check. | Completion, root socket, KernelSU control, and UID 0 validated on four clean boots. |
+| `src/90_diagnostic_checkpoint.h` | Optional boot-tagged durable checkpoints. | Enabled only by `RMG_TRACE_FILE=1`. |
+| `tests/support/skb_send_probe.c`/`.h` | Standalone socket-send probe; production delivery is inside `05_mm_slab_grooming.c`. | Test-only; excluded from production. |
 | `tests/support/pipe_spray.c`/`.h` | Standalone experiment for a separate closed routine. | Available only to focused tests; excluded from production. |
-| `src/fops_install.c`/`.h` | Builds closed waiter, lock, single FOPS table at scratch `+0x2000`, fake task, and rb nodes using A for every OR-derived pointer. | Focused geometry test passes; removed non-binary mirror at scratch `+0x1180`. |
-| `src/sigusr1_payload.c`/`.h` | Builds 512-byte payload and replaces the signal frame’s FPSIMD Q-register image. | Integrated into v14 and validated through four clean end-to-end boots. |
-| `src/futex_trigger.c`/`.h` | Closed futex PI choreography and v14 two-phase FPSIMD/scheduler handshake; invokes callback immediately after successful trigger. | Trigger and immediate callback validated through four clean end-to-end boots. |
-| `src/aar_aaw.c`/`.h` | Pre-exploit ashmem alias discovery, `pread64`/`pwrite64` kernel primitive wrappers, FOPS readback, and magic round trip. | Landing, readback, write round trip, and global FOPS restoration validated on four clean boots. |
-| `src/root_umh.c`/`.h` | Verified workqueue/user-mode-helper root installation with 32-bit counter fields, 12 retries, completion, and root-socket check. | Completion, root socket, KernelSU control, and UID 0 validated on four clean boots. |
-| `src/fops_spray.c`/`.h` | Fake-object delivery used by `groom.c`. | Part of production. |
 | `tests/test_*.c` | Seven focused component diagnostics. | Built only by `make tests`; excluded from production. |
-| `src/kernelsnitch/` | Futex-hash timing side channel used by `groom.c` to obtain the candidate address. | Reused implementation; closed physical scan remains unported. |
 
 ## Testing history (chronological, all real on-device runs this session)
 
-1. `groom.c` standalone (`test_groom.c`, fake target addresses): 3/3 clean.
-2. `futex_trigger.c` + `groom.c` together (`test_futex_trigger.c`, real
+1. `05_mm_slab_grooming.c` standalone (`test_groom.c`, fake target addresses): 3/3 clean.
+2. `07_futex_pi_trigger.c` + `05_mm_slab_grooming.c` together (`test_futex_trigger.c`, real
    `kernel_base` via `su`): 3/3 clean, `sched_setattr ret=0` every time.
-3. After extending `fops_install.c` with the fake `fake_fops`/`fake_task`/
+3. After extending `04_fake_kernel_objects.c` with the fake `fake_fops`/`fake_task`/
    `RIGHT_OFF`/`LEFT_OFF` content (previously only lock+waiter were ported):
    1 more clean run (4th in a row).
-4. First `root_umh.c` integration test (`test_root.c`): **crashed the kernel**
+4. First `10_workqueue_umh_root.c` integration test (`test_root.c`): **crashed the kernel**
    (5th real trigger fire overall) — the device rebooted (`/proc/uptime`
    reset, `su` lost). This is the only crash reproduced by this new engine
    across the whole session.
@@ -533,10 +535,10 @@ from baseline across 6 consecutive trigger fires, including after two
 rounds of plausible-looking fixes.
 
 **What's been ruled out:**
-- Wrong `fops_install.c` field values — triple-verified against the closed
+- Wrong `04_fake_kernel_objects.c` field values — triple-verified against the closed
   binary's decompile, raw disassembly, and BTF; a byte-exact host-side test
   passes 48/48 checks.
-- `groom.c`'s reclaim mechanism itself — proven correct at the array-size
+- `05_mm_slab_grooming.c`'s reclaim mechanism itself — proven correct at the array-size
   level (identical to this repo's own already-working `prepare_kernel_page()`),
   and the mm_struct-slab math involved has never once errored across 15 runs.
 - Wrong AAR/AAW *calling convention* — `FUN_00107058`/`FUN_00107138`'s
@@ -550,7 +552,7 @@ rounds of plausible-looking fixes.
 
 **Leading remaining hypothesis, not yet confirmed:** the closed binary's
 real waiter thread (`FUN_00103e18`) does something this project's
-`futex_trigger.c` still lacks entirely: it installs a `SIGUSR1` handler,
+`07_futex_pi_trigger.c` still lacks entirely: it installs a `SIGUSR1` handler,
 builds a 512-byte payload (same field-construction helpers used elsewhere,
 i.e. plausibly another fake-waiter-shaped object), sends itself
 `tgkill(getpid(), gettid(), SIGUSR1)`, and the handler rewrites its own
@@ -565,7 +567,7 @@ standing rule against inventing unverified logic that touches the kernel.
 A structurally significant, separately-confirmed detail: the closed
 binary's waiter thread calls the AAR/AAW verify step (`FUN_001076c0`)
 **directly, from inside itself**, immediately after the `tgkill` — not from
-a separate later caller the way this project's `test_root.c`/`root_umh.c`
+a separate later caller the way this project's `test_root.c`/`10_workqueue_umh_root.c`
 currently do it. This alone is untested as a fix (a tight retry loop was
 tried as a cheap proxy for "check sooner," and didn't help — but that isn't
 the same as restructuring which thread/context calls it).
@@ -582,7 +584,7 @@ the same as restructuring which thread/context calls it).
    (`lib/rbtree.c`) for this project's fake waiter's exact tree shape (one
    right child, no left child) and confirmed it performs exactly one write:
    `child->__rb_parent_color = node->__rb_parent_color`, i.e. it overwrites
-   `ashmem_misc.fops` with `page_base | 0x1180`. `fops_install.c` originally
+   `ashmem_misc.fops` with `page_base | 0x1180`. `04_fake_kernel_objects.c` originally
    only populated a fake `file_operations` table at `page_base + 0x2000`
    (`FOPS_OFF`) — `page_base + 0x1180` was left zeroed by the page-wide
    `memset`, so the *next* `/dev/ashmem` open by *any* process on the whole
@@ -594,9 +596,9 @@ the same as restructuring which thread/context calls it).
    central open problem above.
 2. `kernelsnitch.h` non-`static` duplicate-symbol linker error when included
    from two `.c` files in the same link — fixed by dropping `mm_leak.c` from
-   the main build (superseded by `groom.c` anyway).
+   the main build (superseded by `05_mm_slab_grooming.c` anyway).
 3. Missing `<errno.h>` include and silent-zero-on-failure return convention
-   in `aar_aaw.c`'s original `oss_kernel_read64()` — fixed to surface real
+   in `08_ashmem_configfs_rw.c`'s original `oss_kernel_read64()` — fixed to surface real
    `pread64`/`pwrite64` return codes and `errno`, which is what made the
    central open problem's diagnosis possible in the first place (the first
    version of this function couldn't distinguish "read a real zero" from
@@ -632,7 +634,7 @@ the same as restructuring which thread/context calls it).
   throughout the closed binary is wrong.
 - **There appear to be at least two separate AAR/AAW establishment
   mechanisms** in the closed binary: (1) the simple one this project ported
-  (`aar_aaw.c`, confusion via the corrupted `ashmem_misc.fops` pointer,
+  (`08_ashmem_configfs_rw.c`, confusion via the corrupted `ashmem_misc.fops` pointer,
   `pread64`/`pwrite64` on a fresh `/dev/ashmem` fd), used for the light
   self-test; and (2) a much larger one (`FUN_00107dd4`/`FUN_00108604`/
   `FUN_001086e0`/`FUN_00108774`/`FUN_00108808`/`FUN_00108fa4`, an estimated
@@ -642,19 +644,19 @@ the same as restructuring which thread/context calls it).
   `anon_pipe_buf_ops` kernel address, located precisely via *direct*
   `struct page`/`slab_cache` reads (not a timing side channel) once some
   read primitive already exists. This second mechanism reuses the exact
-  same 4-tier grooming globals/counts as `groom.c` (confirmed via
+  same 4-tier grooming globals/counts as `05_mm_slab_grooming.c` (confirmed via
   `FUN_001060e8`'s cleanup call listing all four), just targeting a
   different (kmalloc-128, order-0, not order-3/`mm_struct`-sized) allocation.
-  `root_umh.c` currently only has the first, simpler mechanism.
+  `10_workqueue_umh_root.c` currently only has the first, simpler mechanism.
 - **`S23_SUPERVISOR_ATTEMPT` environment variable**: read via `getenv()` in
   the real `FUN_00104300` (the consumer/trigger function) to select an index
-  (1-8, clamped) into the same 8-entry delay table already in `src/main.c`
+  (1-8, clamped) into the same 8-entry delay table already in `src/00_orchestrator.c`
   (`{5000, 0, 10000, 30000, -5000, 20000, 15000, 25000}`). This project's
-  `main.c` already had this exact table from earlier reverse-engineering,
+  `00_orchestrator.c` already had this exact table from earlier reverse-engineering,
   but used it for a *different* purpose (a millisecond-scale outer retry
   delay via `usleep`). Here it's used as a **raw CPU-cycle count**
   (`mrs cntvct_el0`, tight `yield`-loop, no syscalls) for a pre-`sched_setattr`
-  delay. The table may be genuinely dual-purpose, or `main.c`'s existing use
+  delay. The table may be genuinely dual-purpose, or `00_orchestrator.c`'s existing use
   of it may itself be a misattribution worth re-checking.
 - **Struct field offsets that look wrong on first read but are correct**:
   `ASHMEM_MISC_FOPS_OFF` (see bug #1 above) is the most important example —
@@ -720,7 +722,7 @@ machine's own Linux host** (not the Android device) before shipping:
   `gcc` (used for the validation run above).
 
 **Not yet integrated with anything else** -- `pipe_spray.c` doesn't
-call into `groom.c`'s leak logic, doesn't build the fake `pipe_buffer`
+call into `05_mm_slab_grooming.c`'s leak logic, doesn't build the fake `pipe_buffer`
 payload (`FUN_00108604`, still unported), and isn't wired into any of
 the `test_root*` harnesses. It's a validated, safe building block for
 whoever continues the pipe_buffer subsystem port next, not a
@@ -748,7 +750,7 @@ but **never run on a device** — treat it as ready-to-test, not proven.
    its being *non-zero and page-relative*. Searched the entire binary
    (`r2 axt`) for any other code that reads this buffer back (by address or
    by reading the FPSIMD/vector register file after the signal returns) —
-   found none. **Decision: did not port this into `futex_trigger.c` or any
+   found none. **Decision: did not port this into `07_futex_pi_trigger.c` or any
    code that could run against the real device.** The mechanism (`sigaction`
    + self-`tgkill` + FPSIMD-context rewrite) is confirmed real and, taken at
    face value, cannot corrupt kernel memory directly (it only affects this
@@ -768,13 +770,13 @@ but **never run on a device** — treat it as ready-to-test, not proven.
    cross-function or cross-CPU interleavings that only show up under actual
    scheduling), but no additional lead was found this way.
 3. **Implemented and shipped the one well-evidenced, safe structural fix**:
-   `run_futex_trigger()` in `futex_trigger.c` is now a thin wrapper around a
+   `run_futex_trigger()` in `07_futex_pi_trigger.c` is now a thin wrapper around a
    new `run_futex_trigger_cb(futex_post_trigger_cb cb, void *ctx)`, which
    invokes `cb` immediately after `sched_setattr` succeeds, from the same
    call stack/thread — matching the closed binary's confirmed structure
    (`FUN_00103e18` calls its own verify step, `FUN_001076c0`, directly and
    immediately, not from a separate later caller). Existing callers
-   (`test_futex_trigger.c`, `test_groom.c`, `main.c`) are unaffected
+   (`test_futex_trigger.c`, `test_groom.c`, `00_orchestrator.c`) are unaffected
    (`cb=NULL` behaves exactly as before). New test harnesses
    `test_root_immediate.c`/`test_root_immediate_noroot.c` use this to call
    `oss_verify_kernel_access()` + `root_umh_install()` immediately instead of
@@ -807,7 +809,7 @@ but **never run on a device** — treat it as ready-to-test, not proven.
    250×1ms completion poll, and a 200-attempt `AF_UNIX`/`SOCK_STREAM`
    `connect()` check against the same socket path. **This is now the most
    certain, most thoroughly double-verified piece of the entire port** —
-   `root_umh.c` can be trusted as-is; it does not need further changes
+   `10_workqueue_umh_root.c` can be trusted as-is; it does not need further changes
    regardless of what happens with the AAR/AAW primitive investigation.
    Also resolved the small dispatch helpers this function calls
    (`fcn.0000963c`=read64, `fcn.000096e8`=read64-with-implicit-fd,
@@ -825,19 +827,19 @@ but **never run on a device** — treat it as ready-to-test, not proven.
    anything by itself** — it is not on the critical path. The critical
    path is entirely "make `task->pi_blocked_on` point at the sprayed fake
    waiter," full stop; everything downstream of that (this project's own
-   `root_umh.c` included) is already in a trustworthy state waiting on it.
+   `10_workqueue_umh_root.c` included) is already in a trustworthy state waiting on it.
 6. **Reconsidered where the real UAF'd object lives**, prompted by (5)'s
    confirmation that the workqueue-hijack logic is solid and by re-reading
    `kernel/futex/core.c` earlier: `struct rt_mutex_waiter rt_waiter` in
    `futex_wait_requeue_pi()` is stack-local (confirmed, `kernel/futex/
-   core.c:3433`), so it cannot be the thing `groom.c`'s `mm_struct`-sized
+   core.c:3433`), so it cannot be the thing `05_mm_slab_grooming.c`'s `mm_struct`-sized
    (`0x400`-byte) slab spray is cross-cache-reclaiming — those are
    different allocation types entirely. `struct futex_pi_state`
    (`kernel/futex/core.c:173`, `kmalloc`'d, embeds `struct rt_mutex_base
    pi_mutex` directly) is a better *size-class* candidate for a
    kmalloc/slab UAF, but its likely real size (list_head+rt_mutex_base+
    task_struct*+refcount_t+union key, roughly 80-100 bytes) doesn't match
-   `mm_struct`'s 0x400 bytes either. Since this project's `groom.c`
+   `mm_struct`'s 0x400 bytes either. Since this project's `05_mm_slab_grooming.c`
    already byte-exactly matches the closed binary's own choreography
    (`FUN_00106288`, confirmed the very first week of this effort) and the
    closed binary demonstrably works, the `mm_struct`-sized reclaim target
@@ -847,7 +849,7 @@ but **never run on a device** — treat it as ready-to-test, not proven.
    buddy allocator, then race an `sendmsg()`-delivered `skb` to reclaim
    that same physical page for a completely different allocation type)
    rather than a same-slab-cache reuse — which is consistent with
-   `groom.c`'s own already-documented technique name ("cross-cache
+   `05_mm_slab_grooming.c`'s own already-documented technique name ("cross-cache
    reclaim"). This still doesn't identify what SPECIFIC other kernel
    allocation (most likely a kernel stack page, given `rt_waiter` lives on
    one and stacks are freed/reallocated through the page allocator on
@@ -860,7 +862,7 @@ but **never run on a device** — treat it as ready-to-test, not proven.
    `MIN_THREAD_SHIFT = 14` regardless of `CONFIG_VMAP_STACK` given
    `PAGE_SHIFT=12 < 14`, so `THREAD_SIZE = 1<<14 = 0x4000` = 16KB,
    `THREAD_SIZE_ORDER = 2`) is order-2, not order-3 — doesn't match
-   `groom.c`'s `OSS_MM_ORDER=3` (32KB) reclaim target directly, so
+   `05_mm_slab_grooming.c`'s `OSS_MM_ORDER=3` (32KB) reclaim target directly, so
    "kernel stack page" is not a clean match for the cross-cache-reclaimed
    object as originally guessed. Also, with `VMAP_STACK` likely enabled
    (`select HAVE_ARCH_VMAP_STACK` present in `arch/arm64/Kconfig`, not
@@ -877,9 +879,9 @@ but **never run on a device** — treat it as ready-to-test, not proven.
    `fcn.000044f4` (this project's `app_main()` equivalent) pins itself to
    CPU 0 (`FUN_000041f0(0)`) as its very first action, before even the
    `getrlimit`/`setrlimit` calls — confirmed via the same raw-disasm
-   trace used for `FUN_00108fa4`. Ported to `src/main.c:app_main()` as a
+   trace used for `FUN_00108fa4`. Ported to `src/00_orchestrator.c:app_main()` as a
    small standalone `pin_to_cpu(0)` (duplicated rather than shared with
-   `futex_trigger.c`'s copy, since it's a two-line wrapper and the files
+   `07_futex_pi_trigger.c`'s copy, since it's a two-line wrapper and the files
    don't otherwise depend on each other). Did **not** port the
    `getrlimit`/`setrlimit` calls seen in the same region (raw vaddr
    `0x4520`-`0x4570`, `RLIMIT_NOFILE`=7 then `RLIMIT_MEMLOCK`=6) — only
@@ -900,31 +902,31 @@ but **never run on a device** — treat it as ready-to-test, not proven.
    history**: this session's summary already root-caused an earlier
    "F_SETPIPE_SZ Operation not permitted" failure in the *old* engine to
    per-UID fd/pipe-page budget exhaustion from a leftover process holding
-   675 fds, and `groom.c` itself forks and holds open memfds for up to
+   675 fds, and `05_mm_slab_grooming.c` itself forks and holds open memfds for up to
    ~1279 children in a single `groom_and_install_fops_object()` call —
    exactly the kind of load this rlimit raise protects against. Ported
    as `raise_rlimit_to_max()` (fatal, matching the closed binary) in
-   `src/main.c:app_main()`, and as a non-fatal
+   `src/00_orchestrator.c:app_main()`, and as a non-fatal
    `raise_rlimit_to_max_best_effort()` directly inside
-   `groom.c:groom_and_install_fops_object()` so every test harness that
+   `05_mm_slab_grooming.c:groom_and_install_fops_object()` so every test harness that
    calls it (all of `test_root*.c`, `test_futex_trigger.c`,
    `test_groom.c`) gets the same protection without needing to remember
    to call it separately. All 7 binaries (`app_main`, `test_futex_trigger`,
    `test_groom`, `test_root`, `test_root_noroot`, `test_root_immediate`,
    `test_root_immediate_noroot`) rebuild clean from a fresh `make clean`
-   after this change; `fops_install.c`'s host-side 48/48 byte-exact
+   after this change; `04_fake_kernel_objects.c`'s host-side 48/48 byte-exact
    check (unaffected by this change, re-run as a final sanity check)
    still passes.
 
 9. **Caught and fixed a real mistake in item 2/3's own earlier work**:
    the "cycle-precise pre-trigger delay" ported earlier this session used
    `5000` as the default cycle count, sourced by *assuming* it was the
-   same 8-entry table already in `src/main.c`
+   same 8-entry table already in `src/00_orchestrator.c`
    (`{5000, 0, 10000, 30000, -5000, 20000, 15000, 25000}`, real
    `.rodata` offset `0x243c`, 4-byte `int32` entries) reused for a
-   second purpose. Re-verifying this (prompted by re-reading `main.c`'s
+   second purpose. Re-verifying this (prompted by re-reading `00_orchestrator.c`'s
    own `S23_SUPERVISOR_ATTEMPT` env-var propagation and asking "does
-   `futex_trigger.c` actually consume the value main.c already sets?")
+   `07_futex_pi_trigger.c` actually consume the value 00_orchestrator.c already sets?")
    found this was wrong: `r2 -qc "s 0x2240; px 64"` (raw bytes, past
    mistakes in this exact area came from hand-computing file offsets
    instead of letting `r2` translate vaddr→paddr, so used the tool
@@ -932,12 +934,12 @@ but **never run on a device** — treat it as ready-to-test, not proven.
    site is a *different* one, at a different address, with different-
    sized (8-byte `int64`) entries: `{0, 16, 32, 48, 64, 96, 128, 24}`
    (confirmed by the `uxtw 3` = `×8` index-scaling instruction in the
-   disasm, vs `main.c`'s table's implicit `×4` scaling). **The real
+   disasm, vs `00_orchestrator.c`'s table's implicit `×4` scaling). **The real
    default (env var unset, the common case) is index 0 = 0 cycles — no
-   delay at all**, not 5000. Fixed: `futex_trigger.c` now reads
-   `S23_SUPERVISOR_ATTEMPT` itself (previously it was set by `main.c`
+   delay at all**, not 5000. Fixed: `07_futex_pi_trigger.c` now reads
+   `S23_SUPERVISOR_ATTEMPT` itself (previously it was set by `00_orchestrator.c`
    for `do_one_attempt()`'s own use but never actually consumed inside
-   `futex_trigger.c`) and indexes the *correct* table via
+   `07_futex_pi_trigger.c`) and indexes the *correct* table via
    `supervisor_attempt_delay_cycles()`. This also means **the one
    on-device test of "CPU pin + delay" earlier this session was testing
    a delay value (5000) that the closed binary never actually uses at
@@ -985,7 +987,7 @@ corruption landing -- it was actively preventing the only code path
 that could ever touch `pi_blocked_on` from being reached.
 
 **Fix**: added `run_futex_trigger_success_cb()`/
-`run_futex_trigger_success_full()` (`futex_trigger.c`) with a
+`run_futex_trigger_success_full()` (`07_futex_pi_trigger.c`) with a
 simplified owner thread that holds ONLY `f_pi_target`, forever, never
 touching `f_pi_chain` -- removing the circular wait entirely. New test
 harness `test_root_v2.c`.
@@ -1010,13 +1012,13 @@ enough**: `struct rt_mutex_waiter rt_waiter` in
 variable, freshly allocated on the calling thread's own kernel stack
 for every single call, freed by ordinary stack unwinding when the
 function returns -- it is never itself a slab/kmalloc object that
-`groom.c`'s `mm_struct`-cross-cache spray could plausibly race to
+`05_mm_slab_grooming.c`'s `mm_struct`-cross-cache spray could plausibly race to
 reclaim. **If the real bug is a genuine UAF on this object, it likely
 requires a DIFFERENT waiting task's kernel stack (or the thread's task
 structure) to be freed and reclaimed while an rt_mutex chain still
 references it** -- e.g. a task that owns/references an `rt_waiter`
 exiting or being killed while another task's PI chain still points at
-it -- which would reframe `groom.c`'s job as grooming for THAT
+it -- which would reframe `05_mm_slab_grooming.c`'s job as grooming for THAT
 scenario specifically, not for placing a fake waiter directly. Not
 resolved this session; this is now the sharpest, most concrete open
 question, replacing the earlier vaguer "why doesn't it land" framing.
@@ -1034,7 +1036,7 @@ toward full reproduction: resolved the real `ucontext_t`/`sigcontext`/
 `<asm/sigcontext.h>` -- confirmed `struct fpsimd_context { head(8);
 fpsr(4); fpcr(4); vregs[32] }` = exactly `0x210` bytes, `vregs` at
 offset `+16`, matching everything traced from disasm earlier), and
-implemented the full mechanism as `src/sigusr1_payload.c`/`.h`:
+implemented the full mechanism as `src/06_signal_frame_payload.c`/`.h`:
 
 - `sigusr1_install_handler()`: real `sigaction(SIGUSR1, ..., SA_SIGINFO)`.
 - `sigusr1_build_payload(page_base, ashmem_misc_fops_addr)`: builds the
@@ -1042,7 +1044,7 @@ implemented the full mechanism as `src/sigusr1_payload.c`/`.h`:
   disasm (offsets `0x18`/`0x20`/`0x28`/`0x30`/`0x38`/`0x40`/`0x48`/
   `0x50`/`0x58`/`0x60`/`0x68`, values reusing this project's own
   already-verified page-relative scratch addresses -- nothing new to
-  guess here, same inputs `fops_install.c` already takes).
+  guess here, same inputs `04_fake_kernel_objects.c` already takes).
 - `sigusr1_handler()`: scans `ucontext->uc_mcontext.__reserved` for the
   `FPSIMD_MAGIC`/`sizeof(struct fpsimd_context)` record using the SAME
   validation style the real kernel's `parse_user_sigframe()` uses
@@ -1063,7 +1065,7 @@ real device -- the handler correctly found the FPSIMD record and
 copied the payload in, first try. Confirms the mechanism itself works
 correctly against the real kernel/bionic signal-frame implementation.
 
-**Integrated into the real trigger chain**: `futex_trigger.c` gained
+**Integrated into the real trigger chain**: `07_futex_pi_trigger.c` gained
 `run_futex_trigger_full(page_base, ashmem_misc_fops_addr, cb, ctx)`,
 which installs the handler and has the waiter thread build the real
 payload and fire-and-wait for it at the EXACT observed position (raw
@@ -1181,7 +1183,7 @@ answer.
 
 Traced where `DAT_0010daa0` (the "AAR/AAW primitive already established"
 flag `FUN_001086e0`/`FUN_00108774` check) actually gets set, to settle
-whether `root_umh.c`'s substitution of the simple ashmem-based primitive
+whether `10_workqueue_umh_root.c`'s substitution of the simple ashmem-based primitive
 for the closed binary's real pipe_buffer-based one is a viable
 long-term shortcut. It is not:
 
@@ -1195,7 +1197,7 @@ long-term shortcut. It is not:
   decompile line ~4642) — i.e. it is set *by* completing the pipe_buffer
   establishment, not read as a precondition satisfied some other way.
 - `FUN_001076c0`'s own simple ashmem-based self-test (`FUN_00107058`/
-  `FUN_00107138`, what `aar_aaw.c` ports) **never writes to
+  `FUN_00107138`, what `08_ashmem_configfs_rw.c` ports) **never writes to
   `DAT_0010daa0` anywhere** — confirmed via `grep` across the full
   6312-line decompile.
 
@@ -1203,10 +1205,10 @@ long-term shortcut. It is not:
 (`fcn.0000963c`/`fcn.000096e8`/`fcn.00009688`/`fcn.000096b8`, all thin
 wrappers around `FUN_001086e0`/`FUN_00108774`) will **always** take the
 "establish via `FUN_00108604`'s pipe_buffer spray" branch on every
-attempt — never the simple ashmem fast path. `root_umh.c` (this
+attempt — never the simple ashmem fast path. `10_workqueue_umh_root.c` (this
 project's own file), even though its workqueue-hijack logic is now
 fully confirmed correct (item 5 above), **cannot work as currently
-built** feeding it `aar_aaw.c`'s simple primitive instead — that
+built** feeding it `08_ashmem_configfs_rw.c`'s simple primitive instead — that
 combination doesn't correspond to any code path the closed binary ever
 actually takes. This means the pipe_buffer subsystem
 (`FUN_00107dd4`/`FUN_00108604`, mapped in outline in the "Second,
@@ -1284,10 +1286,10 @@ fixed, so this list is current, not stale):
 3. If step 1(a) gets real, independently-oracle-confirmed corruption
    landing on `ashmem_misc.fops`, only *then* is it meaningful to continue
    porting the pipe_buffer-based secondary AAR/AAW subsystem
-   (`FUN_00107dd4`/`FUN_00108604`) or to fully validate `root_umh.c`
+   (`FUN_00107dd4`/`FUN_00108604`) or to fully validate `10_workqueue_umh_root.c`
    end-to-end — doing either before the corruption reliably lands cannot
    be tested meaningfully (as this whole session demonstrated). Note:
-   `root_umh.c` itself no longer needs validation work by the time this
+   `10_workqueue_umh_root.c` itself no longer needs validation work by the time this
    matters — see item 5 in the "Unattended follow-up session" section
    above, `FUN_00108fa4` is now fully confirmed to match it line-for-line.
    The only remaining unfinished piece of that subsystem, if it does turn
@@ -1298,7 +1300,7 @@ fixed, so this list is current, not stale):
 4. ~~Decode the remainder of `FUN_00108808`/all of `FUN_00108fa4`~~ —
    **done this session**, both fully traced. `FUN_00108808` (slab
    identification via direct `struct page` reads + configfs-name
-   verification) and `FUN_00108fa4` (confirmed = `root_umh.c`, see
+   verification) and `FUN_00108fa4` (confirmed = `10_workqueue_umh_root.c`, see
    above) hold no more surprises; nothing left to decode there.
 5. `src/sigreturn.c` (repo root, old engine) has an independently-found and
    fixed field-offset bug (never exercised in any real test, since it's
@@ -1472,19 +1474,19 @@ corruption.
 independent of a dedicated grooming pass) -- checked via BTF, no new
 lead.** `pahole -C mm_struct` against this device's own BTF
 (`targets/afzh3/reference/kernel/btf/vmlinux-SAFZH3-5.15.189.btf`) gives the
-REAL `sizeof(struct mm_struct)` = 992 bytes, not `groom.c`'s
-`OSS_MM_STRUCT_SZ=0x400`(1024). Not a bug: `groom.c`'s constant was
+REAL `sizeof(struct mm_struct)` = 992 bytes, not `05_mm_slab_grooming.c`'s
+`OSS_MM_STRUCT_SZ=0x400`(1024). Not a bug: `05_mm_slab_grooming.c`'s constant was
 taken directly from the closed binary's own disassembly (a proven,
 working exploit), and SLUB's own per-object overhead (redzoning/
 freelist-pointer storage/alignment) commonly rounds a dedicated
 kmem_cache's real per-object stride up from a raw `sizeof()` -- 992→1024
 is a completely unremarkable, expected gap. No actionable lead here;
-`groom.c`'s existing constant should be trusted over the raw BTF
+`05_mm_slab_grooming.c`'s existing constant should be trusted over the raw BTF
 `sizeof()`.
 
 **Candidate 2 (SIGUSR1/FPSIMD payload field values vs BTF) -- CONFIRMED,
 genuinely new, significant.** Re-checked the 11 payload fields
-(`sigusr1_payload.c:sigusr1_build_payload()`, offsets `0x18/0x20/0x28/
+(`06_signal_frame_payload.c:sigusr1_build_payload()`, offsets `0x18/0x20/0x28/
 0x30/0x38/0x40/0x48/0x50/0x58/0x60/0x68` into the 512-byte buffer) 
 against `pahole -C rt_mutex_waiter`'s REAL, exact field offsets this
 time (the "Unattended follow-up" session's earlier comparison used a
@@ -1514,7 +1516,7 @@ tricked into treating this content as a genuine `rt_mutex_waiter*`,
 dereferencing `waiter->task` would hand it an ATTACKER-CONTROLLED
 `task_struct*` -- a second-stage confused-deputy primitive, structurally
 identical in spirit to the already-working fake-`file_operations`
-technique `groom.c`/`fops_install.c` use, just one level deeper into
+technique `05_mm_slab_grooming.c`/`04_fake_kernel_objects.c` use, just one level deeper into
 the rt_mutex/PI object graph. **This resolves the earlier, wrong
 "doesn't align, might be irrelevant" characterization** -- it is not
 irrelevant; it's the second half of a two-stage fake-object chain this
@@ -1644,8 +1646,8 @@ are timing-correct but still missing one more ingredient.
 session**: the fake waiter's `task` field (payload offset `0x30`)
 points at `page_base|0x14e8` -- a SELF-REFERENTIAL address inside the
 SAME sprayed page, implying a fake `task_struct` is meant to live
-there too. **This project has never built one.** `groom.c`/
-`fops_install.c` only construct a fake `file_operations`-shaped object
+there too. **This project has never built one.** `05_mm_slab_grooming.c`/
+`04_fake_kernel_objects.c` only construct a fake `file_operations`-shaped object
 at `payload_base`; nothing currently populates `payload_base+0x14e8`
 with anything resembling a `task_struct` (needed fields, if
 `rt_mutex_adjust_pi`'s chain-walk ever got this far: whatever
@@ -1783,7 +1785,7 @@ newly-confirmed NULL-deref crash risk right next to this code path.
 
 ## `v8` built and tested: interrupt-owner hypothesis, negative (with a real, useful sub-finding)
 
-Built `run_futex_trigger_v8_cb`/`_full` (`futex_trigger.c`/`.h`,
+Built `run_futex_trigger_v8_cb`/`_full` (`07_futex_pi_trigger.c`/`.h`,
 `test_root_v8.c`) implementing the "interrupt owner mid-block"
 experiment from the section above: installs a no-op `SIGUSR2` handler,
 and right after the waiter's SIGUSR1 payload delivery succeeds, sends
@@ -1994,7 +1996,7 @@ something this whole session had missed: **the repository root
 (`/home/matias/Projects/Root-My-Galaxy-SM-S918B/src/`, NOT
 `oss-clone-afzh3/`) already contains a complete, actively-maintained,
 MUCH more mature implementation of this exact exploit** --
-`preload.c`, `main.c`, `util.c`, `slide.c`/`slide_app.c`, `fops.c`,
+`preload.c`, `00_orchestrator.c`, `util.c`, `slide.c`/`slide_app.c`, `fops.c`,
 `pipe.c`, `root.c`, `sigreturn.c`, `su_daemon.c`, with a real target
 header (`src/targets/dm3q-S918BXXSAFZH3/target.h`) for this exact
 device/firmware. This is a **published, released project**
@@ -2052,7 +2054,7 @@ this time: `"p0 pipe oracle prepared ... pipes=240"`,
 `"mm leaked=... object_index=19"`, `"mm target-neighbor slab queued
 for late drain"`, `"mm late cpu-partial drain triggers=32"`,
 `"sk_buff reclaim sends=16/16 mode=1"`, `"kernel page prepare mode=1
-attempt=1/2 elapsed_ms=4426"` -- all matching `groom.c`'s own
+attempt=1/2 elapsed_ms=4426"` -- all matching `05_mm_slab_grooming.c`'s own
 technique step-for-step, confirming (from the ORIGINAL author's own
 current code, not this session's reproduction) that this project's
 understanding of the grooming stage has been right all along. Then:
@@ -2140,7 +2142,7 @@ should.
 **Concrete, well-scoped next step (implementation, not more
 reverse-engineering)**: fix `pi_tree_entry.__rb_parent_color` in
 `src/sigreturn.c`'s `g_fake_waiter` (and this project's own
-`oss-clone-afzh3/src/sigusr1_payload.c`, which has the exact same bug)
+`oss-clone-afzh3/src/06_signal_frame_payload.c`, which has the exact same bug)
 to be genuinely useful instead of crash-inducing. Two directions worth
 trying, in order of how disruptive they are to the existing design:
 1. **Make it look empty on purpose**: set `pi_tree_entry.__rb_parent_color`
@@ -2248,7 +2250,7 @@ this file as "5000+ bytes... multi-session-scale task, not a
 same-session continuation" — that assessment still stands, and this
 round's clean, reliable trigger success makes it the clear next target
 rather than more futex-timing iteration). This project's own
-`aar_aaw.c`/`root_umh.c` substitute (ashmem-based, not pipe_buffer-based)
+`08_ashmem_configfs_rw.c`/`10_workqueue_umh_root.c` substitute (ashmem-based, not pipe_buffer-based)
 remains what's actually being exercised by `oss_verify_kernel_access()`
 above — its `pread64` `EINVAL` is that SEPARATE, already-known
 limitation, not new information from this round.
@@ -2458,7 +2460,7 @@ session.)
 
 **Four real, previously-unverified discrepancies found, now fixed in a
 new `run_futex_trigger_v4_cb`/`run_futex_trigger_v4_full` (in
-`futex_trigger.c`/`.h`; `v1`/`v2`/`v3` untouched, all still build clean;
+`07_futex_pi_trigger.c`/`.h`; `v1`/`v2`/`v3` untouched, all still build clean;
 `test_root_v4.c` added, builds clean against the same NDK toolchain):**
 
 1. **A real fixed 100ms delay before `CMP_REQUEUE_PI`, never ported.**
@@ -2520,7 +2522,7 @@ writer of G+0x76c (or of G+0x734, or G+0x770/0x774, two more flags
 `fcn.00004300`/app_main touch) and found none — every reference found
 is a *read*, in these same two functions. The likely explanation,
 consistent with this project's own already-existing multi-process
-`S23_SUPERVISOR_ATTEMPT` retry harness (`main.c`): these globals are
+`S23_SUPERVISOR_ATTEMPT` retry harness (`00_orchestrator.c`): these globals are
 written by an **outer, multi-process supervisor** this project already
 reproduces separately, not by anything inside a single exploit attempt.
 Also found (same method) that app_main's post-`CMP_REQUEUE_PI` code
@@ -2567,7 +2569,7 @@ even happens) -- using it would have started the real 100ms countdown
 much too early relative to the waiter's actual progress, silently
 defeating the entire point of porting that delay faithfully. Fixed in
 both `run_futex_trigger_v4_cb` and `run_futex_trigger_v5_cb`
-(`futex_trigger.c`); `futex_trigger.h`'s derivation comment corrected
+(`07_futex_pi_trigger.c`); `07_futex_pi_trigger.h`'s derivation comment corrected
 to match. Rebuilt everything (`app_main` + all seven `test_root_v*`
 binaries) clean after the fix — this is the version ready to test.
 
@@ -2584,7 +2586,7 @@ coincidentally exactly 88 bytes. But searched the ENTIRE ~6300-line
 decompiled closed binary
 (`targets/afzh3/reference/kernel/closed-payload-decompile/decompiled_afzh3.c`)
 for any dedicated small-object (kmalloc-96-class) grooming pass and
-found none — `groom.c`'s only spray targets `OSS_MM_STRUCT_SZ`
+found none — `05_mm_slab_grooming.c`'s only spray targets `OSS_MM_STRUCT_SZ`
 (0x400/1024 bytes, order-3 pages), an entirely different size class.
 Absence of a matching grooming step in the real binary is fairly strong
 evidence against this hypothesis for a controlled, reliable exploit
@@ -2592,7 +2594,7 @@ evidence against this hypothesis for a controlled, reliable exploit
 generally avoid). Deprioritized; not investigated further this session.
 
 **Already built while the device stayed disconnected**: step 2 below is
-done. `run_futex_trigger_v5_cb`/`_v5_full` (`futex_trigger.c`/`.h`) and
+done. `run_futex_trigger_v5_cb`/`_v5_full` (`07_futex_pi_trigger.c`/`.h`) and
 `test_root_v5.c` implement the genuine 4-actor concurrent harness --
 app_main-equivalent pinned to CPU 0, waiter on CPU 3 (unchanged,
 byte-accurate), owner unpinned (unchanged, byte-accurate), and a real
@@ -2626,13 +2628,13 @@ the retraction above -- read that section first):**
      deprioritized -- the waiter itself writes it (raw vaddr 0x40fc),
      part of the same handshake `v6` now ports. README's "Outer-
      supervisor globals" section's characterization of G+0x76c is
-     superseded by `futex_trigger.h`'s `run_futex_trigger_v6_cb`
+     superseded by `07_futex_pi_trigger.h`'s `run_futex_trigger_v6_cb`
      comment; G+0x734/G+0x714/fork()/kill()/waitpid() are still
      unresolved and still judged out-of-scope (unrelated flags).
 1. **The `pi_state` hypothesis deserves a second look, not final
    dismissal.** It was deprioritized earlier tonight for lacking a
    dedicated small-object (kmalloc-96) grooming pass in the decompiled
-   binary -- but `groom.c`'s own documented technique is a
+   binary -- but `05_mm_slab_grooming.c`'s own documented technique is a
    **cross-cache-to-PAGE-ALLOCATOR** attack (free enough `mm_struct`
    slab objects to release a whole order-3 page back to the buddy
    allocator, then race a differently-typed allocation for that same
@@ -2651,7 +2653,7 @@ the retraction above -- read that section first):**
    a `v7`. Two remaining threads worth pulling instead: (a) whether this
    project's own SIGUSR1/FPSIMD payload field VALUES (not just the
    mechanism, already confirmed structurally correct) are exactly right
-   -- re-verify `sigusr1_payload.c`'s 11 written fields against fresh
+   -- re-verify `06_signal_frame_payload.c`'s 11 written fields against fresh
    BTF (`pahole -C fpsimd_context ...`) rather than the original,
    pre-BTF-availability derivation; (b) a larger statistical batch (20+)
    of `v6` runs now that each run is cheap (~13s) and the timing is
@@ -2661,10 +2663,10 @@ the retraction above -- read that section first):**
    (`FUN_001076c0` onward) remains what it was assessed as BEFORE
    tonight's timing detour: NOT on the critical path (see the
    "Unattended follow-up session" section, item 5, earlier in this
-   file) -- `root_umh.c` is already confirmed equivalent to
+   file) -- `10_workqueue_umh_root.c` is already confirmed equivalent to
    `FUN_00108fa4` and is waiting on the SAME upstream precondition
    (`pi_blocked_on` / whatever the real corruption target turns out to
-   be) as this project's own simpler `aar_aaw.c`. Don't start this
+   be) as this project's own simpler `08_ashmem_configfs_rw.c`. Don't start this
    multi-session-scale port on the assumption that the trigger is
    "solved" -- it isn't, per the retraction above.
 4. Keep the standing discipline: `adb shell "echo alive"`, `su -c 'cat
@@ -2688,7 +2690,7 @@ and reproduce it faithfully (not guess at it).
 
 ### Part 1: LD_PRELOAD build target (no behavior change)
 
-- `src/main.c`: `app_main()`'s call site split via a new
+- `src/00_orchestrator.c`: `app_main()`'s call site split via a new
   `BUILD_LD_PRELOAD` macro -- `__attribute__((constructor)) static void
   load(void)` (single-shot guarded) when defined, plain `int main(void)`
   otherwise. Mirrors `../src/preload.c:load()`'s own shape exactly.
@@ -2709,13 +2711,13 @@ and reproduce it faithfully (not guess at it).
 
 ### Part 2: wired `root_umh_install()` into the real attempt loop
 
-`do_one_attempt()` in `main.c` previously stopped at
+`do_one_attempt()` in `00_orchestrator.c` previously stopped at
 `run_futex_trigger()` -- `root_umh_install()` (the
 `call_usermodehelper_exec_work` workqueue-hijack root grant,
-`src/root_umh.c`, already "fully confirmed literal match" per the
+`src/10_workqueue_umh_root.c`, already "fully confirmed literal match" per the
 "MAJOR MILESTONE" section above) was only ever called from the
 `test_root*` harnesses, never from the real attempt loop. Added
-`src/aar_aaw.c`/`src/root_umh.c` to the Makefile's `SRCS`, wired
+`src/08_ashmem_configfs_rw.c`/`src/10_workqueue_umh_root.c` to the Makefile's `SRCS`, wired
 `root_umh_install(kernel_base, payload_base, getenv("CVE43499_ROOT_HELPER"))`
 into `do_one_attempt()` after the trigger succeeds. `CVE43499_ROOT_HELPER`
 is the same env var name `src/root.c` already uses for this purpose;
@@ -2729,7 +2731,7 @@ every retry (12/12). Initially misdiagnosed as an SELinux/shell-domain
 restriction -- **disproved empirically**: re-ran the ORIGINAL closed
 `ksu-payload` binary via the identical `adb shell` + `LD_PRELOAD`
 invocation on the same boot, and it printed `stage=verifying-kernel-
-access` (its own `/dev/ashmem` open, per `fops_install.c`'s header
+access` (its own `/dev/ashmem` open, per `04_fake_kernel_objects.c`'s header
 comment on `FUN_001076c0`) and succeeded through to
 `temporary-root-ready` moments later. Same shell domain, same boot,
 same device -- so `/dev/ashmem` open is NOT categorically denied to
@@ -2773,7 +2775,7 @@ Ported as `run_futex_trigger_v10_{cb,full}` (`src/futex_trigger.{c,h}`),
 reusing `owner_thread_fn_v8`/`consumer_thread_fn_v8` unchanged (the
 consumer already had the right `g_sigusr1_done`-wait /
 `g_sched_setattr_done`-signal shape; only the waiter needed the two
-fixes above). Wired into `main.c`'s `do_one_attempt()` in place of
+fixes above). Wired into `00_orchestrator.c`'s `do_one_attempt()` in place of
 `run_futex_trigger_cb()`.
 
 ### Part 4: the G+0x760 gate -- the real waiter never calls verify from here
@@ -2811,13 +2813,13 @@ gate on, without actually calling it from that thread).
 "real-device validated" per the "`pipe_spray.c` validated for real on
 the target device" section above) had never been wired into the actual
 reclaim path. Added `groom_and_install_fops_object_v2()`
-(`src/groom.c`/`.h`, sharing all logic with the original via a new
+(`src/05_mm_slab_grooming.c`/`.h`, sharing all logic with the original via a new
 static `..._impl(..., int use_pipe_prespray)`): creates 480 pipes at 2
 pages BEFORE the existing mm_struct choreography, resizes all of them
 to 32 pages immediately after the leak/mask math succeeds (mirroring
 `FUN_00107dd4`'s own two-loop shape), THEN writes the fake object,
 closing all 480 pipes on every return path including the early-failure
-ones. Wired into `main.c` in place of the v1 call.
+ones. Wired into `00_orchestrator.c` in place of the v1 call.
 `Makefile`'s `SRCS` gained `src/pipe_spray.c`.
 
 **On-device result**: `pipe pre-spray created=480/480`,
@@ -2833,7 +2835,7 @@ re-checking if `resized` ever comes back partial in a future run.
 ### Part 6: KASLR alignment bug found and fixed (unrelated to v10, but blocking test iteration)
 
 Full detail in `targets/afzh3/reference/kernel/README.md`'s "KASLR slide
-alignment bug" section. Summary: `src/kaslr.c`'s tracefs-leak candidate
+alignment bug" section. Summary: `src/01_kernel_base_tracefs.c`'s tracefs-leak candidate
 filter required 64KB alignment (`candidate & 0xffff == 0`); real
 `/proc/kallsyms` readings across 6 boots this session showed the real
 KASLR granularity on this kernel is 32KB (`& 0x7fff == 0`), and 2 of
@@ -2849,7 +2851,7 @@ changed the mask to `0x7fff`. Confirmed working on the very next boot:
 attempt -- previously this exact slide value would have been silently
 rejected.
 
-Also added a `SLIDE_P0_OFFSET` bypass to `main.c` (env var, hex,
+Also added a `SLIDE_P0_OFFSET` bypass to `00_orchestrator.c` (env var, hex,
 validated `<= 0x1f0000`, same name/semantics as
 `Root-My-Galaxy-SM-S918B/src/slide_app.c`'s existing mechanism) so a
 known-good slide for the current boot (obtained via `su` + live
@@ -3001,12 +3003,12 @@ implements correctly -- v10 abandoned it in favor of calling the
 callback unconditionally from the main thread after the whole routine
 joins, on the strength of the now-disproven "never opens" claim.
 
-**Fixed as `run_futex_trigger_v11_{cb,full}`** (`futex_trigger.c`/`.h`):
+**Fixed as `run_futex_trigger_v11_{cb,full}`** (`07_futex_pi_trigger.c`/`.h`):
 v10's waiter body (no fabricated SIGUSR2/delay to the owner, yield-spin
 bounded to ~1s instead of the real `0x3b9ac9ff`-cycle count -- both
 still correct, unrelated to this bug) with v6's callback-from-waiter
 gate restored in place of v10's callback-from-main-thread substitute.
-Wired into `main.c:do_one_attempt()` in place of `run_futex_trigger_v10_full()`.
+Wired into `00_orchestrator.c:do_one_attempt()` in place of `run_futex_trigger_v10_full()`.
 Builds clean (`make` for `app_main`, `make so API=34` for the
 `LD_PRELOAD` target, NDK 28.2.13676358).
 
@@ -3051,7 +3053,7 @@ this round:**
 1. **The `rt_mutex_dequeue_pi()`/`rb_erase` corruption primitive itself
    is NOT the crash cause.** Traced `__rb_erase_augmented()`
    (`kernel_platform/msm-kernel/include/linux/rbtree_augmented.h:198`)
-   by hand against `fops_install.c`'s EXACT current field values (not
+   by hand against `04_fake_kernel_objects.c`'s EXACT current field values (not
    hypothetical ones): for the fake waiter's `pi_tree_entry` (parent_color
    = `pi_parent` = `page_base|0x1180`, `rb_right` = `ashmem_misc_fops_addr`,
    `rb_left` = 0), erasing this exact node performs exactly TWO writes,
@@ -3127,10 +3129,10 @@ spin instead of the real fixed iteration count -- a different loop body
 per iteration than the real 4-instruction loop, and its real-world
 duration depends on this device's core frequency rather than being a
 fixed count). **Built `run_futex_trigger_v12_{cb,full}`**
-(`futex_trigger.c`/`.h`): identical to `v11` except the spin is now the
+(`07_futex_pi_trigger.c`/`.h`): identical to `v11` except the spin is now the
 exact byte-accurate `for (spins = 0; spins < 0x3b9ac9ffULL &&
 !g_sched_setattr_done; spins++) { yield; }`. Wired into
-`main.c:do_one_attempt()` in place of `v11`. Builds clean (`make`,
+`00_orchestrator.c:do_one_attempt()` in place of `v11`. Builds clean (`make`,
 NDK 28.2.13676358).
 
 Also added a diagnostic switch, `GROOM_DISABLE_PIPE_PRESPRAY` (env var,
@@ -3178,7 +3180,7 @@ boot):
 ## Bisection RESULTS (same session, same day): it's an INTERACTION, not either change alone -- 6 total crashes, 3 on-device tests this round, root cause of the CRASH now pinned down empirically
 
 Per explicit instruction to spend as many reboots as needed, built and
-tested `v13`/`v14` (`futex_trigger.c`/`.h`) to isolate Part 3's two
+tested `v13`/`v14` (`07_futex_pi_trigger.c`/`.h`) to isolate Part 3's two
 simultaneous changes individually, then re-tested `v12` (both changes)
 a second time as a control. All three ran back-to-back on the same
 boot (root already granted by the user beforehand), with live
@@ -3233,7 +3235,7 @@ session, reacting differently to nearby scheduler activity on either the
 owner or waiter side, but this is not proven, just the most consistent
 remaining hypothesis).
 
-**Fixed: `main.c:do_one_attempt()` now defaults to `run_futex_trigger_v13_full()`**
+**Fixed: `00_orchestrator.c:do_one_attempt()` now defaults to `run_futex_trigger_v13_full()`**
 (not `v12`) -- the only tested configuration that is BOTH crash-free
 AND achieves a genuinely successful `sched_setattr` on the
 busy-spinning target. Builds clean. This is **not** a byte-exact port
@@ -3325,7 +3327,7 @@ owner thread at all). It happened to be crash-free in the bisection
 above, but keeping it as the default silently swaps in
 non-byte-accurate behavior to dodge a bug this project doesn't
 understand -- exactly what was asked not to do. **Reverted**:
-`main.c:do_one_attempt()` now calls `run_futex_trigger_v12_full()`
+`00_orchestrator.c:do_one_attempt()` now calls `run_futex_trigger_v12_full()`
 again (byte-accurate: busy-spin, no signal to owner), matching
 `fcn.00003e18`/`fcn.00004300` as closely as this project currently
 understands them.
@@ -3360,7 +3362,7 @@ reliably. Remaining candidate explanations, none confirmed: (1) a
 difference in the PHYSICAL MEMORY STATE reaching this point (i.e. the
 real binary's grooming/reclaim, or its still-unported pipe_buffer AAR/AAW
 subsystem, leaves the kernel in a subtly different state than this
-project's `groom.c`/`fops_install.c`, such that the SAME userspace
+project's `05_mm_slab_grooming.c`/`04_fake_kernel_objects.c`, such that the SAME userspace
 sequence is safe against real memory but not against this port's); (2)
 the real binary normally runs each attempt in a genuinely fresh forked
 process (per `su_daemon.c`-equivalent multi-process retry, not
@@ -3398,8 +3400,8 @@ each just `FUTEX_WAIT`ing on a shared gate, then wakes ALL of them at
 once with a single `FUTEX_WAKE(nr_wake = INT_MAX)` -- a deliberate
 thundering-herd CPU/cache/scheduler contention generator, timed to
 fire right around the physical-page reclaim window. **Confirmed via
-`grep -c pthread_create|FUTEX_WAIT|FUTEX_WAKE src/groom.c
-src/fops_install.c` returning zero matches**: this project's `groom.c`
+`grep -c pthread_create|FUTEX_WAIT|FUTEX_WAKE src/05_mm_slab_grooming.c
+src/04_fake_kernel_objects.c` returning zero matches**: this project's `05_mm_slab_grooming.c`
 (which its own header already admits is NOT a literal port of
 `FUN_00106288` -- it reuses a separately-proven kernelsnitch-based
 technique from `src/util.c` instead) never had any equivalent of this
@@ -3418,13 +3420,13 @@ struct-field semantics marked `[médio]`/`[baixo]` confidence even in
 the dedicated reverse-engineering session that produced the
 walkthrough, and their only consumer (`P0_GATE_PAGE_STRUCT`/
 `P0_PROBE_PAGE_STRUCT` env vars for a KASLR-retry path) is not wired
-up anywhere in this project (`main.c`'s own comment: "Deferred to
+up anywhere in this project (`00_orchestrator.c`'s own comment: "Deferred to
 milestone 2"). Porting either with unverified offsets would violate
 this project's standing "never invent field values" rule for something
 that, unlike the confirmed thread-pool mechanism, doesn't have a clean,
 fully-verified asm trace.
 
-**Wired into `groom.c`** (`groom_and_install_fops_object_impl()`),
+**Wired into `05_mm_slab_grooming.c`** (`groom_and_install_fops_object_impl()`),
 called immediately before the `sched_yield()`x4 / close-triggered
 physical reclaim sequence -- the closest structural equivalent to "the
 real binary's contention fires right around its own reclaim window",
@@ -3470,7 +3472,7 @@ Remaining untested candidates: the still-unported pipe_buffer AAR/AAW
 subsystem (`FUN_00107dd4`/`FUN_00108604`, the "P0 attack" -- STEP 17 of
 the walkthrough, itself calling `fork()` + a child that holds corrupted
 state alive via a pipe-communicated loop, structurally different from
-anything this project's `groom.c` does); the possibility that this
+anything this project's `05_mm_slab_grooming.c` does); the possibility that this
 project's OWN reclaim technique (kernelsnitch-based, borrowed from
 `src/util.c`) is subtly less precise than `FUN_00106288`'s real one in
 a way that leaves a dangling/aliased physical page that only manifests
@@ -3536,14 +3538,14 @@ memory of this one) picking this project back up.
 ### What was found and fixed (real, working result)
 
 **A genuine bug in this project's own understanding, found and fixed**:
-`futex_trigger.c`'s `v10`/`v11` variants believed the real waiter never
+`07_futex_pi_trigger.c`'s `v10`/`v11` variants believed the real waiter never
 calls the verify function (`fcn.000076c0`) from inside itself because a
 static `axt`-style cross-reference search for writes to the gating
 global `G+0x760` found nothing. This was **wrong** -- the real write is
 `bl 0x3650`, and `0x3650` disassembles to `__aarch64_atomic_fetch_add4_relax`
 (a real LSE atomic increment, `ldaddal w0,w0,[x1]` at raw vaddr
 `0x3660`), which a plain "find a `str` writing a constant" search will
-never surface. `run_futex_trigger_v11_{cb,full}` (`futex_trigger.c`/
+never surface. `run_futex_trigger_v11_{cb,full}` (`07_futex_pi_trigger.c`/
 `.h`) restores the correct callback-from-waiter-thread call pattern.
 This is real, confirmed, and kept in the codebase, though it is not
 what ended up mattering for the crash (see below).
@@ -3577,7 +3579,7 @@ project could not explain, close, or safely test around this gap.
    (`kernel_platform/msm-kernel/include/linux/rbtree_augmented.h:198`,
    full source now available locally at
    `/home/matias/Projects/SM-S918B_16_Opensource/kernel_platform/`)
-   against `fops_install.c`'s exact current field values for the fake
+   against `04_fake_kernel_objects.c`'s exact current field values for the fake
    waiter's `pi_tree_entry`. Result: exactly two writes, both
    benign/intended (one into this project's own scratch fake-fops
    table, one being the actual intended `ashmem_misc.fops` corruption).
@@ -3638,9 +3640,9 @@ project could not explain, close, or safely test around this gap.
    inside its own grooming function, all `FUTEX_WAIT`ing on a gate,
    then wakes them all at once (`FUTEX_WAKE(INT_MAX)`) -- a deliberate
    thundering-herd contention generator timed around the physical-page
-   reclaim window. Confirmed this project's `groom.c` had ZERO
+   reclaim window. Confirmed this project's `05_mm_slab_grooming.c` had ZERO
    equivalent (`grep -c pthread_create|FUTEX_WAIT|FUTEX_WAKE` = 0).
-   **Implemented** (`src/thread_army.c`/`.h`, wired into `groom.c`,
+   **Implemented** (`src/thread_army.c`/`.h`, wired into `05_mm_slab_grooming.c`,
    host-tested 3/3 clean before touching the device, then run
    on-device with `v12`): **crashed again, 8th crash total, identical
    signature.** Hypothesis disproven -- grooming-time contention is not
@@ -3715,7 +3717,7 @@ itself).
    exploit. This is a product/priority decision, not a technical one --
    this session was explicitly instructed to prioritize fidelity, so
    `v12` (byte-accurate, confirmed to crash) is what's currently wired
-   as the default in `main.c`.
+   as the default in `00_orchestrator.c`.
 4. The still-unread parts of `WALKTHROUGH-ksu-payload.md` (STEP 20
    onward, `_INIT_2`'s retry/repetition logic) and the still-unported
    pipe_buffer/P0 subsystem (STEP 17, `FUN_00107dd4`) were checked
@@ -3728,20 +3730,20 @@ itself).
 
 ### Current file/code state (all committed to disk, builds clean)
 
-- `src/futex_trigger.c`/`.h`: `v11` (gate fix, kept, correct but not
+- `src/07_futex_pi_trigger.c`/`.h`: `v11` (gate fix, kept, correct but not
   the active default's differentiator), `v12` (byte-accurate spin,
   **current default**, confirmed to crash), `v13`/`v14` (bisection
   variants, NOT wired as default, `v13` proven safe but non-byte-
   accurate, kept for reference/diagnostic use via `BISECT_VARIANT=13`
-  or `14` env var in `main.c`).
+  or `14` env var in `00_orchestrator.c`).
 - `src/thread_army.c`/`.h`: real, confirmed-correct port of the closed
-  binary's 4096-thread contention mechanism. Wired into `groom.c`,
+  binary's 4096-thread contention mechanism. Wired into `05_mm_slab_grooming.c`,
   active on every run. Confirmed not to affect the crash, kept because
   it's independently a correct, harmless port of real behavior.
-- `src/groom.c`: `GROOM_DISABLE_PIPE_PRESPRAY` env var still present
+- `src/05_mm_slab_grooming.c`: `GROOM_DISABLE_PIPE_PRESPRAY` env var still present
   (diagnostic only, not implicated -- crash reproduces with or without
   pipe pre-spray).
-- `src/main.c`: `do_one_attempt()` calls `run_futex_trigger_v12_full()`
+- `src/00_orchestrator.c`: `do_one_attempt()` calls `run_futex_trigger_v12_full()`
   by default; `BISECT_VARIANT` env var can select `v13`/`v14` for
   diagnostic (non-default, non-byte-accurate) testing.
 - Builds clean for both `make` (dlopen/`main()` target) and
@@ -3785,7 +3787,7 @@ else found relevant to this project's crash.
 ### External review claim checked and disproven: `lock.waiters` self-ref (`0x14d0`) "geometry mismatch"
 
 A review comment (external, not from this project's own prior notes)
-claimed `fops_install.c:92`'s `lock.waiters.rb_root`/`rb_leftmost =
+claimed `04_fake_kernel_objects.c:92`'s `lock.waiters.rb_root`/`rb_leftmost =
 page_base|0x14d0` is a bug: nothing is ever written to memory at
 `page_base+0x14d0` itself (confirmed true -- it's only ever used as a
 VALUE stored into other fields, never a write destination), while the
@@ -3801,7 +3803,7 @@ binary does the exact same thing --
 `ctx+0x2218` and `ctx+0x2220` (`lock.waiters.rb_root`/`rb_leftmost`).
 **Byte-exact match, not a divergence.** `assets_out/057_001061ac_
 FUN_001061ac.c` (the real waiter-builder) also confirms all 12
-`put_fake_waiter()` field offsets match `fops_install.c` exactly.
+`put_fake_waiter()` field offsets match `04_fake_kernel_objects.c` exactly.
 
 **Why the "mismatch" isn't a bug**: `lock.waiters`/`tree_entry` (the
 rb-tree read by `rt_mutex_top_waiter(lock)`) is a DIFFERENT mechanism
@@ -3816,7 +3818,7 @@ code path does not. Since the real binary has the identical "empty
 self-ref" content in this field and (per the project's own premise)
 doesn't crash, this cannot be the differentiator between this port and
 the real binary's behavior. The suggested bisection tool
-(`GROOM_DISABLE_PIPE_PRESPRAY`, `main.c`) was already built and tested
+(`GROOM_DISABLE_PIPE_PRESPRAY`, `00_orchestrator.c`) was already built and tested
 earlier this session -- crash reproduces identically with or without
 pipe pre-spray, already ruling out that variable independent of this
 claim.
@@ -3824,9 +3826,9 @@ claim.
 ## BREAKTHROUGH, real crash forensics obtained for the first time: `/proc/last_kmsg` (2026-09-18)
 
 Per a suggestion to check ftrace-on-panic forensics, and separately a
-finding that `kaslr.c:210` disables `tracing_on` and never re-enables
+finding that `01_kernel_base_tracefs.c:210` disables `tracing_on` and never re-enables
 it (confirmed: the only 4 writes to `tracing_on` in the whole codebase
-are in `kaslr.c`, ending with `tracefs_write(tracing_on, "0")` with no
+are in `01_kernel_base_tracefs.c`, ending with `tracefs_write(tracing_on, "0")` with no
 re-enable anywhere) -- checked `/proc/last_kmsg` with root, a path
 this project had **never checked before** (only `/sys/fs/pstore/` and
 `/data/vendor/ramdump/` were ever checked, both confirmed empty every
@@ -3836,7 +3838,7 @@ crashes** (the `thread_army` test, PID `app_main_v12ta`, `5684`).
 
 The `Dumping ftrace buffer` section in it is NOT useful (confirmed: it
 only contains stale `sched_blocked_reason` events from this project's
-own KASLR-leak sampling window, from before `kaslr.c` turned
+own KASLR-leak sampling window, from before `01_kernel_base_tracefs.c` turned
 `tracing_on` off -- nothing from anywhere near the actual crash). But
 the **panic's own register dump and call trace are real, complete, and
 directly answer the question this whole project has been unable to
@@ -3940,13 +3942,13 @@ this mechanistically rather than just from the crash symptom.
 
 **Next step for whoever continues**: now that `/proc/last_kmsg` is a
 CONFIRMED WORKING forensics channel (unlike ftrace, which needs the
-`kaslr.c` tracing_on bug fixed first to be useful at crash time), any
+`01_kernel_base_tracefs.c` tracing_on bug fixed first to be useful at crash time), any
 future crash on this device can be diagnosed the same way --
 `su -c 'cat /proc/last_kmsg'` immediately after reconnect, before doing
 anything else, `grep -iE "panic|Unable to handle|Oops|Call trace"`. No
 kprobes needed for basic PC/call-trace/register diagnosis; kprobes
 would still help for deeper state (e.g. dumping the actual `waiter`/
-`lock` pointer values), and WOULD need the `kaslr.c` tracing_on fix
+`lock` pointer values), and WOULD need the `01_kernel_base_tracefs.c` tracing_on fix
 (or a concurrent "keeper" process re-enabling `tracing_on` after the
 KASLR phase, as separately suggested) to survive past the KASLR phase.
 
@@ -3956,7 +3958,7 @@ Per the root-cause confirmation above (`/proc/last_kmsg` panic dump:
 `rt_mutex_adjust_prio_chain+0x1ac`, NULL `waiter->lock`, reached
 because the waiter's post-`ETIMEDOUT` busy-spin never re-enters the
 kernel to let `pi_blocked_on`/`waiter->lock` cleanup finish),
-`main.c:do_one_attempt()` was switched to `run_futex_trigger_v14_full()`
+`00_orchestrator.c:do_one_attempt()` was switched to `run_futex_trigger_v14_full()`
 as the default. `v14` is byte-accurate on the axis that matters for
 fidelity (no SIGUSR2/delay to the owner -- the real waiter, raw vaddr
 `0x40d4`-`0x40fc`, sends nothing to the owner either) and differs from
@@ -4017,7 +4019,7 @@ In priority order:
    unconstructed/zeroed memory even in the hypothetical case
    `pi_blocked_on` did resolve there.
 4. **`GROOM_DISABLE_PIPE_PRESPRAY`** and **`BISECT_VARIANT=13`/`14`**
-   env vars remain available on `main.c` for future isolation testing
+   env vars remain available on `00_orchestrator.c` for future isolation testing
    without rebuilding.
 5. **Not yet re-attempted since the fix**: a full, clean, single-attempt
    run as plain unprivileged `shell` (not `su`) to confirm `v14` is

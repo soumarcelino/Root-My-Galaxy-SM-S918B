@@ -31,7 +31,7 @@ flowchart TD
 
 ## 1. Entrada e supervisor
 
-`src/main.c` possui dois modos de build:
+`src/00_orchestrator.c` possui dois modos de build:
 
 - executável PIE `build/app_main`, útil para diagnóstico;
 - shared object `build/payload.so`, carregado por `LD_PRELOAD`.
@@ -60,7 +60,7 @@ obtido.
 
 ## 3. Localização KASLR
 
-`src/kaslr.c` usa tracefs e `sched_blocked_reason` para derivar a base. O fluxo
+`src/01_kernel_base_tracefs.c` usa tracefs e `sched_blocked_reason` para derivar a base. O fluxo
 preferido continua sendo tracefs mesmo quando `SLIDE_P0_OFFSET` existe; o offset
 forçado é fallback validado por faixa e alinhamento de 64 KiB.
 
@@ -76,7 +76,7 @@ Sem base confiável, nenhum offset do alvo é seguro.
 
 ## 4. Groom e fake FOPS
 
-`src/groom.c` prepara slabs order-3 de `mm_struct`, usa kernelsnitch para obter
+`src/05_mm_slab_grooming.c` prepara slabs order-3 de `mm_struct`, usa kernelsnitch para obter
 uma candidata e calcula:
 
 ```text
@@ -94,7 +94,7 @@ novamente imediatamente após o envio de priming e antes das liberações.
 
 ## 5. Trigger futex/FPSIMD
 
-`src/futex_trigger.c` implementa waiter, owner e consumer. A variante padrão
+`src/07_futex_pi_trigger.c` implementa waiter, owner e consumer. A variante padrão
 v14 preserva o handshake relevante:
 
 ```text
@@ -128,7 +128,7 @@ continua útil porque o VFS já associou seu `f_op` na abertura.
 
 ## 7. Segundo reclaim: backend físico por pipes
 
-O backend em `src/pipe_physrw.c` cria dois bancos de 240 pipes. Após a segunda
+O backend em `src/09_pipe_buffer_rw.c` cria dois bancos de 240 pipes. Após a segunda
 geometria de `mm_struct`, um slab order-3 é reclamado por objetos de pipe. O
 código identifica um `pipe_buffer`, confirma o victim por alteração controlada
 do comprimento e prova leitura e escrita numa região scratch de `payload_base`.
@@ -139,7 +139,7 @@ acionava HARDENED_USERCOPY.
 
 ## 8. Publicação do usermode helper
 
-`src/root_umh.c` usa configfs somente para:
+`src/10_workqueue_umh_root.c` usa configfs somente para:
 
 - alterar `selinux_enforcing` conforme o fluxo fechado;
 - ler o slot estático `system_unbound_wq`.

@@ -73,17 +73,21 @@ two-clean-reboot validator.
 
 | Component | Role |
 |---|---|
-| `src/main.c` | Constructor/executable entry, limits, attempt supervisor, complete chain wiring. |
-| `src/kaslr.c`, `src/slabinfo.c` | Kernel-base discovery and slab telemetry. |
-| `src/groom.c` | Exact object leak, split drain, and skb reclaim lifecycle. |
-| `src/fops_install.c` | Exact fake waiter/FOPS/task buffer layout using aligned base A. |
-| `src/sigusr1_payload.c`, `src/futex_trigger.c` | FPSIMD transport and v14 futex/scheduler trigger. |
-| `src/aar_aaw.c` | Ashmem alias discovery, kernel read/write wrappers, verification. |
-| `src/pipe_physrw.c` | Closed-layout pipe-buffer physical read/write backend. |
-| `src/root_umh.c` | Workqueue usermode-helper root stage. |
+| `src/00_orchestrator.c` | Constructor/executable entry, limits, attempt supervisor, complete chain wiring. |
+| `src/01_kernel_base_tracefs.c`, `src/02_slab_cache_probe.c` | Kernel-base discovery and slab telemetry. |
+| `src/03_mm_address_sidechannel/` | Futex-hash timing side channel for the `mm_struct` address leak. |
+| `src/04_fake_kernel_objects.c` | Exact fake waiter/FOPS/task buffer layout using aligned base A. |
+| `src/05_mm_slab_grooming.c` | Exact object leak, split drain, and skb reclaim lifecycle. |
+| `src/06_signal_frame_payload.c`, `src/07_futex_pi_trigger.c` | FPSIMD transport and v14 futex/scheduler trigger. |
+| `src/08_ashmem_configfs_rw.c` | Ashmem alias discovery, kernel read/write wrappers, verification. |
+| `src/09_pipe_buffer_rw.c` | Closed-layout pipe-buffer physical read/write backend. |
+| `src/10_workqueue_umh_root.c` | Workqueue usermode-helper root stage. |
+| `src/90_diagnostic_checkpoint.h` | Optional durable checkpoints tagged with boot ID. |
 
 Focused diagnostics live under `tests/`; their support-only implementations
 live under `tests/support/`. They never enter the production payload.
+The standalone socket-send probe is `tests/support/skb_send_probe.c`; production
+skb delivery is implemented in `src/05_mm_slab_grooming.c`.
 
 ## Build
 

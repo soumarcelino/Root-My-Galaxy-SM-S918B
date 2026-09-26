@@ -8,7 +8,7 @@ arbitrariamente objetos SLUB dinâmicos: HARDENED_USERCOPY rejeitou a leitura de
 `pool_workqueue`. O binário fechado resolve isso instalando uma segunda
 primitiva baseada em `pipe_buffer`.
 
-`src/pipe_physrw.c` reconstrói esse estágio. Seu objetivo é obter um objeto
+`src/09_pipe_buffer_rw.c` reconstrói esse estágio. Seu objetivo é obter um objeto
 `pipe_buffer` localizado numa página order-3 conhecida e, temporariamente,
 alterar `page`, `offset` e `len` para transformar operações normais de pipe em
 leitura/escrita de endereços direct-map.

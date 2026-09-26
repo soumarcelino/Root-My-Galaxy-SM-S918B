@@ -559,7 +559,7 @@ Objetivo: encontrar limites, não mudar default baseado em um único miss.
 
 ### 7.1 Separar produção de variantes históricas
 
-`futex_trigger.c/.h` acumulam variantes e documentação extensa. Preservar
+`07_futex_pi_trigger.c/.h` acumulam variantes e documentação extensa. Preservar
 histórico, mas considerar:
 
 - `futex_trigger_prod.c` com v14;

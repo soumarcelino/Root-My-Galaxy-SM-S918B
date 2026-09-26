@@ -9,17 +9,17 @@ aberta. Ele ajuda revisão, regressão e investigação de novos firmwares.
 
 | Fechado/origem | Implementação aberta | Fidelidade relevante | Estado |
 |---|---|---|---|
-| `_INIT_2` / `0x10a440` | constructor em `main.c` | execução automática por `LD_PRELOAD` | implementado |
+| `_INIT_2` / `0x10a440` | constructor em `00_orchestrator.c` | execução automática por `LD_PRELOAD` | implementado |
 | `FUN_001044f4` | `do_one_attempt()` | limites, CPU0, ordem da tentativa, holder | implementado |
 | `FUN_0010757c` | `kaslr_locate_via_tracefs()` | tracefs preferido e fallback P0 | implementado |
-| `FUN_00106288` | `groom.c` | mm order-3, pre/post, skb `0x8e80` | validado no device |
+| `FUN_00106288` | `05_mm_slab_grooming.c` | mm order-3, pre/post, skb `0x8e80` | validado no device |
 | `FUN_00104bf0` | `pin_reclaim_to_cpu0()` | repin após priming | implementado/necessário |
-| fake object fechado | `fops_install.c` | FOPS em `A+0x1180` | validado por readback |
-| waiter/owner/consumer | `futex_trigger.c` v14 | handshake e callback no waiter | validado |
-| `FUN_001076c0` | callback em `main.c` | verify, restore, root stage, owner clear | validado |
-| `FUN_00107dd4` | `pipe_physrw.c` prepare | segundo reclaim e bancos 240+240 | validado |
+| fake object fechado | `04_fake_kernel_objects.c` | FOPS em `A+0x1180` | validado por readback |
+| waiter/owner/consumer | `07_futex_pi_trigger.c` v14 | handshake e callback no waiter | validado |
+| `FUN_001076c0` | callback em `00_orchestrator.c` | verify, restore, root stage, owner clear | validado |
+| `FUN_00107dd4` | `09_pipe_buffer_rw.c` prepare | segundo reclaim e bancos 240+240 | validado |
 | `FUN_00108604` | pipe R/W interno | forja temporária do `pipe_buffer` | validado por provas |
-| `FUN_00108fa4` | `root_umh.c` | fake work, contadores, list publish | validado |
+| `FUN_00108fa4` | `10_workqueue_umh_root.c` | fake work, contadores, list publish | validado |
 | helper fechado | `ksu-helper`/`--umh` | socket temporário e late-load | validado |
 
 ## Constantes com impacto direto

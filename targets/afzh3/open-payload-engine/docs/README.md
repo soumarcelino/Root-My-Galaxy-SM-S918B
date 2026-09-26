@@ -67,14 +67,18 @@ Tamanho  101120 bytes
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `src/main.c` | Supervisor, limites, tentativa completa e callback imediato. |
-| `src/kaslr.c` | Descoberta da base KASLR por tracefs. |
-| `src/groom.c` | Reclaim order-3 e instalação do objeto fake FOPS. |
-| `src/fops_install.c` | Layout byte a byte do buffer reclamado. |
-| `src/futex_trigger.c` | Trigger futex/FPSIMD, variante v14 e serviço assíncrono. |
-| `src/aar_aaw.c` | Alias ashmem, AAR/AAW inicial e restauração. |
-| `src/pipe_physrw.c` | Backend físico por pipes equivalente ao estágio fechado. |
-| `src/root_umh.c` | Publicação da workqueue e execução do helper de root. |
+| `src/00_orchestrator.c` | Supervisor, limites, tentativa completa e callback imediato. |
+| `src/01_kernel_base_tracefs.c` | Descoberta da base KASLR por tracefs. |
+| `src/02_slab_cache_probe.c` | Leitura da geometria e ocupação dos slabs. |
+| `src/03_mm_address_sidechannel/` | Vazamento de endereço de `mm_struct` por temporização de futex. |
+| `src/04_fake_kernel_objects.c` | Layout byte a byte do buffer reclamado. |
+| `src/05_mm_slab_grooming.c` | Reclaim order-3 e instalação do objeto fake FOPS. |
+| `src/06_signal_frame_payload.c` | Preparação e aplicação do payload FPSIMD no signal frame. |
+| `src/07_futex_pi_trigger.c` | Trigger futex/FPSIMD, variante v14 e serviço assíncrono. |
+| `src/08_ashmem_configfs_rw.c` | Alias ashmem, AAR/AAW inicial e restauração. |
+| `src/09_pipe_buffer_rw.c` | Backend físico por pipes equivalente ao estágio fechado. |
+| `src/10_workqueue_umh_root.c` | Publicação da workqueue e execução do helper de root. |
+| `src/90_diagnostic_checkpoint.h` | Checkpoints opcionais identificados pelo boot. |
 | `Makefile` | Build PIE e `LD_PRELOAD` com NDK Android. |
 
 ## Convenções desta documentação
