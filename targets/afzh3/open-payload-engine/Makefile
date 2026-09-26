@@ -24,9 +24,9 @@ so: $(SOBIN)
 $(OUTDIR):
 	mkdir -p $@
 
-SRCS := src/main.c src/kaslr.c src/slabinfo.c src/fops_install.c src/fops_spray.c src/groom.c src/futex_trigger.c src/sigusr1_payload.c src/aar_aaw.c src/pipe_physrw.c src/root_umh.c
+SRCS := src/00_orchestrator.c src/01_kernel_base_tracefs.c src/02_slab_cache_probe.c src/04_fake_kernel_objects.c src/05_mm_slab_grooming.c src/06_signal_frame_payload.c src/07_futex_pi_trigger.c src/08_ashmem_configfs_rw.c src/09_pipe_buffer_rw.c src/10_workqueue_umh_root.c
 
-$(BIN) $(SOBIN): src/diag_checkpoint.h src/kernelsnitch/kernelsnitch.h
+$(BIN) $(SOBIN): src/90_diagnostic_checkpoint.h src/03_mm_address_sidechannel/mm_address_leak.h
 
 $(BIN): $(SRCS) | $(OUTDIR)
 	$(TARGET_CC) -fPIE -pie -O2 -g0 -Wall -Wextra -Wno-unused-parameter -Isrc $(SRCS) -pthread -o $@
@@ -40,7 +40,7 @@ $(SOBIN): $(SRCS) | $(OUTDIR)
 # Focused diagnostics live outside src/ and never enter the payload build.
 TEST_OUTDIR := $(OUTDIR)/tests
 TEST_CFLAGS := -O2 -g0 -Wall -Wextra -Wno-unused-parameter -Isrc -Itests/support -pthread
-TEST_BINS := test_groom test_futex_trigger test_mm_leak test_pipe_spray test_signal_sanity test_sigusr1 test_spray
+TEST_BINS := test_groom test_futex_trigger test_mm_leak test_pipe_spray test_signal_sanity test_sigusr1 test_skb_send
 
 tests: $(addprefix $(TEST_OUTDIR)/,$(TEST_BINS))
 
@@ -49,16 +49,16 @@ test-aar-read-plan: | $(TEST_OUTDIR)
 	$(TEST_OUTDIR)/test_aar_read_plan_host
 
 test-fops-layout: | $(TEST_OUTDIR)
-	$(or $(HOST_CC),cc) -O2 -Wall -Wextra -Werror -Isrc tests/test_fops_layout.c src/fops_install.c -o $(TEST_OUTDIR)/test_fops_layout_host
+	$(or $(HOST_CC),cc) -O2 -Wall -Wextra -Werror -Isrc tests/test_fops_layout.c src/04_fake_kernel_objects.c -o $(TEST_OUTDIR)/test_fops_layout_host
 	$(TEST_OUTDIR)/test_fops_layout_host
 
 $(TEST_OUTDIR):
 	mkdir -p $@
 
-$(TEST_OUTDIR)/test_groom: tests/test_groom.c src/groom.c src/fops_install.c src/fops_spray.c src/slabinfo.c | $(TEST_OUTDIR)
+$(TEST_OUTDIR)/test_groom: tests/test_groom.c src/05_mm_slab_grooming.c src/04_fake_kernel_objects.c src/02_slab_cache_probe.c | $(TEST_OUTDIR)
 	$(TARGET_CC) $(TEST_CFLAGS) $^ -o $@
 
-$(TEST_OUTDIR)/test_futex_trigger: tests/test_futex_trigger.c src/groom.c src/fops_install.c src/fops_spray.c src/slabinfo.c src/futex_trigger.c src/sigusr1_payload.c src/pipe_physrw.c src/aar_aaw.c | $(TEST_OUTDIR)
+$(TEST_OUTDIR)/test_futex_trigger: tests/test_futex_trigger.c src/05_mm_slab_grooming.c src/04_fake_kernel_objects.c src/02_slab_cache_probe.c src/06_signal_frame_payload.c src/07_futex_pi_trigger.c src/08_ashmem_configfs_rw.c src/09_pipe_buffer_rw.c | $(TEST_OUTDIR)
 	$(TARGET_CC) $(TEST_CFLAGS) $^ -o $@
 
 $(TEST_OUTDIR)/test_mm_leak: tests/test_mm_leak.c tests/support/mm_leak.c | $(TEST_OUTDIR)
@@ -70,10 +70,10 @@ $(TEST_OUTDIR)/test_pipe_spray: tests/test_pipe_spray.c tests/support/pipe_spray
 $(TEST_OUTDIR)/test_signal_sanity: tests/test_signal_sanity.c | $(TEST_OUTDIR)
 	$(TARGET_CC) $(TEST_CFLAGS) $^ -o $@
 
-$(TEST_OUTDIR)/test_sigusr1: tests/test_sigusr1.c src/sigusr1_payload.c | $(TEST_OUTDIR)
+$(TEST_OUTDIR)/test_sigusr1: tests/test_sigusr1.c src/06_signal_frame_payload.c | $(TEST_OUTDIR)
 	$(TARGET_CC) $(TEST_CFLAGS) $^ -o $@
 
-$(TEST_OUTDIR)/test_spray: tests/test_spray.c tests/support/mm_leak.c src/fops_install.c src/fops_spray.c | $(TEST_OUTDIR)
+$(TEST_OUTDIR)/test_skb_send: tests/test_skb_send.c tests/support/mm_leak.c tests/support/skb_send_probe.c src/04_fake_kernel_objects.c | $(TEST_OUTDIR)
 	$(TARGET_CC) $(TEST_CFLAGS) $^ -o $@
 
 clean:

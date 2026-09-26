@@ -1,5 +1,5 @@
-#ifndef OSS_CLONE_ROOT_UMH_H
-#define OSS_CLONE_ROOT_UMH_H
+#ifndef OSS_CLONE_WORKQUEUE_UMH_ROOT_H
+#define OSS_CLONE_WORKQUEUE_UMH_ROOT_H
 
 #include <stdint.h>
 
@@ -17,16 +17,16 @@
  * specific to either engine, which is why both independently arrive at
  * the identical offsets. The workqueue/subprocess_info struct layout and
  * call_usermodehelper_exec_work trick is identical, so it is reused
- * (like kernelsnitch.h) rather than re-derived from FUN_00108320/
+ * (like 03_mm_address_sidechannel/mm_address_leak.h) rather than re-derived from FUN_00108320/
  * FUN_00108808/FUN_00108fa4's raw disassembly.
  *
- * NOTE: unlike futex_trigger.c/groom.c, this exact code path (root.c's
+ * NOTE: unlike 07_futex_pi_trigger.c/05_mm_slab_grooming.c, this exact code path (root.c's
  * install_workqueue_umh_root) has never been exercised end-to-end on
  * real hardware by this project -- the old engine crashed in the
  * earlier fops-install stage before ever reaching it. Offsets are
  * BTF-verified and now also cross-confirmed against the closed
  * binary's own constants, but this is the least-tested piece of the
- * whole chain. Writes into the SAME reclaimed page groom.c already
+ * whole chain. Writes into the SAME reclaimed page 05_mm_slab_grooming.c already
  * owns (page_base + ROOT_UMH_WORK_OFF / ROOT_UMH_DATA_OFF, 0x6000 /
  * 0x6200 -- well clear of every other object this project writes into
  * that page, which top out around 0x5578), and requeues a real

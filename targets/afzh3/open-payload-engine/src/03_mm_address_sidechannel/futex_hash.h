@@ -1,6 +1,6 @@
 #pragma once
 
-#include "utils.h"
+#include "sidechannel_utils.h"
 
 #include <stdio.h>
 #include <stdlib.h>

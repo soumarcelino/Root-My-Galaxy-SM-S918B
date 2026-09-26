@@ -1,5 +1,5 @@
-#ifndef OSS_DIAG_CHECKPOINT_H
-#define OSS_DIAG_CHECKPOINT_H
+#ifndef OSS_DIAGNOSTIC_CHECKPOINT_H
+#define OSS_DIAGNOSTIC_CHECKPOINT_H
 
 #include <fcntl.h>
 #include <stdio.h>

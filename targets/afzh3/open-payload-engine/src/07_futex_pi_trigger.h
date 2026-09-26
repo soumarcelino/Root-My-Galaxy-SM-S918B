@@ -1,5 +1,5 @@
-#ifndef OSS_CLONE_FUTEX_TRIGGER_H
-#define OSS_CLONE_FUTEX_TRIGGER_H
+#ifndef OSS_CLONE_FUTEX_PI_TRIGGER_H
+#define OSS_CLONE_FUTEX_PI_TRIGGER_H
 
 #include <stdint.h>
 
@@ -15,7 +15,7 @@
  * been the crash site in any test this session (always reaches the
  * expected wait_requeue_pi ret=-1 errno=110 cleanly); only the object
  * content written before the trigger differed from the closed binary's
- * (see fops_install.c). Reusing the proven futex-thread shape here,
+ * (see 04_fake_kernel_objects.c). Reusing the proven futex-thread shape here,
  * wiring it to the newly corrected object.
  *
  * Returns 1 if the trigger fired (task->pi_blocked_on requeue completed
@@ -42,10 +42,10 @@ typedef int (*futex_post_trigger_cb)(void *ctx);
 int run_futex_trigger_cb(futex_post_trigger_cb post_trigger_cb, void *ctx);
 
 /* source: full FUN_00103e18 sequence including the sigaction/tgkill/
- * FPSIMD-payload mechanism (see src/sigusr1_payload.h) -- the most
+ * FPSIMD-payload mechanism (see src/06_signal_frame_payload.h) -- the most
  * faithful entry point in this project so far. page_base/
  * ashmem_misc_fops_addr are the SAME values groom_and_install_fops_object()
- * returns and fops_install.c's build_fops_install_object() already
+ * returns and 04_fake_kernel_objects.c's build_fops_install_object() already
  * takes -- used here to build the sigusr1 payload with real addresses
  * instead of the simpler entry points' silence on the subject.
  * post_trigger_cb behaves exactly as in run_futex_trigger_cb(). */
@@ -53,7 +53,7 @@ int run_futex_trigger_full(uint64_t page_base, uint64_t ashmem_misc_fops_addr,
                             futex_post_trigger_cb post_trigger_cb, void *ctx);
 
 /* source: real kernel source (kernel/futex/core.c), not disassembly --
- * see futex_trigger.c's comment above these functions for the full
+ * see 07_futex_pi_trigger.c's comment above these functions for the full
  * derivation. Diagnostic/experimental variant: same overall shape as
  * run_futex_trigger_full(), but the owner thread holds ONLY f_pi_target
  * (never contends for f_pi_chain), removing the artificial circular
@@ -73,7 +73,7 @@ int run_futex_trigger_success_full(uint64_t page_base,
                                     void *ctx);
 
 /* source: raw disasm of FUN_00104274 (owner), full derivation in
- * futex_trigger.c above run_futex_trigger_v3_cb(). Restores the
+ * 07_futex_pi_trigger.c above run_futex_trigger_v3_cb(). Restores the
  * owner's second FUTEX_LOCK_PI(f_pi_chain) attempt (matching the
  * closed binary's real structure, dropped in the _success_ variant
  * above), but only after the requeue has already genuinely succeeded
@@ -186,7 +186,7 @@ int run_futex_trigger_v4_full(uint64_t page_base,
                                void *ctx);
 
 /* source: same fresh re-disassembly as v4 (see its comment above and
- * futex_trigger.c/targets/afzh3/reference/kernel/README.md for full derivation),
+ * 07_futex_pi_trigger.c/targets/afzh3/reference/kernel/README.md for full derivation),
  * fixing v4's one acknowledged simplification: the real binary spawns a
  * genuinely SEPARATE, fourth thread (fcn.00004300, "consumer", pinned
  * to CPU 1) that fires sched_setattr on the waiter's tid on ITS OWN
@@ -279,7 +279,7 @@ int run_futex_trigger_v7_full(uint64_t page_base,
 /* source: NOT from the closed binary -- this project's own hypothesis,
  * derived from real kernel source this session (targets/afzh3/reference/kernel/
  * locking/rtmutex.c, rt_mutex_adjust_prio()/rt_mutex_enqueue_pi()/
- * task_top_pi_waiter()). See futex_trigger.h's comment above v7 and
+ * task_top_pi_waiter()). See 07_futex_pi_trigger.h's comment above v7 and
  * STATUS.md's "Deep kernel-source trace" section for the full
  * derivation. Summary: task_top_pi_waiter(p)->task (used by
  * rt_mutex_adjust_prio() -> rt_mutex_setprio()) reads a task's

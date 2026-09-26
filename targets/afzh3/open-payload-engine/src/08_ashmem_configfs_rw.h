@@ -1,5 +1,5 @@
-#ifndef OSS_CLONE_AAR_AAW_H
-#define OSS_CLONE_AAR_AAW_H
+#ifndef OSS_CLONE_ASHMEM_CONFIGFS_RW_H
+#define OSS_CLONE_ASHMEM_CONFIGFS_RW_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -59,7 +59,7 @@ int oss_kernel_write64(int fd, uint64_t target_addr, uint64_t value);
  *      page_base|0x1180 (DAT_0010d9d0 in the decompile) -- this is the
  *      exact value groom_and_install_fops_object's fake rt_mutex_waiter
  *      corrupted ashmem_misc_fops's first field to (see
- *      fops_install.c's pi_parent). A match here proves the earlier
+ *      04_fake_kernel_objects.c's pi_parent). A match here proves the earlier
  *      rb_erase/rt_mutex corruption actually landed, not just that
  *      sched_setattr returned 0.
  *   2. write the exact 35-byte magic string

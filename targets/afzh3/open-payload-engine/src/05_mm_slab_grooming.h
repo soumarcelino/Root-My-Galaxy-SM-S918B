@@ -1,5 +1,5 @@
-#ifndef OSS_CLONE_GROOM_H
-#define OSS_CLONE_GROOM_H
+#ifndef OSS_CLONE_MM_SLAB_GROOMING_H
+#define OSS_CLONE_MM_SLAB_GROOMING_H
 
 #include <stdint.h>
 
@@ -12,13 +12,13 @@
  *   DAT_0010d9f0 (spray_ctx count)   = 192  = (1+MM_PARTIALS)*32, MM_PARTIALS=5
  * with mm_objs_per_slab = ORDER3_SIZE(0x8000) / MM_STRUCT_SZ(0x400) = 32.
  * This is the same technique with the same constants -- ported here by
- * direct reuse (like kernelsnitch.h), not re-derived from disassembly,
+ * direct reuse (like 03_mm_address_sidechannel/mm_address_leak.h), not re-derived from disassembly,
  * because it is proven, generic reclaim infrastructure that has never
  * once been the crash site in any test this session (every run logged
  * "mm leaked=..." / "kernel page prepare ... attempt=1/2" succeeding).
  * The only thing that changes here from the old engine is WHAT gets
  * written into the reclaimed page: build_fops_install_object()
- * (fops_install.c), not the old engine's put_slide_bank_entry(). */
+ * (04_fake_kernel_objects.c), not the old engine's put_slide_bank_entry(). */
 
 /* Grooms the mm_struct slab, leaks one instance's address via
  * kernelsnitch, frees it, and reclaims it with the fake fops-install

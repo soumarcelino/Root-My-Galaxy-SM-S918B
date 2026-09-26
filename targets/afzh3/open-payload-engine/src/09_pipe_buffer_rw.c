@@ -22,12 +22,12 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "aar_aaw.h"
-#include "diag_checkpoint.h"
-#include "pipe_physrw.h"
+#include "08_ashmem_configfs_rw.h"
+#include "90_diagnostic_checkpoint.h"
+#include "09_pipe_buffer_rw.h"
 
-/* kernelsnitch.h contains the implementation and is already emitted once by
- * groom.c. Keep this translation unit on its public ABI to avoid duplicate
+/* 03_mm_address_sidechannel/mm_address_leak.h contains the implementation and is already emitted once by
+ * 05_mm_slab_grooming.c. Keep this translation unit on its public ABI to avoid duplicate
  * definitions while reusing the same in-tree implementation. */
 struct kernelsnitch_shared_state;
 struct kernelsnitch_shared_state *kernelsnitch_setup(
@@ -42,7 +42,7 @@ void kernelsnitch_set_profile(struct kernelsnitch_shared_state *ks,
                               size_t appended_futexes,
                               size_t repeat_measurement, size_t average);
 
-/* KernelSnitch measurement default (AVERAGE from kernelsnitch.h); the struct
+/* KernelSnitch measurement default (AVERAGE from 03_mm_address_sidechannel/mm_address_leak.h); the struct
  * is opaque in this TU so it is passed explicitly. */
 #define OSS_KSNITCH_AVERAGE 8
 #define OSS_KSNITCH_REPEAT_DEFAULT 128
@@ -497,7 +497,7 @@ static void log_prepare_telemetry(struct pipe_prepare_progress *progress,
                                    : 0));
 }
 
-/* Experiment knob shared with groom.c: KernelSnitch measurement repeat and
+/* Experiment knob shared with 05_mm_slab_grooming.c: KernelSnitch measurement repeat and
  * appended-futex counts, env-gated, defaults preserve the closed profile. */
 static long pipe_env_long_clamped(const char *name, long fallback, long lo,
                                   long hi) {

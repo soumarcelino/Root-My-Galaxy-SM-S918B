@@ -1,10 +1,10 @@
 /* source: FUN_00106288 (param_1==0 branch, "install fake ashmem_misc_fops"
  * path) + FUN_001061ac (fake rt_mutex_waiter builder). Straight port of
  * the byte layout, verified field-by-field against the decompile this
- * session -- see fops_install.h for the derivation. */
+ * session -- see 04_fake_kernel_objects.h for the derivation. */
 #include <string.h>
 
-#include "fops_install.h"
+#include "04_fake_kernel_objects.h"
 
 static void put64(unsigned char *base, size_t off, uint64_t value) {
   memcpy(base + off, &value, sizeof(value));

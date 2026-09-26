@@ -9,21 +9,21 @@ import pathlib
 
 
 CHECK_NAMES = [
-    ("ashmem_misc_fops", "src/main.c"),
-    ("real_ashmem_fops", "src/main.c"),
-    ("init_task", "src/main.c"),
-    ("selinux_enforcing", "src/root_umh.c"),
-    ("system_unbound_wq", "src/root_umh.c"),
-    ("call_usermodehelper_exec_work", "src/root_umh.c"),
-    ("kmalloc_caches", "src/pipe_physrw.c"),
-    ("anon_pipe_buf_ops", "src/pipe_physrw.c"),
-    ("skb_send_size", "src/pipe_physrw.c"),
-    ("pipe_count", "src/pipe_physrw.c"),
-    ("pipe_slots", "src/pipe_physrw.c"),
-    ("fake_fops_offset", "src/main.c"),
-    ("fake_work_offset", "src/root_umh.c"),
-    ("umh_data_offset", "src/root_umh.c"),
-    ("pipe_proof_offset", "src/pipe_physrw.c"),
+    ("ashmem_misc_fops", "src/00_orchestrator.c"),
+    ("real_ashmem_fops", "src/00_orchestrator.c"),
+    ("init_task", "src/00_orchestrator.c"),
+    ("selinux_enforcing", "src/10_workqueue_umh_root.c"),
+    ("system_unbound_wq", "src/10_workqueue_umh_root.c"),
+    ("call_usermodehelper_exec_work", "src/10_workqueue_umh_root.c"),
+    ("kmalloc_caches", "src/09_pipe_buffer_rw.c"),
+    ("anon_pipe_buf_ops", "src/09_pipe_buffer_rw.c"),
+    ("skb_send_size", "src/09_pipe_buffer_rw.c"),
+    ("pipe_count", "src/09_pipe_buffer_rw.c"),
+    ("pipe_slots", "src/09_pipe_buffer_rw.c"),
+    ("fake_fops_offset", "src/00_orchestrator.c"),
+    ("fake_work_offset", "src/10_workqueue_umh_root.c"),
+    ("umh_data_offset", "src/10_workqueue_umh_root.c"),
+    ("pipe_proof_offset", "src/09_pipe_buffer_rw.c"),
 ]
 
 

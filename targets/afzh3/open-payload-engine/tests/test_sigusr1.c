@@ -9,7 +9,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "sigusr1_payload.h"
+#include "06_signal_frame_payload.h"
 
 int main(void) {
   if (!sigusr1_install_handler()) {

@@ -5,7 +5,7 @@
  * only, not part of the ported payload flow. */
 #include <stdio.h>
 
-#include "groom.h"
+#include "05_mm_slab_grooming.h"
 
 int main(void) {
   uint64_t page_base = groom_and_install_fops_object(

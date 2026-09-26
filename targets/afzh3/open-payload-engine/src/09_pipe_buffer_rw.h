@@ -1,5 +1,5 @@
-#ifndef OSS_CLONE_PIPE_PHYSRW_H
-#define OSS_CLONE_PIPE_PHYSRW_H
+#ifndef OSS_CLONE_PIPE_BUFFER_RW_H
+#define OSS_CLONE_PIPE_BUFFER_RW_H
 
 #include <stddef.h>
 #include <stdint.h>

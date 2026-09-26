@@ -44,7 +44,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "kaslr.h"
+#include "01_kernel_base_tracefs.h"
 
 #define TRACEFS_ROOT "/sys/kernel/tracing"
 

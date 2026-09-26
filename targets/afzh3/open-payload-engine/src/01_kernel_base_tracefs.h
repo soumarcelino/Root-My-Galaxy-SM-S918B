@@ -1,5 +1,5 @@
-#ifndef OSS_CLONE_KASLR_H
-#define OSS_CLONE_KASLR_H
+#ifndef OSS_CLONE_KERNEL_BASE_TRACEFS_H
+#define OSS_CLONE_KERNEL_BASE_TRACEFS_H
 
 #include <stdint.h>
 

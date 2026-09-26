@@ -8,8 +8,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "futex_trigger.h"
-#include "groom.h"
+#include "07_futex_pi_trigger.h"
+#include "05_mm_slab_grooming.h"
 
 int main(int argc, char **argv) {
   if (argc != 2) {

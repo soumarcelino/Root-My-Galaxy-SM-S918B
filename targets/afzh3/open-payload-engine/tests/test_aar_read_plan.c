@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "../src/aar_aaw.c"
+#include "../src/08_ashmem_configfs_rw.c"
 
 static void check(uint64_t target, size_t len, int expect_large_step) {
   uint64_t base = target - (OSS_CONFIGFS_COUNT - len);

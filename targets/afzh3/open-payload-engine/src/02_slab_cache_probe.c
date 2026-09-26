@@ -10,7 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "slabinfo.h"
+#include "02_slab_cache_probe.h"
 
 int read_named_slabinfo(const char *name, struct mm_slabinfo *out) {
   if (!name || !*name || !out) {

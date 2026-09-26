@@ -1,7 +1,7 @@
 #pragma once
 
-#include "timeutils.h"
-#include "utils.h"
+#include "counter_timing.h"
+#include "sidechannel_utils.h"
 #include "futex_hash.h"
 
 #include <linux/futex.h>
@@ -662,14 +662,14 @@ void kernelsnitch_find_collisions_parallel(struct kernelsnitch_shared_state *ks)
     ks->confirmed_collisions = 0;
     ks->collision_min_time = (size_t)-1;
 
-    int ks_timing = (getenv("KS_TIMING") != NULL);
-    size_t __t_pile0 = ks_timing ? gettime_ns() : 0;
+    int counter_timing = (getenv("KS_TIMING") != NULL);
+    size_t __t_pile0 = counter_timing ? gettime_ns() : 0;
 
     /* pile the target bucket (shared-stack waiters for a cheap create/join) */
     struct ks_pile pile = {0};
     ks->futex_addrs[0] = (size_t)&ks->inc_futex[ID];
     __increase_fast(ks, ID, ks->appended_futexes, &pile);
-    size_t __t_pile1 = ks_timing ? gettime_ns() : 0;
+    size_t __t_pile1 = counter_timing ? gettime_ns() : 0;
     if (ks->verbose) pr_info("start finding collisisons (parallel, %zd workers)\n", nworkers);
 
     struct ks_par_ctx ctx;
@@ -694,7 +694,7 @@ void kernelsnitch_find_collisions_parallel(struct kernelsnitch_shared_state *ks)
     free(wt);
     free(wa);
 
-    size_t __t_scan1 = ks_timing ? gettime_ns() : 0;
+    size_t __t_scan1 = counter_timing ? gettime_ns() : 0;
 
     size_t count = atomic_load(&ctx.next_slot);
     if (count > wanted)
@@ -714,7 +714,7 @@ void kernelsnitch_find_collisions_parallel(struct kernelsnitch_shared_state *ks)
         ks->state = KERNELSNITCH_COLLISIONS_NOT_FOUND;
     }
     __decrease_fast(ks, &pile);
-    if (ks_timing) {
+    if (counter_timing) {
         size_t __t_dec1 = gettime_ns();
         fprintf(stderr, "    [timing] pile=%.1f ms  scan=%.1f ms  decrease=%.1f ms\n",
                 (__t_pile1 - __t_pile0) / 1.0e6, (__t_scan1 - __t_pile1) / 1.0e6,

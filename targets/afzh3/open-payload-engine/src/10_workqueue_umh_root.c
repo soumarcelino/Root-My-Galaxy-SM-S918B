@@ -8,13 +8,13 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-#include "aar_aaw.h"
-#include "diag_checkpoint.h"
-#include "pipe_physrw.h"
-#include "root_umh.h"
+#include "08_ashmem_configfs_rw.h"
+#include "90_diagnostic_checkpoint.h"
+#include "09_pipe_buffer_rw.h"
+#include "10_workqueue_umh_root.h"
 
 /* target.h constants for dm3q-S918BXXSAFZH3, inlined per this
- * project's established style (groom.c/fops_install.c do the same
+ * project's established style (05_mm_slab_grooming.c/04_fake_kernel_objects.c do the same
  * rather than #include the old engine's target.h). Values copied
  * verbatim, not re-derived. */
 #define SELINUX_ENFORCING_OFF 0x02d8e5c0ULL

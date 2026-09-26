@@ -1,5 +1,5 @@
-#ifndef OSS_CLONE_SLABINFO_H
-#define OSS_CLONE_SLABINFO_H
+#ifndef OSS_CLONE_SLAB_CACHE_PROBE_H
+#define OSS_CLONE_SLAB_CACHE_PROBE_H
 
 #include <stdint.h>
 
