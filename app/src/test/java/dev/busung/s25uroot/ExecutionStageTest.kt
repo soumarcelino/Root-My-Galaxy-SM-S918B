@@ -7,6 +7,32 @@ import org.junit.Test
 
 class ExecutionStageTest {
     @Test
+    fun journeyWaitsForFirstStabilitySampleThenAdvancesByStage() {
+        assertNull(executionJourneyProgress(ExecutionStage.Preparing, null))
+        assertNull(executionJourneyProgress(ExecutionStage.Stabilizing, null))
+        val sample = StabilizationMetrics("39.8", 6840, sample = 2, requiredSamples = 3)
+        assertEquals((1f + 2f / 3f) / 9f, executionJourneyProgress(ExecutionStage.Stabilizing, sample)!!, 0.0001f)
+        assertEquals(2f / 9f, executionJourneyProgress(ExecutionStage.StartingExploit, sample)!!, 0.0001f)
+        assertEquals(8f / 9f, executionJourneyProgress(ExecutionStage.VerifyingRoot, null)!!, 0.0001f)
+    }
+
+    @Test
+    fun readsLatestStabilizationSample() {
+        val metrics = parseStabilizationMetrics(
+            """
+                [launcher] gate=1/3 phase=baseline temp=43.2C mem=6200MB runnable=2
+                [launcher] gate=2/3 phase=baseline temp=39.8C mem=6840MB runnable=1
+            """.trimIndent(),
+        )
+
+        assertEquals("39.8", metrics?.temperatureCelsius)
+        assertEquals(6840, metrics?.availableMemoryMb)
+        assertEquals(2, metrics?.sample)
+        assertEquals(3, metrics?.requiredSamples)
+        assertNull(parseStabilizationMetrics("[launcher] waiting for quiet window"))
+    }
+
+    @Test
     fun followsLauncherAndPayloadMarkers() {
         val log = """
             [launcher] gate=3/5 phase=baseline temp=37.0C mem=6800MB runnable=1 load=3.0 psi=2.0/0.0/0.0 mm=704/704 slabs=22 uptime=130s boot=1

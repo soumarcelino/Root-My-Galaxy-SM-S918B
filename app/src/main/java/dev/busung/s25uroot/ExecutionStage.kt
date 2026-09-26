@@ -17,6 +17,40 @@ data class ExecutionProgress(
     val detail: String? = null,
 )
 
+data class StabilizationMetrics(
+    val temperatureCelsius: String,
+    val availableMemoryMb: Int,
+    val sample: Int,
+    val requiredSamples: Int,
+)
+
+private val stabilizationSamplePattern = Regex(
+    """(?m)^\[launcher] gate=(\d+)/(\d+).*?temp=(\d+(?:\.\d+)?)C mem=(\d+)MB\b""",
+)
+
+internal fun parseStabilizationMetrics(rawLog: String): StabilizationMetrics? {
+    val match = stabilizationSamplePattern.findAll(rawLog).lastOrNull() ?: return null
+    return StabilizationMetrics(
+        temperatureCelsius = match.groupValues[3],
+        availableMemoryMb = match.groupValues[4].toIntOrNull() ?: return null,
+        sample = match.groupValues[1].toIntOrNull() ?: return null,
+        requiredSamples = match.groupValues[2].toIntOrNull() ?: return null,
+    )
+}
+
+internal fun executionJourneyProgress(
+    stage: ExecutionStage,
+    metrics: StabilizationMetrics?,
+): Float? {
+    if (stage == ExecutionStage.Preparing) return null
+    val completedStages = stage.ordinal.toFloat()
+    val stageFraction = if (stage == ExecutionStage.Stabilizing) {
+        metrics ?: return null
+        (metrics.sample.toFloat() / metrics.requiredSamples.coerceAtLeast(1)).coerceIn(0f, 1f)
+    } else 0f
+    return (completedStages + stageFraction) / ExecutionStage.entries.size
+}
+
 private val launcherGatePattern = Regex(
     "gate=(\\d+/\\d+).*temp=([^ ]+) mem=([^ ]+) runnable=(\\d+).*" +
         "psi=([^ ]+).*mm=([^ ]+) slabs=([^ ]+)",

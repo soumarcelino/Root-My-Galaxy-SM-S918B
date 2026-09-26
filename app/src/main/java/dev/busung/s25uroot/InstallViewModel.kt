@@ -36,6 +36,8 @@ data class InstallUiState(
     val executionStage: ExecutionStage = ExecutionStage.Preparing,
     val executionDetail: String? = null,
     val rootActive: Boolean = false,
+    val stabilizationMetrics: StabilizationMetrics? = null,
+    val completionDurationMillis: Long? = null,
     val bootAllocatorRemainingMillis: Long? = null,
     val bootAllocatorTotalMillis: Long? = null,
 ) {
@@ -69,6 +71,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     private var installJob: Job? = null
     private var activeHistoryEntry: InstallHistoryEntry? = null
     private var fullRunLog = ""
+    private var runStartedElapsedRealtime: Long? = null
     val state: StateFlow<InstallUiState> = mutableState.asStateFlow()
     val history: StateFlow<List<InstallHistoryEntry>> = mutableHistory.asStateFlow()
     val targetCatalog: StateFlow<TargetCatalogUiState> = mutableTargetCatalog.asStateFlow()
@@ -143,6 +146,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         if (installJob?.isActive == true || mutableState.value.phase == InstallPhase.Installed) return
         discoveryJob?.cancel()
         installJob = viewModelScope.launch(Dispatchers.IO) {
+            runStartedElapsedRealtime = SystemClock.elapsedRealtime()
             mutableState.value = InstallUiState(
                 phase = InstallPhase.Checking,
                 probeOutput = mutableState.value.probeOutput,
@@ -193,6 +197,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         if (installJob?.isActive == true) return
         discoveryJob?.cancel()
         installJob = viewModelScope.launch(Dispatchers.IO) {
+            runStartedElapsedRealtime = SystemClock.elapsedRealtime()
             mutableState.value = InstallUiState(
                 phase = InstallPhase.Checking,
                 probeOutput = mutableState.value.probeOutput,
@@ -379,6 +384,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             log = logTail(completeLog),
             executionStage = progress.stage,
             executionDetail = progress.detail,
+            stabilizationMetrics = parseStabilizationMetrics(rawLog) ?: mutableState.value.stabilizationMetrics,
         )
         if (persist) updateHistoryLog()
     }
@@ -582,6 +588,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             executionStage = stage,
             executionDetail = mutableState.value.executionDetail.takeIf { stage == mutableState.value.executionStage },
             rootActive = phase == InstallPhase.Installed || mutableState.value.rootActive,
+            completionDurationMillis = if (phase == InstallPhase.Installed) {
+                runStartedElapsedRealtime?.let { SystemClock.elapsedRealtime() - it }
+            } else null,
             bootAllocatorRemainingMillis = null,
             bootAllocatorTotalMillis = null,
         )
