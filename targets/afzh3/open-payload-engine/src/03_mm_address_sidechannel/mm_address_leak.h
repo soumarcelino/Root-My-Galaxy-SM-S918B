@@ -1,3 +1,8 @@
+/*
+ * Finds a candidate mm_struct address through futex hash collisions. Times
+ * bucket traversal, confirms colliding user addresses, and tests candidate
+ * kernel addresses against those collisions.
+ */
 #pragma once
 
 #include "counter_timing.h"

@@ -1,3 +1,7 @@
+/*
+ * Appends optional boot-tagged checkpoints with a monotonic timestamp to a
+ * durable diagnostic file.
+ */
 #ifndef OSS_DIAGNOSTIC_CHECKPOINT_H
 #define OSS_DIAGNOSTIC_CHECKPOINT_H
 

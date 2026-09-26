@@ -1,3 +1,7 @@
+/*
+ * Computes private futex hash buckets from Jenkins hashing and the kernel
+ * futex-key layout.
+ */
 #pragma once
 
 #include "sidechannel_utils.h"
@@ -8,7 +12,6 @@
 #include <time.h>
 #include <sys/time.h>
 
-// --------------- ADDED/REPLACED FOR COMPATIBILITY ---------------
 typedef uint32_t u32;
 typedef uint32_t __u32;
 typedef uint8_t u8;
@@ -20,7 +23,6 @@ static inline __u32 rol32(__u32 word, unsigned int shift)
 }
 
 #define fallthrough __attribute__((fallthrough));
-// --------------- ADDED/REPLACED FOR COMPATIBILITY ---------------
 
 /* jhash.h: Jenkins hash support.
  *
@@ -88,7 +90,6 @@ static inline __u32 rol32(__u32 word, unsigned int shift)
  *
  * Returns the hash value of the key. The result depends on endianness.
  */
-
 
 /* jhash2 - hash an array of u32's
  * @k: the key which must be an array of u32's

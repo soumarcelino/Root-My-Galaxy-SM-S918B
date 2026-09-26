@@ -1,3 +1,7 @@
+/*
+ * Provides ordered ARM virtual-counter reads for low-latency futex timing
+ * measurements.
+ */
 #pragma once
 
 #define _GNU_SOURCE

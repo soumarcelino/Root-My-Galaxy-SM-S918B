@@ -1,3 +1,7 @@
+/*
+ * Provides process, CPU-affinity, timing, logging, and allocation helpers used
+ * by the futex side channel.
+ */
 #pragma once
 
 #define _GNU_SOURCE
@@ -186,7 +190,6 @@ static void write_file(const char *path, const char *data)
         pr_error("write(%s): %m\n", path);
     close(fd);
 }
-
 
 static inline void set_user_namespace(void)
 {

