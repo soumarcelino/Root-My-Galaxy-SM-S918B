@@ -13,6 +13,12 @@ primitiva baseada em `pipe_buffer`.
 alterar `page`, `offset` e `len` para transformar operações normais de pipe em
 leitura/escrita de endereços direct-map.
 
+Desde 2026-09-26, o caminho normal resolve diretamente o `pipe_buffer` pelos
+FDs do processo atual. A geometria order-3 e o KernelSnitch descritos abaixo
+permanecem como fallback para misses restaurados com segurança. A arquitetura,
+o guard local contra Hardened Usercopy e a validação dessa melhoria estão em
+[Resolução direta do `pipe_buffer`](13-RESOLUCAO-DIRETA-PIPE.md).
+
 ## Constantes do alvo
 
 | Constante | Valor | Papel |

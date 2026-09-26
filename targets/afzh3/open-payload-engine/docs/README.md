@@ -59,7 +59,10 @@ Tamanho  101120 bytes
 12. [Próximos passos e roadmap](12-PROXIMOS-PASSOS-E-ROADMAP.md): plano
     priorizado para confiabilidade, velocidade, estabilidade, testes,
     observabilidade, manutenção, CI e novos firmwares.
-13. [Ferramentas de porting e debug](../tools/README.md): scripts reutilizáveis
+13. [Resolução direta do pipe](13-RESOLUCAO-DIRETA-PIPE.md): eliminação do
+    reclaim no caminho normal, guard local contra Hardened Usercopy, política
+    fail-closed, desempenho e validação em três boots.
+14. [Ferramentas de porting e debug](../tools/README.md): scripts reutilizáveis
     para preflight, forense, comparação ELF, manifests, perfis, análise de logs,
     checks locais e validação em dois reboots.
 
