@@ -96,4 +96,11 @@ pstore final:     vazio
 O payload incorporado tem SHA-256
 `9c412f5af77611f61165f82f02e0576e410b8a1fb556748ff6ddf3cb44364997`.
 O APK tem SHA-256
-`2f326cf1ac99e092f849de5934a41d1882c0a1fd3f274b373ba1e1f0103a5ce6`.
+`cd2b2391da8ef681b22a6c05ed64ae1c69986c2c4301fd89c315480059eedde4`.
+
+## Campanha final
+
+Após a correção, foram concluídos **10/10 reboots limpos com sucesso**. Todas
+as dez execuções completaram o payload sem reboot inesperado, confirmaram o
+controle KernelSU Next v3.4.0, retornaram root em `u:r:ksu:s0` e restauraram
+SELinux para `Enforcing`.

@@ -1,11 +1,12 @@
 # Root My Galaxy · SM-S918B
 
-**Version 0.6.0-beta-1** · Samsung Galaxy S23 Ultra (`SM-S918B`, `dm3q`)
+**Version 0.6.0-beta-2** · Samsung Galaxy S23 Ultra (`SM-S918B`, `dm3q`)
 
 Root My Galaxy provides an Android app and a command-line runner for loading
 KernelSU on specific SM-S918B firmware builds. The app selects a bundled payload
-using the device's exact build and kernel identity. The AFZH3 path uses the open
-payload engine, a stability launcher, and KernelSU Next **v3.4.0**.
+using the device's exact build and kernel identity. The AFZH3 and One UI 9 ZZHL
+paths use the open payload engine, a stability launcher, and KernelSU Next
+**v3.4.0**.
 
 [Releases](https://github.com/soumarcelino/Root-My-Galaxy-SM-S918B/releases) ·
 [Documentation](docs/README.md)

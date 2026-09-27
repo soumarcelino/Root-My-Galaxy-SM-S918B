@@ -11,6 +11,10 @@ aprovada confirmou KASLR, reclaim, AAR/AAW, pipe R/W, restauração de
 `ashmem_misc.fops`, UMH, controle KernelSU, `uid=0` e SELinux enforcing,
 mantendo o mesmo boot ID e o pstore vazio.
 
+A campanha final da correção passou em **10/10 reboots limpos**, com o fluxo
+completo, KernelSU Next funcional, root `u:r:ksu:s0` e SELinux `Enforcing` em
+todas as execuções.
+
 Leia primeiro:
 
 1. [Incidente do encoder ConfigFS no ZZHL](18-INCIDENTE-STRSCPY-CONFIGFS.md):

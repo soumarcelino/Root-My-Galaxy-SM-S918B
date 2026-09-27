@@ -69,3 +69,8 @@ O APK corrigido foi validado no boot limpo
 `9075374d-a736-4da8-b0cd-17ab4bc3b739`: primeira tentativa, root em 35,169 s,
 KernelSU Next confirmado, SELinux enforcing e pstore vazio. A análise completa
 está em `docs/18-INCIDENTE-STRSCPY-CONFIGFS.md`.
+
+Após essa correção, a campanha final completou **10/10 reboots limpos com
+sucesso**. Cada boot executou o fluxo completo sem reboot inesperado, confirmou
+KernelSU Next, retornou root no domínio `u:r:ksu:s0` e terminou com SELinux em
+`Enforcing`.

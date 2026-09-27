@@ -226,7 +226,7 @@ Os hashes calculados depois do `adb push` foram idênticos aos arquivos host.
 
 ## Perfil Android
 
-O app 0.6.0-beta-1 contém o perfil exato `dm3q-S918BXXUAZZHL-ksunext`. Ele seleciona
+O app 0.6.0-beta-2 contém o perfil exato `dm3q-S918BXXUAZZHL-ksunext`. Ele seleciona
 modelo, build display, fingerprint, kernel release e `uname -v` antes de
 expor o fluxo. Os assets são sincronizados e auditados com:
 
@@ -236,10 +236,10 @@ tools/zzhl-app-bundle.py verify
 ```
 
 O APK `app-debug.apk`, SHA-256
-`2f326cf1ac99e092f849de5934a41d1882c0a1fd3f274b373ba1e1f0103a5ce6`,
+`cd2b2391da8ef681b22a6c05ed64ae1c69986c2c4301fd89c315480059eedde4`,
 passou nos testes. O verificador confirmou dentro do APK os cinco binários da
 tabela acima, seus tamanhos e o perfil. O `apkanalyzer` confirmou
-`versionCode=36` e `versionName=0.6.0-beta-1`.
+`versionCode=37` e `versionName=0.6.0-beta-2`.
 
 ## Verificações locais
 
@@ -261,8 +261,8 @@ compact logging. `shellcheck` não estava instalado e foi marcado como `SKIP`.
 
 - O módulo KernelSU é carregado em runtime e precisa ser carregado novamente
   após um reboot.
-- Há duas execuções completas aprovadas em boots distintos, incluindo uma com
-  o módulo KernelSU Next final; ainda não existe uma campanha longa de soak.
+- A campanha final passou em 10/10 reboots limpos com o módulo KernelSU Next
+  final, root `u:r:ksu:s0`, SELinux `Enforcing` e nenhum reboot inesperado.
 - As evidências brutas ficam fora do Git. Os caminhos, hashes, checkpoints e
   resultados necessários para auditar a campanha estão preservados aqui.
 - Toda nova execução completa requer boot limpo. Depois de qualquer marcador
