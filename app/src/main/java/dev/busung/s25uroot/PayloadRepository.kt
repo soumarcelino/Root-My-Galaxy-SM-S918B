@@ -15,6 +15,7 @@ data class VerifiedPayloads(
     val kernelSu: File,
     val helper: File,
     val launcher: File,
+    val mmFactory: File?,
 )
 
 class PayloadRepository(private val context: Context) {
@@ -58,11 +59,20 @@ class PayloadRepository(private val context: Context) {
             onProgress,
             launcherLabel,
         ) ?: error("bundled launcher missing: $LAUNCHER_ASSET")
+        val mmFactory = profile.mmFactory?.let { artifact ->
+            bundledAssetFor(
+                artifact,
+                directory,
+                onProgress,
+                context.getString(R.string.artifact_mm_factory_bundled),
+            ) ?: error("bundled mm factory missing: ${artifact.url}")
+        }
         Os.chmod(exploit.absolutePath, 0b100100100)
         Os.chmod(kernelSu.absolutePath, 0b100100100)
         Os.chmod(helper.absolutePath, 0b111101101)
         Os.chmod(launcher.absolutePath, 0b111101101)
-        return VerifiedPayloads(profile, exploit, kernelSu, helper, launcher)
+        mmFactory?.let { Os.chmod(it.absolutePath, 0b111101101) }
+        return VerifiedPayloads(profile, exploit, kernelSu, helper, launcher, mmFactory)
     }
 
     private fun bundledAssetFor(

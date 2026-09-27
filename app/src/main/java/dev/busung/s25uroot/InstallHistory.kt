@@ -51,13 +51,9 @@ class InstallHistoryStore(private val context: Context) {
         usedShizuku = AppPreferences.shizukuMode(context),
     ).also(::save)
 
-    fun save(entry: InstallHistoryEntry, durable: Boolean = entry.result != InstallRunResult.Running) {
+    fun save(entry: InstallHistoryEntry) {
         val target = File(directory, "${entry.id}.json")
         val encoded = encode(entry).toString().toByteArray(Charsets.UTF_8)
-        if (!durable) {
-            target.outputStream().buffered().use { it.write(encoded) }
-            return
-        }
         val atomicFile = AtomicFile(target)
         val output = atomicFile.startWrite()
         try {

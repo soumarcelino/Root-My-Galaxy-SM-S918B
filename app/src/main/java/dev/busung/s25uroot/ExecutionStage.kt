@@ -1,6 +1,8 @@
 package dev.busung.s25uroot
 
 enum class ExecutionStage {
+    CheckingShizuku,
+    WaitingForUptime,
     Preparing,
     Stabilizing,
     StartingExploit,
@@ -10,6 +12,17 @@ enum class ExecutionStage {
     BuildingPipeBridge,
     LoadingKernelSu,
     VerifyingRoot,
+}
+
+internal const val MINIMUM_PAYLOAD_UPTIME_MILLIS = 60_000L
+
+internal fun uptimeGateRemainingMillis(uptimeMillis: Long): Long =
+    (MINIMUM_PAYLOAD_UPTIME_MILLIS - uptimeMillis).coerceAtLeast(0L)
+
+internal fun uptimeGateProgress(remainingMillis: Long, totalMillis: Long): Float {
+    if (totalMillis <= 0L) return 1f
+    return (1f - remainingMillis.coerceIn(0L, totalMillis).toFloat() / totalMillis.toFloat())
+        .coerceIn(0f, 1f)
 }
 
 data class ExecutionProgress(
@@ -42,7 +55,10 @@ internal fun executionJourneyProgress(
     stage: ExecutionStage,
     metrics: StabilizationMetrics?,
 ): Float? {
-    if (stage == ExecutionStage.Preparing) return null
+    if (stage == ExecutionStage.CheckingShizuku ||
+        stage == ExecutionStage.WaitingForUptime ||
+        stage == ExecutionStage.Preparing
+    ) return null
     val completedStages = stage.ordinal.toFloat()
     val stageFraction = if (stage == ExecutionStage.Stabilizing) {
         metrics ?: return null
@@ -54,6 +70,9 @@ internal fun executionJourneyProgress(
 private val launcherGatePattern = Regex(
     "gate=(\\d+/\\d+).*temp=([^ ]+) mem=([^ ]+) runnable=(\\d+).*" +
         "psi=([^ ]+).*mm=([^ ]+) slabs=([^ ]+)",
+)
+private val launcherGateSummaryPattern = Regex(
+    "gate=(\\d+/\\d+).*temp=([^ ]+) mem=([^ ]+)",
 )
 private val exploitAttemptPattern = Regex("exploit attempt=(\\d+)/(\\d+)")
 
@@ -81,6 +100,8 @@ internal fun parseExecutionProgress(
         val line = rawLine.trim()
         val lowered = line.lowercase()
         when {
+            lowered == "[launcher] gate=ready" ->
+                describe(ExecutionStage.Stabilizing, "Launcher checks completed.")
             lowered.startsWith("[launcher] gate=") -> {
                 advance(ExecutionStage.Stabilizing)
                 launcherGatePattern.find(line)?.let { match ->
@@ -89,6 +110,12 @@ internal fun parseExecutionProgress(
                         "${match.groupValues[3]} livres · ${match.groupValues[4]} tarefas · " +
                         "PSI ${match.groupValues[5]} · mm ${match.groupValues[6]} · " +
                         "${match.groupValues[7]} slabs")
+                } ?: launcherGateSummaryPattern.find(line)?.let { match ->
+                    describe(
+                        ExecutionStage.Stabilizing,
+                        "Estabilização ${match.groupValues[1]} · ${match.groupValues[2]} · " +
+                            "${match.groupValues[3]} livres",
+                    )
                 }
             }
             "[launcher] pipe-gate=pass" in lowered -> {
@@ -100,7 +127,8 @@ internal fun parseExecutionProgress(
             "[launcher] estabilidade confirmada" in lowered ||
                 "[launcher] estabilidade máxima confirmada" in lowered ->
                 describe(ExecutionStage.Stabilizing, "Verificações do launcher aprovadas; aguardando início do payload.")
-            "[launcher] execve:" in lowered || "stage=preparing-kernel-access" in lowered ->
+            "[launcher] payload=exec" in lowered || "[launcher] execve:" in lowered ||
+                "stage=preparing-kernel-access" in lowered ->
                 advance(ExecutionStage.StartingExploit)
             "starting exploit" in lowered -> advance(ExecutionStage.StartingExploit)
             "exploit attempt=" in lowered -> {

@@ -27,15 +27,20 @@ object ShizukuController {
      * Wait a short while in case the service is already up but the binder has not arrived yet.
      */
     suspend fun pingUntilRunning(
-        timeoutMillis: Long = SHIZUKU_START_TIMEOUT_MILLIS,
-        pollIntervalMillis: Long = SHIZUKU_START_POLL_MILLIS,
+        timeoutMillis: Long = SHIZUKU_CONNECTION_TIMEOUT_MILLIS,
+        pollIntervalMillis: Long = SHIZUKU_CONNECTION_POLL_MILLIS,
+        onCheck: (attempt: Int, remainingMillis: Long, connected: Boolean) -> Unit = { _, _, _ -> },
     ): Boolean {
         require(timeoutMillis >= 0)
         require(pollIntervalMillis > 0)
         val deadline = SystemClock.elapsedRealtime() + timeoutMillis
+        var attempt = 0
         while (true) {
-            if (isRunning()) return true
-            val remaining = deadline - SystemClock.elapsedRealtime()
+            attempt += 1
+            val connected = isRunning()
+            val remaining = (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+            onCheck(attempt, remaining, connected)
+            if (connected) return true
             if (remaining <= 0) return false
             delay(minOf(pollIntervalMillis, remaining))
         }
@@ -130,6 +135,6 @@ object ShizukuController {
         override fun isAlive(): Boolean = remote.alive()
     }
 
-    private const val SHIZUKU_START_TIMEOUT_MILLIS = 10_000L
-    private const val SHIZUKU_START_POLL_MILLIS = 2_000L
+    internal const val SHIZUKU_CONNECTION_TIMEOUT_MILLIS = 20_000L
+    internal const val SHIZUKU_CONNECTION_POLL_MILLIS = 2_000L
 }

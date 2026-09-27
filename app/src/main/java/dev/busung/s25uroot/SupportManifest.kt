@@ -17,6 +17,7 @@ data class TargetProfile(
     val kernelSu: RemoteArtifact,
     val helper: RemoteArtifact,
     val launcher: RemoteArtifact? = null,
+    val mmFactory: RemoteArtifact? = null,
     val buildDisplays: Set<String> = emptySet(),
     val fingerprints: Set<String> = emptySet(),
     val kernelReleases: Set<String> = emptySet(),
@@ -92,6 +93,12 @@ data class SupportManifest(
                                 RemoteArtifact(
                                     url = launcher.getString("url"),
                                     size = launcher.getLong("size"),
+                                )
+                            },
+                            mmFactory = payload.optJSONObject("mmFactory")?.let { factory ->
+                                RemoteArtifact(
+                                    url = factory.getString("url"),
+                                    size = factory.getLong("size"),
                                 )
                             },
                             buildDisplays = payload.optJSONArray("buildDisplays").strings(),

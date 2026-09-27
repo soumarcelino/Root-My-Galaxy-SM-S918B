@@ -7,13 +7,40 @@ import org.junit.Test
 
 class ExecutionStageTest {
     @Test
+    fun groupsTechnicalStagesIntoFourVisualStages() {
+        assertEquals(VisualStage.Preparation, ExecutionStage.CheckingShizuku.visualStage())
+        assertEquals(VisualStage.Preparation, ExecutionStage.WaitingForUptime.visualStage())
+        assertEquals(VisualStage.Preparation, ExecutionStage.Preparing.visualStage())
+        assertEquals(VisualStage.Stability, ExecutionStage.Stabilizing.visualStage())
+        assertEquals(VisualStage.Root, ExecutionStage.StartingExploit.visualStage())
+        assertEquals(VisualStage.Root, ExecutionStage.BuildingPipeBridge.visualStage())
+        assertEquals(VisualStage.Finishing, ExecutionStage.LoadingKernelSu.visualStage())
+        assertEquals(VisualStage.Finishing, ExecutionStage.VerifyingRoot.visualStage())
+        assertEquals(4, VisualStage.entries.size)
+    }
+
+    @Test
     fun journeyWaitsForFirstStabilitySampleThenAdvancesByStage() {
+        assertNull(executionJourneyProgress(ExecutionStage.CheckingShizuku, null))
+        assertNull(executionJourneyProgress(ExecutionStage.WaitingForUptime, null))
         assertNull(executionJourneyProgress(ExecutionStage.Preparing, null))
         assertNull(executionJourneyProgress(ExecutionStage.Stabilizing, null))
         val sample = StabilizationMetrics("39.8", 6840, sample = 2, requiredSamples = 3)
-        assertEquals((1f + 2f / 3f) / 9f, executionJourneyProgress(ExecutionStage.Stabilizing, sample)!!, 0.0001f)
-        assertEquals(2f / 9f, executionJourneyProgress(ExecutionStage.StartingExploit, sample)!!, 0.0001f)
-        assertEquals(8f / 9f, executionJourneyProgress(ExecutionStage.VerifyingRoot, null)!!, 0.0001f)
+        assertEquals((3f + 2f / 3f) / 11f, executionJourneyProgress(ExecutionStage.Stabilizing, sample)!!, 0.0001f)
+        assertEquals(4f / 11f, executionJourneyProgress(ExecutionStage.StartingExploit, sample)!!, 0.0001f)
+        assertEquals(10f / 11f, executionJourneyProgress(ExecutionStage.VerifyingRoot, null)!!, 0.0001f)
+    }
+
+    @Test
+    fun uptimeGateUsesBootUptimeAndReachesFullProgressAt60Seconds() {
+        assertEquals(60_000L, uptimeGateRemainingMillis(0L))
+        assertEquals(30_000L, uptimeGateRemainingMillis(30_000L))
+        assertEquals(0L, uptimeGateRemainingMillis(60_000L))
+        assertEquals(0L, uptimeGateRemainingMillis(120_000L))
+        assertEquals(0L, uptimeGateRemainingMillis(180_000L))
+        assertEquals(0f, uptimeGateProgress(60_000L, 60_000L), 0.0001f)
+        assertEquals(0.5f, uptimeGateProgress(30_000L, 60_000L), 0.0001f)
+        assertEquals(1f, uptimeGateProgress(0L, 60_000L), 0.0001f)
     }
 
     @Test
@@ -83,7 +110,7 @@ class ExecutionStageTest {
                     assertNull(progress.detail)
             }
         }
-        assertEquals(ExecutionStage.entries.toList(), stages.toList())
+        assertEquals(ExecutionStage.entries.drop(2), stages.toList())
         assertEquals(parseExecutionProgress(log), progress)
         assertEquals("Canal de controle do KernelSU confirmado.", progress.detail)
     }

@@ -18,8 +18,10 @@ import java.io.InputStream
 import kotlin.time.Duration.Companion.milliseconds
 
 enum class InstallPhase {
+    CheckingShizuku,
     Checking,
     Ready,
+    WaitingForUptime,
     Downloading,
     WaitingForBootAllocator,
     Exploiting,
@@ -38,12 +40,20 @@ data class InstallUiState(
     val rootActive: Boolean = false,
     val stabilizationMetrics: StabilizationMetrics? = null,
     val completionDurationMillis: Long? = null,
+    val uptimeGateRemainingMillis: Long? = null,
+    val uptimeGateTotalMillis: Long? = null,
     val bootAllocatorRemainingMillis: Long? = null,
     val bootAllocatorTotalMillis: Long? = null,
+    val shizukuConnectionAlert: String? = null,
+    val rebootRequired: Boolean = false,
+    val rebootInProgress: Boolean = false,
+    val rebootError: String? = null,
 ) {
     val busy: Boolean
         get() = phase in setOf(
+            InstallPhase.CheckingShizuku,
             InstallPhase.Checking,
+            InstallPhase.WaitingForUptime,
             InstallPhase.Downloading,
             InstallPhase.WaitingForBootAllocator,
             InstallPhase.Exploiting,
@@ -72,6 +82,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     private var activeHistoryEntry: InstallHistoryEntry? = null
     private var fullRunLog = ""
     private var runStartedElapsedRealtime: Long? = null
+    private var rebootRequiredForCurrentRun = false
+    private var payloadMarkerTail = ""
     val state: StateFlow<InstallUiState> = mutableState.asStateFlow()
     val history: StateFlow<List<InstallHistoryEntry>> = mutableHistory.asStateFlow()
     val targetCatalog: StateFlow<TargetCatalogUiState> = mutableTargetCatalog.asStateFlow()
@@ -97,20 +109,31 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 )
                 return@launch
             }
+            if (currentBootRequiresReboot()) {
+                mutableState.value = InstallUiState(
+                    phase = InstallPhase.Failed,
+                    message = app.getString(R.string.status_reboot_required),
+                    probeOutput = probe,
+                    log = "$probe\n[app] fatal=reboot-required reason=post-mutation-failure",
+                    executionStage = ExecutionStage.VerifyingKernelAccess,
+                    rebootRequired = true,
+                )
+                return@launch
+            }
             try {
                 val profile = repository.resolveTarget(DeviceSnapshot.current())
                 mutableState.value = InstallUiState(
                     phase = InstallPhase.Ready,
                     message = app.getString(R.string.status_not_installed),
                     probeOutput = probe,
-                    log = "$probe\n${app.getString(R.string.log_profile, profile.profileId)}",
+                    log = "$probe\n[app] profile=${profile.profileId}",
                 )
             } catch (error: Throwable) {
                 mutableState.value = InstallUiState(
                     phase = InstallPhase.Failed,
                     message = app.getString(R.string.status_support_failed),
                     probeOutput = probe,
-                    log = "$probe\n[-] ${error.message ?: error.javaClass.simpleName}",
+                    log = "$probe\n[app] support=failed type=${error.javaClass.simpleName}",
                 )
             }
         }
@@ -122,6 +145,10 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         if (toDelete.isEmpty()) return
         toDelete.forEach(historyStore::delete)
         mutableHistory.value = mutableHistory.value.filterNot { it.id in toDelete }
+    }
+
+    fun dismissShizukuConnectionAlert() {
+        mutableState.value = mutableState.value.copy(shizukuConnectionAlert = null)
     }
 
     fun loadTargetCatalog() {
@@ -144,8 +171,11 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
 
     fun install(profileId: String? = null) {
         if (installJob?.isActive == true || mutableState.value.phase == InstallPhase.Installed) return
+        if (blockRunUntilReboot()) return
         discoveryJob?.cancel()
         installJob = viewModelScope.launch(Dispatchers.IO) {
+            rebootRequiredForCurrentRun = false
+            payloadMarkerTail = ""
             runStartedElapsedRealtime = SystemClock.elapsedRealtime()
             mutableState.value = InstallUiState(
                 phase = InstallPhase.Checking,
@@ -153,28 +183,20 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             )
             startHistory()
             try {
-                if (shizukuEnabled()) {
-                    appendLog(app.getString(R.string.log_shizuku_prepare))
-                    if (!ShizukuController.isRunning() && !ShizukuController.pingUntilRunning()) {
-                        error(app.getString(R.string.error_shizuku_unavailable))
-                    }
-                    if (!ShizukuController.isGranted() && !ShizukuController.requestPermission()) {
-                        error(app.getString(R.string.error_shizuku_permission))
-                    }
-                    appendLog(app.getString(R.string.log_shizuku_permission))
-                }
+                ensureShizukuReady()
+                awaitMinimumUptime()
                 setPhase(InstallPhase.Checking, app.getString(R.string.status_checking_github))
                 val profile = if (profileId == null) {
                     repository.resolveTarget(DeviceSnapshot.current())
                 } else {
                     repository.resolveTarget(profileId)
                 }
-                appendLog(app.getString(R.string.log_profile, profile.profileId))
+                appendLog("[app] profile=${profile.profileId}")
                 updateHistoryProfile(profile.profileId)
 
                 setPhase(InstallPhase.Downloading, app.getString(R.string.status_downloading_payload))
-                val payloads = repository.download(profile) { appendLog("[*] $it") }
-                appendLog(app.getString(R.string.log_download_verified))
+                val payloads = repository.download(profile) {}
+                appendLog("[app] assets=ready")
 
                 setPhase(InstallPhase.Exploiting, app.getString(R.string.status_exploit_running))
                 executeExploit(payloads)
@@ -183,20 +205,21 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 installKernelSu(payloads)
 
                 setPhase(InstallPhase.Installed, app.getString(R.string.status_ksu_active))
-                appendLog(app.getString(R.string.log_install_complete))
+                appendLog("[app] install=complete")
                 finishHistory(InstallRunResult.Succeeded)
             } catch (error: Throwable) {
-                appendLog("[-] ${error.message ?: error.javaClass.simpleName}")
-                setPhase(InstallPhase.Failed, app.getString(R.string.status_install_failed))
-                finishHistory(InstallRunResult.Failed)
+                handleRunFailure(error)
             }
         }
     }
 
     fun uninstallRoot(profileId: String? = null) {
         if (installJob?.isActive == true) return
+        if (blockRunUntilReboot()) return
         discoveryJob?.cancel()
         installJob = viewModelScope.launch(Dispatchers.IO) {
+            rebootRequiredForCurrentRun = false
+            payloadMarkerTail = ""
             runStartedElapsedRealtime = SystemClock.elapsedRealtime()
             mutableState.value = InstallUiState(
                 phase = InstallPhase.Checking,
@@ -204,27 +227,19 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             )
             startHistory()
             try {
-                if (shizukuEnabled()) {
-                    appendLog(app.getString(R.string.log_shizuku_prepare))
-                    if (!ShizukuController.isRunning() && !ShizukuController.pingUntilRunning()) {
-                        error(app.getString(R.string.error_shizuku_unavailable))
-                    }
-                    if (!ShizukuController.isGranted() && !ShizukuController.requestPermission()) {
-                        error(app.getString(R.string.error_shizuku_permission))
-                    }
-                    appendLog(app.getString(R.string.log_shizuku_permission))
-                }
+                ensureShizukuReady()
+                awaitMinimumUptime()
                 setPhase(InstallPhase.Checking, app.getString(R.string.status_checking_github))
                 val profile = if (profileId == null) {
                     repository.resolveTarget(DeviceSnapshot.current())
                 } else {
                     repository.resolveTarget(profileId)
                 }
-                appendLog(app.getString(R.string.log_profile, profile.profileId))
+                appendLog("[app] profile=${profile.profileId}")
                 updateHistoryProfile(profile.profileId)
                 setPhase(InstallPhase.Downloading, app.getString(R.string.status_downloading_payload))
-                val payloads = repository.download(profile) { appendLog("[*] $it") }
-                appendLog(app.getString(R.string.log_download_verified))
+                val payloads = repository.download(profile) {}
+                appendLog("[app] assets=ready")
                 setPhase(InstallPhase.Exploiting, app.getString(R.string.status_exploit_running))
                 executeExploit(payloads)
                 setPhase(InstallPhase.LoadingKernelSu, app.getString(R.string.status_uninstalling_root))
@@ -232,54 +247,150 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 setPhase(InstallPhase.Installed, app.getString(R.string.status_root_uninstalled))
                 finishHistory(InstallRunResult.Succeeded)
             } catch (error: Throwable) {
-                appendLog("[-] ${error.message ?: error.javaClass.simpleName}")
-                setPhase(InstallPhase.Failed, app.getString(R.string.status_install_failed))
-                finishHistory(InstallRunResult.Failed)
+                handleRunFailure(error)
             }
+        }
+    }
+
+    fun rebootDevice() {
+        if (!mutableState.value.rebootRequired || mutableState.value.rebootInProgress) return
+        viewModelScope.launch(Dispatchers.IO) {
+            mutableState.value = mutableState.value.copy(
+                message = app.getString(R.string.status_rebooting),
+                rebootInProgress = true,
+                rebootError = null,
+            )
+            appendLog("[app] reboot=requested")
+            val failure = requestDeviceReboot()
+            if (failure != null) {
+                appendLog("[App] reboot failed: $failure")
+                mutableState.value = mutableState.value.copy(
+                    message = app.getString(R.string.status_reboot_required),
+                    rebootInProgress = false,
+                    rebootError = app.getString(R.string.error_reboot_failed, failure),
+                )
+            }
+        }
+    }
+
+    private suspend fun ensureShizukuReady() {
+        if (!shizukuEnabled()) {
+            appendLog("[app] shizuku-gate=skipped mode=disabled")
+            return
+        }
+        setPhase(
+            InstallPhase.CheckingShizuku,
+            app.getString(
+                R.string.status_checking_shizuku,
+                ShizukuController.SHIZUKU_CONNECTION_TIMEOUT_MILLIS / 1_000L,
+            ),
+        )
+        val connected = ShizukuController.pingUntilRunning { _, remainingMillis, _ ->
+            val remainingSeconds = (remainingMillis + 999L) / 1_000L
+            mutableState.value = mutableState.value.copy(
+                message = app.getString(R.string.status_checking_shizuku, remainingSeconds),
+            )
+            Unit
+        }
+        if (!connected) {
+            val alert = app.getString(
+                R.string.error_shizuku_connection_timeout,
+                ShizukuController.SHIZUKU_CONNECTION_TIMEOUT_MILLIS / 1_000L,
+                ShizukuController.SHIZUKU_CONNECTION_POLL_MILLIS / 1_000L,
+            )
+            mutableState.value = mutableState.value.copy(shizukuConnectionAlert = alert)
+            error(alert)
+        }
+        if (!ShizukuController.isGranted() && !ShizukuController.requestPermission()) {
+            error(app.getString(R.string.error_shizuku_permission))
+        }
+        appendLog("[app] shizuku=ready")
+    }
+
+    private suspend fun awaitMinimumUptime() {
+        val initialUptime = SystemClock.elapsedRealtime()
+        appendLog(
+            "[app] uptime-gate=waiting uptime=${initialUptime / 1_000L}s " +
+                "minimum=${MINIMUM_PAYLOAD_UPTIME_MILLIS / 1_000L}s",
+        )
+        while (currentCoroutineContext().isActive) {
+            val uptime = SystemClock.elapsedRealtime()
+            val remaining = uptimeGateRemainingMillis(uptime)
+            val remainingSeconds = (remaining + 999L) / 1_000L
+            mutableState.value = mutableState.value.copy(
+                phase = InstallPhase.WaitingForUptime,
+                message = app.getString(R.string.status_waiting_uptime, remainingSeconds),
+                executionStage = ExecutionStage.WaitingForUptime,
+                executionDetail = null,
+                stabilizationMetrics = null,
+                uptimeGateRemainingMillis = remaining,
+                uptimeGateTotalMillis = MINIMUM_PAYLOAD_UPTIME_MILLIS,
+                bootAllocatorRemainingMillis = null,
+                bootAllocatorTotalMillis = null,
+            )
+            if (remaining == 0L) {
+                appendLog(
+                    "[app] uptime-gate=pass uptime=${uptime / 1_000L}s " +
+                        "minimum=${MINIMUM_PAYLOAD_UPTIME_MILLIS / 1_000L}s",
+                )
+                return
+            }
+            delay(minOf(remaining, UPTIME_GATE_REFRESH_MILLIS).milliseconds)
         }
     }
 
     private suspend fun executeExploit(payloads: VerifiedPayloads) {
         val payload = payloads.exploit
         val launcher = payloads.launcher
+        val mmFactory = payloads.mmFactory
         val shizuku = shizukuEnabled()
-        appendLog("[diag] shizukuEnabled=$shizuku isRunning=${ShizukuController.isRunning()} isGranted=${ShizukuController.isGranted()}")
+        appendLog("[app] runner=${if (shizuku) "shizuku" else "direct"}")
         // v0.2.34: pstore dump —— 重启后读上次内核崩溃日志（KDP/DEFEX/RKP 拦截铁证）
         if (shizuku) dumpPstore()
         val helper = helperFile(payloads.helper)
-        appendLog("[diag] helper=${helper.absolutePath} launcher=${launcher.absolutePath}")
         if (!shizuku) {
             require(helper.canExecute()) { app.getString(R.string.error_helper_unavailable) }
             require(launcher.canExecute()) { app.getString(R.string.error_launcher_unavailable) }
+            require(mmFactory == null || mmFactory.canExecute()) {
+                app.getString(R.string.error_mm_factory_unavailable)
+            }
+        }
+        if (AppPreferences.optimizeOnExploit(app)) {
+            appendLog("[app] process-quiesce ${StartupOptimizer.apply(app)}")
         }
         val logPrefix = mutableState.value.log
         val bootToken = currentBootToken()
         val process = if (shizuku) {
             val stagedPayload = shizukuStage(payload, SHIZUKU_PAYLOAD_PATH, "755")
             val stagedLauncher = shizukuStage(launcher, SHIZUKU_LAUNCHER_PATH, "755")
-            appendLog(
-                "[diag] Shizuku branch: launcher=${stagedLauncher.absolutePath} " +
-                    "payload=${stagedPayload.absolutePath}",
-            )
+            val stagedFactory = mmFactory?.let {
+                shizukuStage(it, SHIZUKU_MM_FACTORY_PATH, "755")
+            }
             val launcherEnv = buildList {
                 cachedP0Offset(bootToken)?.let { add("$P0_OFFSET_ENV=$it") }
             }.toTypedArray()
             val command = "exec ${shellQuote(stagedLauncher.absolutePath)} " +
                 "--payload ${shellQuote(stagedPayload.absolutePath)} " +
-                "--helper ${shellQuote(helper.absolutePath)} 2>&1"
+                "--helper ${shellQuote(helper.absolutePath)}" +
+                (stagedFactory?.let { " --mm-factory ${shellQuote(it.absolutePath)}" } ?: "") +
+                " 2>&1"
             ShizukuController.exec(
                 arrayOf("/system/bin/sh", "-c", command),
                 launcherEnv.takeIf { it.isNotEmpty() },
             )
         } else {
-            appendLog("[diag] App branch: launcher=${launcher.absolutePath} payload=${payload.absolutePath}")
-            val processBuilder = ProcessBuilder(
+            val command = mutableListOf(
                 launcher.absolutePath,
                 "--payload",
                 payload.absolutePath,
                 "--helper",
                 helper.absolutePath,
-            ).redirectErrorStream(true)
+            )
+            mmFactory?.let {
+                command += "--mm-factory"
+                command += it.absolutePath
+            }
+            val processBuilder = ProcessBuilder(command).redirectErrorStream(true)
             processBuilder.environment().apply {
                 cachedP0Offset(bootToken)?.let { put(P0_OFFSET_ENV, it) }
             }
@@ -297,6 +408,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 val chunk = drainProcessOutput(process)
                 if (chunk.isNotEmpty()) {
                     captured.append(chunk)
+                    observePayloadOutput(chunk)
                     cacheP0Offset(bootToken, chunk)
                     lastProgressAt = SystemClock.elapsedRealtime()
                 }
@@ -321,7 +433,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             }
 
             val exitCode = process.waitFor()
-            captured.append(drainProcessOutput(process))
+            val finalChunk = drainProcessOutput(process)
+            captured.append(finalChunk)
+            observePayloadOutput(finalChunk)
             val rawLog = captured.toString()
             cacheP0Offset(bootToken, rawLog)
             publishExploitLog(logPrefix, rawLog, persist = true)
@@ -342,7 +456,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             }
             val rootDurationMillis = SystemClock.elapsedRealtime() - startedAt
             AppPreferences.setLastRootDurationMillis(app, rootDurationMillis)
-            appendLog("[+] Root acquired in ${rootDurationMillis / 1_000.0} seconds")
+            appendLog("[App] root acquired in ${rootDurationMillis / 1_000.0} seconds")
         } finally {
             // Closing the UI must not abort a device-side launcher in a critical section.
             if (process.isAlive && currentCoroutineContext().isActive) {
@@ -351,7 +465,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 if (process.isAlive) process.destroyForcibly()
             }
         }
-        appendLog(app.getString(R.string.log_bootstrap_root))
+        appendLog("[app] bootstrap-root=ready")
     }
 
     private fun drainProcessOutput(process: Process): String {
@@ -389,6 +503,88 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         if (persist) updateHistoryLog()
     }
 
+    private fun observePayloadOutput(chunk: String) {
+        if (chunk.isEmpty() || rebootRequiredForCurrentRun) return
+        val markerWindow = payloadMarkerTail + chunk
+        if (payloadFailureRequiresReboot(markerWindow)) {
+            rebootRequiredForCurrentRun = true
+        }
+        payloadMarkerTail = markerWindow.takeLast(PAYLOAD_MARKER_TAIL_CHARS)
+    }
+
+    private fun handleRunFailure(error: Throwable) {
+        appendLog("[app] run=failed type=${error.javaClass.simpleName}")
+        val rebootRequired = rebootRequiredForCurrentRun
+        if (rebootRequired) {
+            markCurrentBootRequiresReboot()
+            appendLog("[app] fatal=reboot-required reason=post-mutation-failure")
+        }
+        setPhase(
+            InstallPhase.Failed,
+            app.getString(
+                if (rebootRequired) R.string.status_reboot_required
+                else R.string.status_install_failed,
+            ),
+        )
+        mutableState.value = mutableState.value.copy(rebootRequired = rebootRequired)
+        finishHistory(InstallRunResult.Failed)
+    }
+
+    private fun blockRunUntilReboot(): Boolean {
+        if (!currentBootRequiresReboot()) return false
+        mutableState.value = mutableState.value.copy(
+            phase = InstallPhase.Failed,
+            message = app.getString(R.string.status_reboot_required),
+            rebootRequired = true,
+            rebootInProgress = false,
+        )
+        return true
+    }
+
+    private suspend fun requestDeviceReboot(): String? {
+        val attempts = buildList {
+            if (ShizukuController.isGranted()) {
+                add("Shizuku" to arrayOf("/system/bin/svc", "power", "reboot"))
+            }
+            add("su" to arrayOf("/system/bin/su", "-c", "/system/bin/svc power reboot"))
+        }
+        val failures = mutableListOf<String>()
+        for ((name, command) in attempts) {
+            val processResult = runCatching {
+                if (name == "Shizuku") ShizukuController.exec(command)
+                else ProcessBuilder(*command).redirectErrorStream(true).start()
+            }
+            val process = processResult.getOrNull()
+            if (process == null) {
+                val error = processResult.exceptionOrNull()
+                failures += "$name: ${error?.message ?: error?.javaClass?.simpleName ?: "error"}"
+                continue
+            }
+            try {
+                var exited = false
+                for (poll in 0 until REBOOT_WAIT_POLLS) {
+                    if (!process.isAlive) {
+                        val output = runCatching { process.inputStream.bufferedReader().readText() }
+                            .getOrDefault("")
+                            .trim()
+                        val exitCode = process.exitValue()
+                        if (exitCode == 0) return null
+                        failures += "$name: rc=$exitCode${output.takeIf(String::isNotBlank)?.let { " ($it)" } ?: ""}"
+                        exited = true
+                        break
+                    }
+                    delay(REBOOT_WAIT_INTERVAL_MILLIS)
+                }
+                if (!exited) failures += "$name: timeout"
+            } catch (_: Throwable) {
+                return null
+            } finally {
+                if (process.isAlive) process.destroy()
+            }
+        }
+        return failures.joinToString("; ").ifBlank { "command unavailable" }
+    }
+
     private fun updateBootAllocatorState(window: BootAllocatorWindow?, nowMillis: Long) {
         val current = mutableState.value
         if (window != null) {
@@ -416,7 +612,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             // v0.2.26+: helper 硬编码 ksud 路径 /data/local/tmp/ksud-selected（F7310 版 helper）
             shizukuStage(payloads.kernelSu, "/data/local/tmp/ksud-selected", "755")
             shizukuStage(payloads.kernelSu, SHIZUKU_KSUD_STAGE_PATH, "755")
-            appendLog(app.getString(R.string.log_ksu_staged))
+            appendLog("[app] kernelsu=staged")
         } else {
             val source = shellQuote(payloads.kernelSu.absolutePath)
             val stageCommand =
@@ -427,7 +623,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                     "/data/local/tmp/ksud-s25u-kdp /data/local/tmp/.ksud-stage"
             val stage = runHelper(helper, "-c", stageCommand)
             require(stage.code == 0) { app.getString(R.string.error_ksu_stage, stage.output) }
-            appendLog(app.getString(R.string.log_ksu_staged))
+            appendLog("[app] kernelsu=staged")
         }
 
         val lateLoad = runHelper(helper, "--late-load")
@@ -443,7 +639,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             executionStage = ExecutionStage.VerifyingRoot,
             rootActive = true,
         )
-        appendLog(app.getString(R.string.log_ksu_control_verified))
+        appendLog("[app] kernelsu=verified")
     }
 
     private fun removeRootFiles(helperSource: File) {
@@ -484,6 +680,23 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             .takeIf(String::isNotBlank)
     }.getOrNull()
 
+    private fun currentBootRequiresReboot(): Boolean {
+        val bootToken = currentBootToken() ?: return false
+        val stored = app.getSharedPreferences(REBOOT_GUARD, Application.MODE_PRIVATE)
+        val guardedBoot = stored.getString(REBOOT_GUARD_BOOT_TOKEN, null)
+        if (guardedBoot == bootToken) return true
+        if (guardedBoot != null) stored.edit().clear().apply()
+        return false
+    }
+
+    private fun markCurrentBootRequiresReboot() {
+        val bootToken = currentBootToken() ?: return
+        app.getSharedPreferences(REBOOT_GUARD, Application.MODE_PRIVATE)
+            .edit()
+            .putString(REBOOT_GUARD_BOOT_TOKEN, bootToken)
+            .commit()
+    }
+
     private fun cachedP0Offset(bootToken: String?): String? {
         if (bootToken == null) return null
         val stored = app.getSharedPreferences(P0_CACHE, Application.MODE_PRIVATE)
@@ -513,13 +726,17 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
      */
     private fun dumpPstore() {
         try {
-            appendLog("--- [pstore] dump start ---")
+            appendLog("[Pstore] dump=start")
             val out = ShizukuController.capture(arrayOf("sh", "-c",
                 "for f in /sys/fs/pstore/*; do echo \"===== ${'$'}f =====\"; head -c 8192 \"${'$'}f\" 2>/dev/null; echo; done; ls -la /sys/fs/pstore/ 2>/dev/null"))
-            if (out.isNotBlank()) appendLog(out) else appendLog("--- [pstore] empty ---")
-            appendLog("--- [pstore] dump end ---")
+            if (out.isNotBlank()) {
+                appendLog(out.lineSequence().joinToString("\n") { "[Pstore] $it" })
+            } else {
+                appendLog("[Pstore] dump=empty")
+            }
+            appendLog("[Pstore] dump=end")
         } catch (t: Throwable) {
-            appendLog("--- [pstore] error: ${t.message} ---")
+            appendLog("[Pstore] error=${t.javaClass.simpleName}")
         }
     }
 
@@ -575,6 +792,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
 
     private fun setPhase(phase: InstallPhase, message: String) {
         val stage = when (phase) {
+            InstallPhase.CheckingShizuku -> ExecutionStage.CheckingShizuku
+            InstallPhase.WaitingForUptime -> ExecutionStage.WaitingForUptime
             InstallPhase.Checking, InstallPhase.Ready, InstallPhase.Downloading ->
                 ExecutionStage.Preparing
             InstallPhase.WaitingForBootAllocator, InstallPhase.Exploiting -> mutableState.value.executionStage
@@ -591,22 +810,26 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             completionDurationMillis = if (phase == InstallPhase.Installed) {
                 runStartedElapsedRealtime?.let { SystemClock.elapsedRealtime() - it }
             } else null,
+            uptimeGateRemainingMillis = null,
+            uptimeGateTotalMillis = null,
             bootAllocatorRemainingMillis = null,
             bootAllocatorTotalMillis = null,
         )
-        appendLog("[*] $message")
     }
 
     private fun appendLog(line: String) {
-        val cleanLine = stripAnsi(line).trim()
-        if (cleanLine.isBlank()) return
-        val progress = parseExecutionProgress(cleanLine, mutableState.value.executionStage, mutableState.value.executionDetail)
-        fullRunLog = (fullRunLog + "\n" + cleanLine).trim()
-        mutableState.value = mutableState.value.copy(
-            log = logTail(fullRunLog),
-            executionStage = progress.stage,
-            executionDetail = progress.detail,
-        )
+        stripAnsi(line).lineSequence().forEach { rawLine ->
+            val content = rawLine.trim()
+            if (content.isBlank()) return@forEach
+            val cleanLine = if (MODULE_PREFIX.containsMatchIn(content)) content else "[App] $content"
+            val progress = parseExecutionProgress(cleanLine, mutableState.value.executionStage, mutableState.value.executionDetail)
+            fullRunLog = (fullRunLog + "\n" + cleanLine).trim()
+            mutableState.value = mutableState.value.copy(
+                log = logTail(fullRunLog),
+                executionStage = progress.stage,
+                executionDetail = progress.detail,
+            )
+        }
         updateHistoryLog()
     }
 
@@ -652,10 +875,16 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private const val EXPLOIT_TOTAL_MILLIS = 900_000L
         private const val UI_PUBLISH_MILLIS = 1_000L
         private const val HISTORY_SAVE_MILLIS = 10_000L
+        private const val UPTIME_GATE_REFRESH_MILLIS = 250L
         private const val DISPLAY_LOG_LINES = 180
         private const val INSTALL_RECEIPT = "install_receipt"
         private const val RECEIPT_BOOT_TOKEN = "kernel_boot_id"
         private const val RECEIPT_VERIFIED = "verified"
+        private const val REBOOT_GUARD = "reboot_guard"
+        private const val REBOOT_GUARD_BOOT_TOKEN = "kernel_boot_id"
+        private const val REBOOT_WAIT_POLLS = 25
+        private const val REBOOT_WAIT_INTERVAL_MILLIS = 200L
+        private const val PAYLOAD_MARKER_TAIL_CHARS = 128
         private const val P0_CACHE = "p0_cache"
         private const val P0_CACHE_BOOT_TOKEN = "kernel_boot_id"
         private const val P0_CACHE_OFFSET = "offset"
@@ -665,10 +894,12 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private const val SHIZUKU_HELPER_PATH = "/data/local/tmp/ksu-helper"
         private const val SHIZUKU_PAYLOAD_PATH = "/data/local/tmp/ksu-payload"
         private const val SHIZUKU_LAUNCHER_PATH = "/data/local/tmp/stability-launcher"
+        private const val SHIZUKU_MM_FACTORY_PATH = "/data/local/tmp/mm-exec-factory"
         private const val SHIZUKU_KSUD_PATH = "/data/local/tmp/ksud-s25u-kdp"
         private const val SHIZUKU_KSUD_STAGE_PATH = "/data/local/tmp/.ksud-stage"
         private val LOG_POLL_INTERVAL = 1_000.milliseconds
         private val ANSI_ESCAPE = Regex("\u001B\\[[0-?]*[ -/]*[@-~]")
+        private val MODULE_PREFIX = Regex("^\\[[A-Za-z0-9][A-Za-z0-9_-]*]")
         private val P0_OFFSET_PATTERN = Regex(
             "(?:slide-kaslr-ok[^\\n]*slide=|\\[kaslr][^\\n]*p0_offset=)([0-9a-fA-F]{6,16})",
         )

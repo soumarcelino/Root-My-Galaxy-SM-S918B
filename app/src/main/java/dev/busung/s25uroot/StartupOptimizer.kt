@@ -12,12 +12,12 @@ object StartupOptimizer {
         }
 
         val packageName = context.packageName
-        val keep = setOf(packageName, SHIZUKU_PACKAGE, KSU_MANAGER_PACKAGE)
-        val results = mutableListOf<String>()
+        val keep = setOf(packageName, SHIZUKU_PACKAGE)
+        val results = mutableListOf<Boolean>()
 
-        runCommand("cmd", "deviceidle", "whitelist", "+$packageName", results = results)
-        runCommand("am", "set-standby-bucket", packageName, "active", results = results)
-        runCommand("cmd", "power", "set-fixed-performance-mode-enabled", "true", results = results)
+        results += runCommand("cmd", "deviceidle", "whitelist", "+$packageName")
+        results += runCommand("am", "set-standby-bucket", packageName, "active")
+        results += runCommand("am", "kill-all")
 
         val packages = runCatching {
             ShizukuController.capture(arrayOf("pm", "list", "packages", "-3"))
@@ -26,23 +26,21 @@ object StartupOptimizer {
                 .filter { it.isNotEmpty() && it !in keep && it.matches(PACKAGE_NAME) }
                 .toList()
         }.getOrDefault(emptyList())
-        packages.forEach { runCommand("am", "force-stop", "--user", "0", it, results = results) }
-
-        "optimized=${results.count { it == SUCCESS }} stopped=${packages.size}"
-    }
-
-    private fun runCommand(vararg command: String, results: MutableList<String>) {
-        val process = runCatching { ShizukuController.exec(command.toList().toTypedArray()) }.getOrNull()
-        if (process == null) {
-            results += FAILURE
-            return
+        val stopped = packages.count {
+            val ok = runCommand("am", "force-stop", "--user", "0", it)
+            results += ok
+            ok
         }
-        results += if (runCatching { process.waitFor() == 0 }.getOrDefault(false)) SUCCESS else FAILURE
+
+        "commands=${results.count { it }}/${results.size} stopped=$stopped/${packages.size}"
     }
 
-    private const val SUCCESS = "ok"
-    private const val FAILURE = "failed"
+    private fun runCommand(vararg command: String): Boolean {
+        val process = runCatching { ShizukuController.exec(command.toList().toTypedArray()) }.getOrNull()
+            ?: return false
+        return runCatching { process.waitFor() == 0 }.getOrDefault(false)
+    }
+
     private const val SHIZUKU_PACKAGE = "moe.shizuku.manager"
-    private const val KSU_MANAGER_PACKAGE = "com.rifsxd.ksunext"
     private val PACKAGE_NAME = Regex("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+")
 }
