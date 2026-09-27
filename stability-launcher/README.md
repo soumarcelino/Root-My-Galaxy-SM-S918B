@@ -22,14 +22,12 @@ Root acquisition is performed by the payload and its helper.
    including on failure.
 5. Discard the precheck and require consecutive full samples after the pipe
    probe. A device clearing all thresholds with wide margin uses an adaptive
-   fast path: five samples one second apart.
-6. After final confirmation, configure the payload environment and wait two
-   cancelable seconds. When the app handshake is enabled, emit the readiness
-   marker and wait for the app to acknowledge that its UI and log polling are
-   quiescent. After the acknowledgement, call `execve` without another log or
-   metric read. Android's dynamic linker loads the payload from `LD_PRELOAD`;
-   the payload must support execution through a constructor. `--check-only`
-   returns before this delay because it never invokes the payload.
+   fast path: two samples one second apart.
+6. After final confirmation, configure the payload environment, wait two
+   cancelable seconds, and call `execve`. Android's dynamic linker loads the
+   payload from `LD_PRELOAD`; the payload must support execution through a
+   constructor. `--check-only` returns before this delay because it never
+   invokes the payload.
 
 An unstable or unreadable sample resets the post-probe consecutive-sample
 counter. The pipe probe runs exactly once, between the stable precheck and
@@ -43,8 +41,8 @@ requires a clean reboot.
 
 ## Profiles
 
-The default profile is called `relaxado` in logs. `--conservative` selects
-the `conservador` profile. Values below are source defaults.
+The default profile is called `relaxed` in logs. `--conservative` selects
+the `conservative` profile. Values below are source defaults.
 
 | Condition | Default | Conservative |
 | --- | ---: | ---: |
@@ -58,13 +56,13 @@ the `conservador` profile. Values below are source defaults.
 | Maximum I/O PSI `some avg10` | 10 | 2 |
 | Maximum active and total `mm_struct` objects, each | 2560 | 1024 |
 | Maximum estimated `mm_struct` slabs | 80 | 32 |
-| Consecutive samples per phase | 5 | 5 |
+| Consecutive samples per phase | 2 | 2 |
 
 The minimum-uptime gate is mandatory and outside the stability timeout. A read
 failure aborts execution, and the launcher validates uptime again immediately
 before loading the payload. Both profiles use a two-second baseline interval
 and a 60-second stability-gate wait budget. The
-adaptive fast path uses five samples one second apart only while
+adaptive fast path uses two samples one second apart only while
 memory, temperature, runnable tasks and PSI retain wide margins. Sampling is
 scheduled against absolute `CLOCK_MONOTONIC` deadlines, so metric collection
 time does not accumulate as drift. Blocking reads or system calls are not
@@ -144,21 +142,18 @@ Immediately before `execve`, the launcher sets:
 Timeout variables are interpreted by the payload; the launcher does not
 supervise execution after `execve`.
 
-The Android app sets `RMG_APP_QUIET_HANDSHAKE=1`. In this mode the launcher
-prints `[launcher] app-quiesce-ready` after the two-second delay and waits for
-a single `Q` byte on standard input. A missing or invalid acknowledgement
-aborts execution, so the payload cannot start while app polling is still
-active. The app replaces the animated installer with a static screen before
-acknowledging, stops reading process output, and resumes at least five seconds
-after the acknowledgement. Direct command-line use remains compatible because
-the handshake is disabled when the variable is absent.
-
 ## Logs and exit codes
 
-Logs are written to standard error with a `[launcher]` prefix. Sample logs use
-`cheap`, `baseline`, or `fast`; deferred fields are explicit. Pipe probes emit
-`pipe-gate=pass` or `pipe-gate=fail`. A timeout emits `ALERTA` before releasing
-the payload without a stability confirmation.
+Logs are written to standard error with a `[launcher]` prefix. Gate samples
+contain the stable count, temperature, available memory, and a compact wait
+reason. Pipe probes emit `pipe-gate=pass` or `pipe-gate=fail`; gate timeout is
+explicit before the payload continues. Launcher and payload builds use
+the shared compact logger in `native/compact_log.c`: ANSI control sequences are
+removed, partial writes are assembled, and every physical line is limited to
+42 columns without discarding diagnostic fields. Default output keeps only
+progress, safety decisions, timing summaries, mutation context, restoration
+results, and failures. Set `RMG_LOG_VERBOSE=1` before launching to retain every
+internal diagnostic line.
 
 | Exit code | Meaning before payload execution |
 | --- | --- |
@@ -178,7 +173,8 @@ Requires the Android NDK. Example for Linux hosts, ARM64, Android API 35:
 mkdir -p build
 "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang" \
   -O2 -Wall -Wextra -Werror -fPIE -fstack-protector-strong \
-  -D_FORTIFY_SOURCE=2 stability-launcher.c \
+  -D_FORTIFY_SOURCE=2 -include ../native/compact_log.h \
+  stability-launcher.c ../native/compact_log.c \
   -pie -Wl,-z,relro,-z,now -o build/stability-launcher
 ```
 

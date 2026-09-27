@@ -4,7 +4,6 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,7 +23,7 @@
 #define REL_MAX_MEM_PSI 6.0
 #define REL_MAX_IO_PSI 10.0
 #define REL_MIN_UPTIME_SEC 60.0
-#define REL_STABLE_SAMPLES 5
+#define REL_STABLE_SAMPLES 2
 #define REL_MAX_MM_OBJECTS 2560L
 #define REL_MAX_MM_DELTA 96L
 #ifndef REL_MAX_MM_SLABS
@@ -32,7 +31,7 @@
 #endif
 
 #ifndef REL_GATE_NAME
-#define REL_GATE_NAME "relaxado"
+#define REL_GATE_NAME "relaxed"
 #endif
 
 /* Conservative profile (--conservative). */
@@ -43,7 +42,7 @@
 #define CONS_MAX_MEM_PSI 1.0
 #define CONS_MAX_IO_PSI 2.0
 #define CONS_MIN_UPTIME_SEC 60.0
-#define CONS_STABLE_SAMPLES 5
+#define CONS_STABLE_SAMPLES 2
 #define CONS_MAX_MM_OBJECTS 1024L
 #define CONS_MAX_MM_SLABS 32L
 #define CONS_MAX_MM_DELTA 32L
@@ -53,13 +52,10 @@
  * (device idle and cool), confirm with shorter-spaced samples instead of the
  * full baseline cadence. Borderline-but-passing samples still require the
  * full stable_samples at SAMPLE_INTERVAL_SEC; hot/loaded samples still reset
- * and wait. Both profiles require five samples on either path. */
-#define FAST_STABLE_SAMPLES 5
+ * and wait. Both profiles require two samples on either path. */
+#define FAST_STABLE_SAMPLES 2
 #define FAST_INTERVAL_SEC 1
 #define PAYLOAD_DELAY_SEC 2
-#define APP_QUIET_ACK_TIMEOUT_MS 8000
-#define APP_QUIET_ACK 'Q'
-#define APP_QUIET_ENV "RMG_APP_QUIET_HANDSHAKE"
 #define APP_KILL_ALL_TIMEOUT_MS 5000
 #define TEMP_HEADROOM_MC 5000L
 #define MAX_WAIT_SEC 60
@@ -127,7 +123,7 @@ static const struct gate_cfg gate_conservative = {
     .max_mm_objects = CONS_MAX_MM_OBJECTS,
     .max_mm_slabs = CONS_MAX_MM_SLABS,
     .max_mm_delta = CONS_MAX_MM_DELTA,
-    .name = "conservador",
+    .name = "conservative",
 };
 
 static volatile sig_atomic_t stopped;
@@ -254,7 +250,7 @@ static int wait_for_minimum_uptime(double minimum) {
   while (!stopped) {
     double uptime;
     if (!read_uptime(&uptime)) {
-      fprintf(stderr, "[launcher] uptime-gate=fail leitura de /proc/uptime\n");
+      fprintf(stderr, "[launcher] uptime-gate=fail read=/proc/uptime\n");
       return 0;
     }
     if (uptime >= minimum) {
@@ -267,7 +263,7 @@ static int wait_for_minimum_uptime(double minimum) {
     double remaining = minimum - uptime;
     time_t seconds = (time_t)remaining;
     if ((double)seconds < remaining) seconds++;
-    fprintf(stderr, "[launcher] aguardando uptime minimo: %.0fs restantes\n",
+    fprintf(stderr, "[launcher] uptime-gate=wait remaining=%.0fs\n",
             remaining);
     struct timespec delay = {.tv_sec = seconds, .tv_nsec = 0};
     while (!stopped) {
@@ -277,7 +273,7 @@ static int wait_for_minimum_uptime(double minimum) {
       if (error == 0) break;
       if (error != EINTR) {
         fprintf(stderr,
-                "[launcher] espera do uptime falhou errno=%d(%s)\n", error,
+                "[launcher] uptime wait failed errno=%d(%s)\n", error,
                 strerror(error));
         return 0;
       }
@@ -295,56 +291,13 @@ static int wait_before_payload(void) {
     if (error == 0) return 1;
     if (error != EINTR) {
       fprintf(stderr,
-              "[launcher] espera antes do payload falhou errno=%d(%s)\n",
+              "[launcher] payload wait failed errno=%d(%s)\n",
               error, strerror(error));
       return 0;
     }
     delay = interrupted;
   }
   return 0;
-}
-
-static int app_quiet_handshake_enabled(void) {
-  const char *value = getenv(APP_QUIET_ENV);
-  return value && strcmp(value, "1") == 0;
-}
-
-static int wait_for_app_quiet_ack(void) {
-  fprintf(stderr, "[launcher] app-quiesce-ready post_quiet=5s\n");
-  struct pollfd descriptor = {
-      .fd = STDIN_FILENO,
-      .events = POLLIN,
-      .revents = 0,
-  };
-  int ready;
-  do {
-    ready = poll(&descriptor, 1, APP_QUIET_ACK_TIMEOUT_MS);
-  } while (ready < 0 && errno == EINTR && !stopped);
-  if (stopped) return 0;
-  if (ready == 0) {
-    fprintf(stderr, "[launcher] app-quiesce=fail timeout aguardando ACK\n");
-    return 0;
-  }
-  if (ready < 0) {
-    fprintf(stderr, "[launcher] app-quiesce=fail poll errno=%d(%s)\n", errno,
-            strerror(errno));
-    return 0;
-  }
-  if (!(descriptor.revents & POLLIN)) {
-    fprintf(stderr, "[launcher] app-quiesce=fail stdin revents=0x%x\n",
-            descriptor.revents);
-    return 0;
-  }
-  unsigned char ack = 0;
-  ssize_t count;
-  do {
-    count = read(STDIN_FILENO, &ack, 1);
-  } while (count < 0 && errno == EINTR && !stopped);
-  if (count != 1 || ack != APP_QUIET_ACK) {
-    fprintf(stderr, "[launcher] app-quiesce=fail ACK inválido\n");
-    return 0;
-  }
-  return 1;
 }
 
 static int read_boot_complete(void) {
@@ -415,6 +368,31 @@ static int metrics_stable(const struct metrics *m) {
          m->mm_slabs <= gate.max_mm_slabs;
 }
 
+static const char *gate_state(const struct metrics *m, int cheap_valid,
+                              int full_valid, int churn_stable, int accepted,
+                              int pipe_probed, int pipe_ok) {
+  if (!cheap_valid) return "metric-read";
+  if (!m->boot_complete) return "boot";
+  if (m->selinux_enforcing != 1) return "selinux";
+  if (m->uptime < gate.min_uptime_sec) return "uptime";
+  if (m->mem_kb < gate.min_mem_kb) return "memory";
+  if (m->runnable > gate.max_runnable) return "runnable";
+  if (m->cpu_psi > gate.max_cpu_psi) return "cpu-psi";
+  if (m->mem_psi > gate.max_mem_psi) return "memory-psi";
+  if (m->io_psi > gate.max_io_psi) return "io-psi";
+  if (!full_valid) return "metric-read";
+  if (m->temp_mc > gate.max_temp_mc) return "temperature";
+  if (m->mm_active > gate.max_mm_objects ||
+      m->mm_total > gate.max_mm_objects || m->mm_slabs > gate.max_mm_slabs) {
+    return "mm-slab";
+  }
+  if (!churn_stable) return "mm-churn";
+  if (!accepted) return "threshold";
+  if (!pipe_probed) return "pipe-probe";
+  if (!pipe_ok) return "pipe-capacity";
+  return "stable";
+}
+
 /* Comfortable = passes every threshold with margin: half the PSI ceilings,
  * half the runnable ceiling, 1.5x the memory floor, temperature TEMP_HEADROOM_MC
  * below its ceiling. Implies metrics_stable(). Used to shorten the gate on a
@@ -446,7 +424,7 @@ static int wait_interval_absolute(struct timespec *deadline, int seconds,
     int error = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, deadline, NULL);
     if (error == 0) return 1;
     if (error != EINTR) {
-      fprintf(stderr, "[launcher] clock_nanosleep falhou errno=%d(%s)\n",
+      fprintf(stderr, "[launcher] sleep failed errno=%d(%s)\n",
               error, strerror(error));
       return 0;
     }
@@ -497,7 +475,7 @@ static int pipe_capacity_probe(void) {
             PIPE_COUNT, PIPE_TARGET_SIZE / 4096);
   } else {
     fprintf(stderr,
-            "[launcher] pipe-gate=fail index=%d errno=%d(%s); aguardando timeout\n",
+            "[launcher] pipe-gate=fail index=%d errno=%d(%s) action=wait\n",
             failed_at, saved_errno, strerror(saved_errno));
   }
   return ok;
@@ -531,8 +509,9 @@ static int stop_background_apps(void) {
     pid_t waited = waitpid(child, &status, WNOHANG);
     if (waited == child) {
       int ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
-      fprintf(stderr, "[launcher] app-kill-all=%s status=%d\n",
-              ok ? "pass" : "fail", status);
+      if (!ok) {
+        fprintf(stderr, "[launcher] app-kill-all=fail status=%d\n", status);
+      }
       return ok;
     }
     if (waited < 0 && errno != EINTR) {
@@ -554,8 +533,8 @@ static int stop_background_apps(void) {
 
 static void usage(const char *program) {
   fprintf(stderr,
-          "Uso: %s --payload CAMINHO --helper CAMINHO [--check-only] "
-          "[--mm-factory CAMINHO] [--conservative]\n",
+          "Usage: %s --payload PATH --helper PATH [--check-only] "
+          "[--mm-factory PATH] [--conservative]\n",
           program);
 }
 
@@ -563,7 +542,7 @@ int main(int argc, char **argv) {
   const char *inherited_preload = getenv("LD_PRELOAD");
   if (inherited_preload && inherited_preload[0] != '\0') {
     fprintf(stderr,
-            "[launcher] recusado: LD_PRELOAD já estava definido antes do gate\n");
+            "[launcher] refused inherited LD_PRELOAD\n");
     return 2;
   }
   const char *payload = NULL;
@@ -594,7 +573,7 @@ int main(int argc, char **argv) {
       (!validate_elf(payload) || !validate_elf(helper) ||
        (mm_factory && !validate_elf(mm_factory)))) {
     fprintf(stderr,
-            "[launcher] payload/helper/factory ausente ou ELF inválido\n");
+            "[launcher] invalid payload/helper/factory ELF\n");
     return 2;
   }
 
@@ -609,16 +588,8 @@ int main(int argc, char **argv) {
 
   if (!check_only) stop_background_apps();
 
-  fprintf(stderr,
-          "[launcher] gate %s: %d amostras/%ds (fast %d/%ds) temp<=%ldC "
-          "mem>=%ldMB tarefas<=%d PSI<=%.0f/%.0f/%.0f uptime>=%.0fs mm<=%ld/%ld "
-          "mm-delta<=%ld pipe=480x32 timeout=%ds\n",
-          gate.name, gate.stable_samples, SAMPLE_INTERVAL_SEC,
-          FAST_STABLE_SAMPLES, FAST_INTERVAL_SEC,
-          gate.max_temp_mc / 1000, gate.min_mem_kb / 1024,
-          gate.max_runnable, gate.max_cpu_psi, gate.max_mem_psi,
-          gate.max_io_psi, gate.min_uptime_sec, gate.max_mm_objects,
-          gate.max_mm_slabs, gate.max_mm_delta, MAX_WAIT_SEC);
+  fprintf(stderr, "[launcher] start profile=%s samples=%d timeout=%ds\n",
+          gate.name, gate.stable_samples, MAX_WAIT_SEC);
   if (!wait_for_minimum_uptime(gate.min_uptime_sec)) {
     return stopped ? 130 : 1;
   }
@@ -669,26 +640,20 @@ int main(int argc, char **argv) {
       stable = accepted ? stable + 1 : 0;
       comfortable_streak = comfortable ? comfortable_streak + 1 : 0;
     }
+    const char *sample_state = gate_state(
+        &m, cheap_valid, full_valid, churn_stable, accepted, pipe_probed,
+        pipe_ok);
     if (full_valid) {
       fprintf(stderr,
-              "[launcher] gate=%d/%d phase=%s temp=%.1fC mem=%ldMB runnable=%d "
-              "load=%.2f psi=%.2f/%.2f/%.2f mm=%ld/%ld slabs=%ld dmm=%ld "
-              "uptime=%.0fs boot=%d se=%ld\n",
-              stable, gate.stable_samples, comfortable ? "fast" : "baseline",
-              m.temp_mc / 1000.0,
-              m.mem_kb / 1024,
-              m.runnable, m.load1, m.cpu_psi, m.mem_psi, m.io_psi,
-              m.mm_active, m.mm_total, m.mm_slabs, mm_delta, m.uptime,
-              m.boot_complete, m.selinux_enforcing);
+              "[launcher] gate=%d/%d temp=%.1fC mem=%ldMB state=%s\n",
+              stable, gate.stable_samples, m.temp_mc / 1000.0,
+              m.mem_kb / 1024, sample_state);
     } else if (cheap_valid) {
       fprintf(stderr,
-              "[launcher] gate=0/%d phase=cheap temp=deferred mem=%ldMB "
-              "runnable=%d load=%.2f psi=%.2f/%.2f/%.2f mm=deferred "
-              "uptime=%.0fs boot=%d\n",
-              gate.stable_samples, m.mem_kb / 1024, m.runnable, m.load1,
-              m.cpu_psi, m.mem_psi, m.io_psi, m.uptime, m.boot_complete);
+              "[launcher] gate=0/%d temp=n/a mem=%ldMB state=%s\n",
+              gate.stable_samples, m.mem_kb / 1024, sample_state);
     } else {
-      fprintf(stderr, "[launcher] gate=0/%d leitura de métricas inválida\n",
+      fprintf(stderr, "[launcher] gate=0/%d metrics=invalid\n",
               gate.stable_samples);
     }
 
@@ -699,8 +664,6 @@ int main(int argc, char **argv) {
       pipe_probed = 1;
       pipe_ok = pipe_capacity_probe();
       if (pipe_ok) {
-        fprintf(stderr,
-                "[launcher] pipe-gate aprovado; iniciando confirmação final\n");
         previous_full = m;
         have_previous_full = 1;
         if (clock_gettime(CLOCK_MONOTONIC, &next_sample) != 0) {
@@ -743,7 +706,7 @@ int main(int argc, char **argv) {
     }
   }
   if (stopped) {
-    fprintf(stderr, "[launcher] cancelado antes de carregar payload\n");
+    fprintf(stderr, "[launcher] canceled before payload\n");
     return 130;
   }
   if (wait_failed) {
@@ -751,13 +714,11 @@ int main(int argc, char **argv) {
   }
   if (!gate_passed) {
     fprintf(stderr,
-            "[launcher] ALERTA: timeout de %ds; ambiente não estabilizou "
-            "(pipe=%s); liberando payload mesmo assim\n",
-            MAX_WAIT_SEC, pipe_probed ? (pipe_ok ? "aprovado" : "falhou")
-                                      : "não verificado");
+            "[launcher] gate=timeout after=%ds pipe=%s action=continue\n",
+            MAX_WAIT_SEC, pipe_probed ? (pipe_ok ? "pass" : "fail")
+                                      : "not-tested");
   } else {
-    fprintf(stderr,
-            "[launcher] estabilidade confirmada: métricas+slab+pipe\n");
+    fprintf(stderr, "[launcher] gate=ready\n");
   }
   double launch_uptime = -1.0;
   if (!read_uptime(&launch_uptime) || launch_uptime < gate.min_uptime_sec) {
@@ -786,14 +747,11 @@ int main(int argc, char **argv) {
     return 1;
   }
   fprintf(stderr,
-          "[launcher] payload-delay=%ds; checagens concluídas\n",
+          "[launcher] payload=wait delay=%ds\n",
           PAYLOAD_DELAY_SEC);
   if (!wait_before_payload()) return stopped ? 130 : 1;
 
-  const int app_quiet = app_quiet_handshake_enabled();
-  if (app_quiet && !wait_for_app_quiet_ack()) return stopped ? 130 : 1;
-  if (!app_quiet)
-    fprintf(stderr, "[launcher] execve: carregando payload agora\n");
+  fprintf(stderr, "[launcher] payload=exec\n");
   char *const child_argv[] = {"/system/bin/true", NULL};
   execve(child_argv[0], child_argv, environ);
   perror("[launcher] execve");
