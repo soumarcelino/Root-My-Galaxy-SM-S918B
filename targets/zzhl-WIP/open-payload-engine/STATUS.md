@@ -51,3 +51,16 @@ Enforcing
 O runner seleciona esse loader por padrão e considera a execução aprovada
 somente se o controle KernelSU for verificado. `--no-kernelsu` mantém o modo de
 root temporário para diagnóstico.
+
+## Correção pendente após as execuções do app
+
+As três execuções mais recentes revelaram uma falha no encoder NUL da primitiva
+ConfigFS. O teste host assumia cópia byte a byte, enquanto o `strscpy()` do
+ZZHL grava blocos de oito bytes e pode alterar bytes posteriores ao NUL. Isso
+explica tanto `private PTY staging failed` quanto o panic posterior em
+`configfs_read_iter`.
+
+O diagnóstico, a aritmética dos ponteiros e a correção necessária estão em
+`docs/18-INCIDENTE-STRSCPY-CONFIGFS.md`. Até a implementação e uma nova campanha
+multiboot, o APK `0.6.0-beta-1` não deve ser tratado como estável para qualquer
+slide KASLR ou endereço de reclaim.

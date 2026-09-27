@@ -14,13 +14,15 @@ disponíveis.
 
 Leia primeiro:
 
-1. [Port novo e campanha no aparelho](17-PORT-ZZHL-FRESH-E-CAMPANHA.md):
+1. [Incidente do encoder ConfigFS no ZZHL](18-INCIDENTE-STRSCPY-CONFIGFS.md):
+   análise das três execuções mais recentes e correção necessária.
+2. [Port novo e campanha no aparelho](17-PORT-ZZHL-FRESH-E-CAMPANHA.md):
    proveniência, target, hashes, arquitetura, falhas, correção final, cinco
    execuções, prova de root e limites.
-2. [Dossiê do firmware ZZHL](ZZHL-FIRMWARE.md): identidade, fontes, verificações
+3. [Dossiê do firmware ZZHL](ZZHL-FIRMWARE.md): identidade, fontes, verificações
    ELF/BTF e política de revalidação.
-3. [Estado atual](../STATUS.md): resumo operacional curto.
-4. [Ferramentas](../tools/README.md): verificadores, preflight, runner e coleta.
+4. [Estado atual](../STATUS.md): resumo operacional curto.
+5. [Ferramentas](../tools/README.md): verificadores, preflight, runner e coleta.
 
 ## Referência arquitetural herdada
 
