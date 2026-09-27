@@ -587,6 +587,10 @@ class RootWindow(QMainWindow):
         if launcher.is_file():
             digest = hashlib.sha256(launcher.read_bytes()).hexdigest()
             self.append_log(f"[GUI] Launcher SHA-256: {digest}")
+        mm_factory = self.runner.parent / "assets" / "mm-exec-factory"
+        if mm_factory.is_file():
+            digest = hashlib.sha256(mm_factory.read_bytes()).hexdigest()
+            self.append_log(f"[GUI] MM factory SHA-256: {digest}")
         self.append_log("[GUI] Tela não será apagada. Aplicativos não serão encerrados.")
 
         # The device-side C launcher owns the stability gate. Stop the live

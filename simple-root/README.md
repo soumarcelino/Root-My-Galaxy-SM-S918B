@@ -18,7 +18,7 @@ At each run, the script:
 2. Compiles `../stability-launcher/stability-launcher.c` for Android ARM64/API
    35 and copies the binary to `assets/stability-launcher`.
 3. Builds only the shared-library target in `../targets/afzh3/open-payload-engine/`
-   and copies `build/payload.so` to `assets/payload.so`.
+   and copies `build/payload.so` plus `build/mm-exec-factory` to `assets/`.
 4. Builds the AFZH3 helper in `targets/afzh3/helper/` for Android ARM64/API 35 and
    copies it to `assets/ksu-helper`.
 
@@ -33,6 +33,7 @@ The resulting asset set is:
 | Asset | Source |
 | --- | --- |
 | `assets/payload.so` | `targets/afzh3/open-payload-engine/build/payload.so` |
+| `assets/mm-exec-factory` | `targets/afzh3/open-payload-engine/build/mm-exec-factory` |
 | `assets/stability-launcher` | `stability-launcher/build/stability-launcher` |
 | `assets/ksu-helper` | `targets/afzh3/helper/su_daemon.c` via `targets/afzh3/helper/build/cve-2026-43499-root` |
 | `assets/ksud-selected` | `targets/afzh3/kernelsu-next/out/kernelsu-next-afzh3-v3.4.0/ksud-next-v3.4.0` |
@@ -52,7 +53,7 @@ With exactly one authorized ADB device, the serial may be omitted:
 ./simple-root.sh
 ```
 
-After building and validating assets, the script copies the five listed files
+After building and validating assets, the script copies the six listed files
 to `/data/local/tmp/simple-root/`. It also stages the runtime files
 at their individual paths in `/data/local/tmp`, validates ELF magic, starts the
 stability launcher, then waits for temporary root, KernelSU late-load, and
