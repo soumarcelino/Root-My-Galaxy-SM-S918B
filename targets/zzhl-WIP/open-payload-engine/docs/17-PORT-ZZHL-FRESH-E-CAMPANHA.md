@@ -217,7 +217,7 @@ Os hashes calculados depois do `adb push` foram idênticos aos arquivos host.
 
 ## Perfil Android
 
-O app 0.6.1 contém o perfil exato `dm3q-S918BXXUAZZHL-ksunext`. Ele seleciona
+O app 0.6.0-beta-1 contém o perfil exato `dm3q-S918BXXUAZZHL-ksunext`. Ele seleciona
 modelo, build display, fingerprint, kernel release e `uname -v` antes de
 expor o fluxo. Os assets são sincronizados e auditados com:
 
@@ -227,12 +227,10 @@ tools/zzhl-app-bundle.py verify
 ```
 
 O APK `app-debug.apk`, SHA-256
-`903a09b192aae533d6ded525e06c38a7e131aec4ad560fc6e8e6c57ab41bafa1`,
-passou nos testes e foi instalado no `RXCX602E20X`. A cópia de `base.apk`
-extraída depois da instalação tem o mesmo hash. O verificador confirmou dentro
-do APK os cinco binários da tabela acima, seus tamanhos e o perfil. O package
-manager registrou `versionCode=36`, `versionName=0.6.1`, e a activity principal
-iniciou corretamente.
+`928cac228876032808076e18dfe9564c008f900dce8027afdf6a99c550a1e22a`,
+passou nos testes. O verificador confirmou dentro do APK os cinco binários da
+tabela acima, seus tamanhos e o perfil. O `apkanalyzer` confirmou
+`versionCode=36` e `versionName=0.6.0-beta-1`.
 
 ## Verificações locais
 

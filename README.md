@@ -1,6 +1,6 @@
 # Root My Galaxy · SM-S918B
 
-**Version 0.6.1** · Samsung Galaxy S23 Ultra (`SM-S918B`, `dm3q`)
+**Version 0.6.0-beta-1** · Samsung Galaxy S23 Ultra (`SM-S918B`, `dm3q`)
 
 Root My Galaxy provides an Android app and a command-line runner for loading
 KernelSU on specific SM-S918B firmware builds. The app selects a bundled payload
