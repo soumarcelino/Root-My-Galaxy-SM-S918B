@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,22 +12,23 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/system_properties.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
 /* Relaxed profile (default). */
-#define REL_MIN_MEM_KB (512L * 1024L)
-#define REL_MAX_TEMP_MC 55000L
-#define REL_MAX_RUNNABLE 16
-#define REL_MAX_CPU_PSI 55.0
-#define REL_MAX_MEM_PSI 10.0
-#define REL_MAX_IO_PSI 15.0
-#define REL_MIN_UPTIME_SEC 0.0
-#define REL_STABLE_SAMPLES 2
-#define REL_MAX_MM_OBJECTS 3072L
-#define REL_MAX_MM_DELTA 128L
+#define REL_MIN_MEM_KB (768L * 1024L)
+#define REL_MAX_TEMP_MC 52000L
+#define REL_MAX_RUNNABLE 12
+#define REL_MAX_CPU_PSI 40.0
+#define REL_MAX_MEM_PSI 6.0
+#define REL_MAX_IO_PSI 10.0
+#define REL_MIN_UPTIME_SEC 60.0
+#define REL_STABLE_SAMPLES 5
+#define REL_MAX_MM_OBJECTS 2560L
+#define REL_MAX_MM_DELTA 96L
 #ifndef REL_MAX_MM_SLABS
-#define REL_MAX_MM_SLABS 96L
+#define REL_MAX_MM_SLABS 80L
 #endif
 
 #ifndef REL_GATE_NAME
@@ -40,7 +42,7 @@
 #define CONS_MAX_CPU_PSI 12.0
 #define CONS_MAX_MEM_PSI 1.0
 #define CONS_MAX_IO_PSI 2.0
-#define CONS_MIN_UPTIME_SEC 120.0
+#define CONS_MIN_UPTIME_SEC 60.0
 #define CONS_STABLE_SAMPLES 5
 #define CONS_MAX_MM_OBJECTS 1024L
 #define CONS_MAX_MM_SLABS 32L
@@ -48,12 +50,17 @@
 
 #define SAMPLE_INTERVAL_SEC 2
 /* Adaptive fast path: when a sample clears the thresholds with wide margin
- * (device idle and cool), confirm with fewer, shorter-spaced samples instead
- * of the full baseline cadence. Borderline-but-passing samples still require
- * the full stable_samples at SAMPLE_INTERVAL_SEC; hot/loaded samples still
- * reset and wait. Safety envelope unchanged, only faster when clearly idle. */
-#define FAST_STABLE_SAMPLES 2
+ * (device idle and cool), confirm with shorter-spaced samples instead of the
+ * full baseline cadence. Borderline-but-passing samples still require the
+ * full stable_samples at SAMPLE_INTERVAL_SEC; hot/loaded samples still reset
+ * and wait. Both profiles require five samples on either path. */
+#define FAST_STABLE_SAMPLES 5
 #define FAST_INTERVAL_SEC 1
+#define PAYLOAD_DELAY_SEC 2
+#define APP_QUIET_ACK_TIMEOUT_MS 8000
+#define APP_QUIET_ACK 'Q'
+#define APP_QUIET_ENV "RMG_APP_QUIET_HANDSHAKE"
+#define APP_KILL_ALL_TIMEOUT_MS 5000
 #define TEMP_HEADROOM_MC 5000L
 #define MAX_WAIT_SEC 60
 #define PIPE_COUNT 480
@@ -243,6 +250,103 @@ static int read_uptime(double *uptime) {
   return ok;
 }
 
+static int wait_for_minimum_uptime(double minimum) {
+  while (!stopped) {
+    double uptime;
+    if (!read_uptime(&uptime)) {
+      fprintf(stderr, "[launcher] uptime-gate=fail leitura de /proc/uptime\n");
+      return 0;
+    }
+    if (uptime >= minimum) {
+      fprintf(stderr,
+              "[launcher] uptime-gate=pass uptime=%.0fs minimum=%.0fs\n",
+              uptime, minimum);
+      return 1;
+    }
+
+    double remaining = minimum - uptime;
+    time_t seconds = (time_t)remaining;
+    if ((double)seconds < remaining) seconds++;
+    fprintf(stderr, "[launcher] aguardando uptime minimo: %.0fs restantes\n",
+            remaining);
+    struct timespec delay = {.tv_sec = seconds, .tv_nsec = 0};
+    while (!stopped) {
+      struct timespec interrupted;
+      int error =
+          clock_nanosleep(CLOCK_MONOTONIC, 0, &delay, &interrupted);
+      if (error == 0) break;
+      if (error != EINTR) {
+        fprintf(stderr,
+                "[launcher] espera do uptime falhou errno=%d(%s)\n", error,
+                strerror(error));
+        return 0;
+      }
+      delay = interrupted;
+    }
+  }
+  return 0;
+}
+
+static int wait_before_payload(void) {
+  struct timespec delay = {.tv_sec = PAYLOAD_DELAY_SEC, .tv_nsec = 0};
+  while (!stopped) {
+    struct timespec interrupted;
+    int error = clock_nanosleep(CLOCK_MONOTONIC, 0, &delay, &interrupted);
+    if (error == 0) return 1;
+    if (error != EINTR) {
+      fprintf(stderr,
+              "[launcher] espera antes do payload falhou errno=%d(%s)\n",
+              error, strerror(error));
+      return 0;
+    }
+    delay = interrupted;
+  }
+  return 0;
+}
+
+static int app_quiet_handshake_enabled(void) {
+  const char *value = getenv(APP_QUIET_ENV);
+  return value && strcmp(value, "1") == 0;
+}
+
+static int wait_for_app_quiet_ack(void) {
+  fprintf(stderr, "[launcher] app-quiesce-ready post_quiet=5s\n");
+  struct pollfd descriptor = {
+      .fd = STDIN_FILENO,
+      .events = POLLIN,
+      .revents = 0,
+  };
+  int ready;
+  do {
+    ready = poll(&descriptor, 1, APP_QUIET_ACK_TIMEOUT_MS);
+  } while (ready < 0 && errno == EINTR && !stopped);
+  if (stopped) return 0;
+  if (ready == 0) {
+    fprintf(stderr, "[launcher] app-quiesce=fail timeout aguardando ACK\n");
+    return 0;
+  }
+  if (ready < 0) {
+    fprintf(stderr, "[launcher] app-quiesce=fail poll errno=%d(%s)\n", errno,
+            strerror(errno));
+    return 0;
+  }
+  if (!(descriptor.revents & POLLIN)) {
+    fprintf(stderr, "[launcher] app-quiesce=fail stdin revents=0x%x\n",
+            descriptor.revents);
+    return 0;
+  }
+  unsigned char ack = 0;
+  ssize_t count;
+  do {
+    count = read(STDIN_FILENO, &ack, 1);
+  } while (count < 0 && errno == EINTR && !stopped);
+  if (count != 1 || ack != APP_QUIET_ACK) {
+    fprintf(stderr, "[launcher] app-quiesce=fail ACK inválido\n");
+    return 0;
+  }
+  return 1;
+}
+
 static int read_boot_complete(void) {
   char value[PROP_VALUE_MAX] = {0};
   return __system_property_get("sys.boot_completed", value) > 0 &&
@@ -409,6 +513,45 @@ static int validate_elf(const char *path) {
          magic[2] == 'L' && magic[3] == 'F';
 }
 
+static int stop_background_apps(void) {
+  pid_t child = fork();
+  if (child < 0) {
+    fprintf(stderr, "[launcher] app-kill-all=fail fork errno=%d(%s)\n",
+            errno, strerror(errno));
+    return 0;
+  }
+  if (child == 0) {
+    char *const command[] = {"/system/bin/am", "kill-all", NULL};
+    execv(command[0], command);
+    _exit(127);
+  }
+
+  int status = 0;
+  for (int elapsed = 0; elapsed < APP_KILL_ALL_TIMEOUT_MS; elapsed += 20) {
+    pid_t waited = waitpid(child, &status, WNOHANG);
+    if (waited == child) {
+      int ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+      fprintf(stderr, "[launcher] app-kill-all=%s status=%d\n",
+              ok ? "pass" : "fail", status);
+      return ok;
+    }
+    if (waited < 0 && errno != EINTR) {
+      fprintf(stderr,
+              "[launcher] app-kill-all=fail waitpid errno=%d(%s)\n",
+              errno, strerror(errno));
+      return 0;
+    }
+    usleep(20000);
+  }
+
+  kill(child, SIGKILL);
+  while (waitpid(child, &status, 0) < 0 && errno == EINTR) {
+  }
+  fprintf(stderr, "[launcher] app-kill-all=fail timeout=%dms\n",
+          APP_KILL_ALL_TIMEOUT_MS);
+  return 0;
+}
+
 static void usage(const char *program) {
   fprintf(stderr,
           "Uso: %s --payload CAMINHO --helper CAMINHO [--check-only] "
@@ -464,6 +607,8 @@ int main(int argc, char **argv) {
   setvbuf(stdout, NULL, _IONBF, 0);
   setvbuf(stderr, NULL, _IONBF, 0);
 
+  if (!check_only) stop_background_apps();
+
   fprintf(stderr,
           "[launcher] gate %s: %d amostras/%ds (fast %d/%ds) temp<=%ldC "
           "mem>=%ldMB tarefas<=%d PSI<=%.0f/%.0f/%.0f uptime>=%.0fs mm<=%ld/%ld "
@@ -474,6 +619,9 @@ int main(int argc, char **argv) {
           gate.max_runnable, gate.max_cpu_psi, gate.max_mem_psi,
           gate.max_io_psi, gate.min_uptime_sec, gate.max_mm_objects,
           gate.max_mm_slabs, gate.max_mm_delta, MAX_WAIT_SEC);
+  if (!wait_for_minimum_uptime(gate.min_uptime_sec)) {
+    return stopped ? 130 : 1;
+  }
   struct timespec started;
   if (clock_gettime(CLOCK_MONOTONIC, &started) != 0) {
     perror("[launcher] clock_gettime");
@@ -490,20 +638,6 @@ int main(int argc, char **argv) {
   struct metrics previous_full;
   memset(&previous_full, 0, sizeof(previous_full));
   struct timespec next_sample = started;
-  /* Uptime is a hard gate. Until it can pass, polling the other procfs,
-   * pressure and thermal interfaces only adds load during boot. Wake just
-   * before the threshold so the normal full gate can run immediately. */
-  double initial_uptime;
-  if (read_uptime(&initial_uptime) && initial_uptime < gate.min_uptime_sec) {
-    int wait_seconds = (int)(gate.min_uptime_sec - initial_uptime + 0.999999);
-    if (wait_seconds > 0) {
-      fprintf(stderr, "[launcher] aguardando uptime minimo: %.0fs restantes\n",
-              gate.min_uptime_sec - initial_uptime);
-      if (!wait_interval_absolute(&next_sample, wait_seconds, &timeout_at)) {
-        return stopped ? 130 : 1;
-      }
-    }
-  }
   int wait_failed = 0;
   while (!stopped) {
     struct timespec now;
@@ -625,6 +759,14 @@ int main(int argc, char **argv) {
     fprintf(stderr,
             "[launcher] estabilidade confirmada: métricas+slab+pipe\n");
   }
+  double launch_uptime = -1.0;
+  if (!read_uptime(&launch_uptime) || launch_uptime < gate.min_uptime_sec) {
+    fprintf(stderr,
+            "[launcher] uptime-gate=fail antes do payload uptime=%.0fs "
+            "minimum=%.0fs\n",
+            launch_uptime, gate.min_uptime_sec);
+    return 1;
+  }
   if (check_only) return 0;
 
   /* The payload supervisor retries only while its shared kernel-state marker
@@ -643,7 +785,15 @@ int main(int argc, char **argv) {
     perror("[launcher] setenv");
     return 1;
   }
-  fprintf(stderr, "[launcher] execve: carregando payload agora\n");
+  fprintf(stderr,
+          "[launcher] payload-delay=%ds; checagens concluídas\n",
+          PAYLOAD_DELAY_SEC);
+  if (!wait_before_payload()) return stopped ? 130 : 1;
+
+  const int app_quiet = app_quiet_handshake_enabled();
+  if (app_quiet && !wait_for_app_quiet_ack()) return stopped ? 130 : 1;
+  if (!app_quiet)
+    fprintf(stderr, "[launcher] execve: carregando payload agora\n");
   char *const child_argv[] = {"/system/bin/true", NULL};
   execve(child_argv[0], child_argv, environ);
   perror("[launcher] execve");

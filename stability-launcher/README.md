@@ -12,7 +12,8 @@ Root acquisition is performed by the payload and its helper.
 1. Reject a nonempty inherited `LD_PRELOAD` environment variable.
 2. Parse arguments and, unless running with `--check-only`, check the first
    four ELF magic bytes of both payload and helper.
-3. In the conservative profile, sleep until its minimum uptime when needed.
+3. Ask Android's ActivityManager to kill every background process it considers
+   safe to stop, then enforce the profile's minimum uptime before starting the stability timeout.
    Then read cheap metrics: boot state, uptime, memory, load/runnable tasks,
    and PSI. Read thermal zones and `mm_struct` slab data only when every cheap
    threshold passes.
@@ -21,17 +22,21 @@ Root acquisition is performed by the payload and its helper.
    including on failure.
 5. Discard the precheck and require consecutive full samples after the pipe
    probe. A device clearing all thresholds with wide margin uses an adaptive
-   fast path: two samples one second apart.
-6. After final confirmation, configure the payload environment and
-   replace the launcher process with `/system/bin/true`. Android's dynamic
-   linker loads the payload from `LD_PRELOAD`; the payload must support
-   execution through a constructor.
+   fast path: five samples one second apart.
+6. After final confirmation, configure the payload environment and wait two
+   cancelable seconds. When the app handshake is enabled, emit the readiness
+   marker and wait for the app to acknowledge that its UI and log polling are
+   quiescent. After the acknowledgement, call `execve` without another log or
+   metric read. Android's dynamic linker loads the payload from `LD_PRELOAD`;
+   the payload must support execution through a constructor. `--check-only`
+   returns before this delay because it never invokes the payload.
 
 An unstable or unreadable sample resets the post-probe consecutive-sample
 counter. The pipe probe runs exactly once, between the stable precheck and
 final confirmation. If it fails, the launcher keeps waiting until the timeout.
-At 60 seconds, an unconfirmed gate logs an explicit warning and loads the
-payload anyway, including when the pipe probe failed or was not reached.
+At 60 seconds after the uptime requirement passes, an unconfirmed stability
+gate logs an explicit warning and loads the payload anyway, including when the
+pipe probe failed or was not reached.
 The payload may make up to three attempts. Its supervisor retries only after a
 confirmed pre-mutation failure; any kernel-mutation marker ends the run and
 requires a clean reboot.
@@ -44,21 +49,22 @@ the `conservador` profile. Values below are source defaults.
 | Condition | Default | Conservative |
 | --- | ---: | ---: |
 | Android `sys.boot_completed` | `1` | `1` |
-| Minimum uptime | 0 s | 120 s |
-| Minimum available memory | 512 MiB | 2 GiB |
-| Maximum temperature | 55 °C | 42 °C |
-| Maximum runnable tasks | 16 | 4 |
-| Maximum CPU PSI `some avg10` | 55 | 12 |
-| Maximum memory PSI `some avg10` | 10 | 1 |
-| Maximum I/O PSI `some avg10` | 15 | 2 |
-| Maximum active and total `mm_struct` objects, each | 3072 | 1024 |
-| Maximum estimated `mm_struct` slabs | 96 | 32 |
-| Consecutive samples per phase | 2 | 5 |
+| Minimum uptime | 60 s | 60 s |
+| Minimum available memory | 768 MiB | 2 GiB |
+| Maximum temperature | 52 °C | 42 °C |
+| Maximum runnable tasks | 12 | 4 |
+| Maximum CPU PSI `some avg10` | 40 | 12 |
+| Maximum memory PSI `some avg10` | 6 | 1 |
+| Maximum I/O PSI `some avg10` | 10 | 2 |
+| Maximum active and total `mm_struct` objects, each | 2560 | 1024 |
+| Maximum estimated `mm_struct` slabs | 80 | 32 |
+| Consecutive samples per phase | 5 | 5 |
 
-The conservative profile sleeps through its initial uptime gate, capped by the
-launcher timeout. Both profiles use a two-second baseline interval and a
-60-second gate wait budget. The
-adaptive fast path uses two samples one second apart only while
+The minimum-uptime gate is mandatory and outside the stability timeout. A read
+failure aborts execution, and the launcher validates uptime again immediately
+before loading the payload. Both profiles use a two-second baseline interval
+and a 60-second stability-gate wait budget. The
+adaptive fast path uses five samples one second apart only while
 memory, temperature, runnable tasks and PSI retain wide margins. Sampling is
 scheduled against absolute `CLOCK_MONOTONIC` deadlines, so metric collection
 time does not accumulate as drift. Blocking reads or system calls are not
@@ -137,6 +143,15 @@ Immediately before `execve`, the launcher sets:
 
 Timeout variables are interpreted by the payload; the launcher does not
 supervise execution after `execve`.
+
+The Android app sets `RMG_APP_QUIET_HANDSHAKE=1`. In this mode the launcher
+prints `[launcher] app-quiesce-ready` after the two-second delay and waits for
+a single `Q` byte on standard input. A missing or invalid acknowledgement
+aborts execution, so the payload cannot start while app polling is still
+active. The app replaces the animated installer with a static screen before
+acknowledging, stops reading process output, and resumes at least five seconds
+after the acknowledgement. Direct command-line use remains compatible because
+the handshake is disabled when the variable is absent.
 
 ## Logs and exit codes
 
