@@ -162,6 +162,7 @@ de evidências é local e ignorado pelo Git por conter coletas grandes.
 | `20260927T111614Z-execute` | `f5a1f43f-c866-4a30-9a39-60080785439b` | igual | landing não utilizável; `ENOTTY`, holder preservado e nenhuma repetição |
 | `20260927T111906Z-execute` | `c9356db4-04e7-4175-b1e1-a903fb7b5d02` | igual | sucesso completo do root temporário na primeira tentativa |
 | `20260927T114521Z-execute` | `b2e9b62d-4082-43e5-b03d-582c78b726bd` | igual | root e KernelSU Next v3.4.0 final verificados na primeira tentativa |
+| `20260927T125205Z-app` | `6a6be15d-44c6-4b14-b722-dd94997649b7` | igual | encoder ConfigFS corrigido; root e KernelSU verificados na primeira tentativa; pstore vazio |
 
 Após a terceira execução, as coletas foram feitas com o holder preservado. O
 reboot seguinte foi iniciado manualmente pelo operador e produziu o boot limpo
@@ -203,11 +204,19 @@ uid=0(root) gid=0(root) groups=0(root) context=u:r:ksu:s0
 Enforcing
 ```
 
+Após a correção do encoder ConfigFS, a execução Android
+`9075374d-a736-4da8-b0cd-17ab4bc3b739` confirmou novamente o fluxo completo no
+boot `6a6be15d-44c6-4b14-b722-dd94997649b7`. O KASLR foi
+`0xffffffc008190000`, o reclaim produziu `payload_base=0xffffff8913ab8000`, o
+pipe ficou pronto em 12 ms, o UMH retornou `complete=1 socket=1 restore=1` e o
+root foi adquirido em 35,169 s. O controle KernelSU retornou os mesmos valores,
+SELinux terminou enforcing e `/sys/fs/pstore` permaneceu vazio.
+
 ## Artefatos da execução aprovada
 
 | Artefato | SHA-256 |
 |---|---|
-| `build/payload.so` | `82fdc998033dcde863bccd41c9baadc4058a76ed6916214ba478ba35456ad4d9` |
+| `build/payload.so` | `9c412f5af77611f61165f82f02e0576e410b8a1fb556748ff6ddf3cb44364997` |
 | helper temporário | `0e29b9706dac9c4ecef30772776e5647fc92014833417ed5f50cee01d990464a` |
 | `build/mm-exec-factory` | `3422d63142db11de2968febed36bd47d1fb22f232e40875df8c8fb0cf5b90851` |
 | `build/stability-launcher-zzhl` | `77e65c61795534dbbefd62198e20a06cdd4fce56d56570f726cb1dffd80ee0c6` |
@@ -227,7 +236,7 @@ tools/zzhl-app-bundle.py verify
 ```
 
 O APK `app-debug.apk`, SHA-256
-`928cac228876032808076e18dfe9564c008f900dce8027afdf6a99c550a1e22a`,
+`2f326cf1ac99e092f849de5934a41d1882c0a1fd3f274b373ba1e1f0103a5ce6`,
 passou nos testes. O verificador confirmou dentro do APK os cinco binários da
 tabela acima, seus tamanhos e o perfil. O `apkanalyzer` confirmou
 `versionCode=36` e `versionName=0.6.0-beta-1`.

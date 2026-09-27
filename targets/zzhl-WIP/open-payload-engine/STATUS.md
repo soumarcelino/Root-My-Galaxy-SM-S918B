@@ -52,15 +52,20 @@ O runner seleciona esse loader por padrão e considera a execução aprovada
 somente se o controle KernelSU for verificado. `--no-kernelsu` mantém o modo de
 root temporário para diagnóstico.
 
-## Correção pendente após as execuções do app
+## Correção do encoder ConfigFS
 
-As três execuções mais recentes revelaram uma falha no encoder NUL da primitiva
+Três execuções do app revelaram uma falha no encoder NUL da primitiva
 ConfigFS. O teste host assumia cópia byte a byte, enquanto o `strscpy()` do
 ZZHL grava blocos de oito bytes e pode alterar bytes posteriores ao NUL. Isso
 explica tanto `private PTY staging failed` quanto o panic posterior em
 `configfs_read_iter`.
 
-O diagnóstico, a aritmética dos ponteiros e a correção necessária estão em
-`docs/18-INCIDENTE-STRSCPY-CONFIGFS.md`. Até a implementação e uma nova campanha
-multiboot, o APK `0.6.0-beta-1` não deve ser tratado como estável para qualquer
-slide KASLR ou endereço de reclaim.
+A correção simula o `strscpy()` real, rejeita planos divergentes antes da
+syscall, faz preflight antes do futex e abandona ConfigFS AAR depois da
+instalação do pipe. SELinux e dados da imagem passam pelo alias linear.
+
+O APK corrigido foi validado no boot limpo
+`6a6be15d-44c6-4b14-b722-dd94997649b7`, execução
+`9075374d-a736-4da8-b0cd-17ab4bc3b739`: primeira tentativa, root em 35,169 s,
+KernelSU Next confirmado, SELinux enforcing e pstore vazio. A análise completa
+está em `docs/18-INCIDENTE-STRSCPY-CONFIGFS.md`.

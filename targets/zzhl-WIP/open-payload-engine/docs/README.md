@@ -6,16 +6,15 @@ Este diretório acompanha o port novo do open payload engine para
 
 ## Estado comprovado
 
-O root temporário foi validado no aparelho em 2026-09-27. A execução aprovada
-confirmou KASLR, reclaim, AAR/AAW, pipe R/W, restauração de
-`ashmem_misc.fops`, UMH, socket de root e `uid=0`, mantendo o mesmo boot ID.
-KernelSU não foi solicitado porque não existe loader exato ZZHL nos recursos
-disponíveis.
+O root e o KernelSU Next foram validados no aparelho em 2026-09-27. A execução
+aprovada confirmou KASLR, reclaim, AAR/AAW, pipe R/W, restauração de
+`ashmem_misc.fops`, UMH, controle KernelSU, `uid=0` e SELinux enforcing,
+mantendo o mesmo boot ID e o pstore vazio.
 
 Leia primeiro:
 
 1. [Incidente do encoder ConfigFS no ZZHL](18-INCIDENTE-STRSCPY-CONFIGFS.md):
-   análise das três execuções mais recentes e correção necessária.
+   causa raiz, correção implementada e validação no aparelho.
 2. [Port novo e campanha no aparelho](17-PORT-ZZHL-FRESH-E-CAMPANHA.md):
    proveniência, target, hashes, arquitetura, falhas, correção final, cinco
    execuções, prova de root e limites.

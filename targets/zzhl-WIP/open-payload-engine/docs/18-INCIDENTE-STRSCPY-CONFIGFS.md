@@ -1,9 +1,7 @@
 # Incidente do encoder ConfigFS no ZZHL
 
-Este documento registra a análise das três execuções mais recentes do perfil
-Android `dm3q-S918BXXUAZZHL-ksunext`. O root e o KernelSU Next continuam
-comprovados, mas o payload atual possui uma falha dependente dos bytes dos
-endereços calculados para a primitiva ConfigFS.
+Este documento registra a análise das três execuções que revelaram a falha e a
+correção validada no perfil Android `dm3q-S918BXXUAZZHL-ksunext`.
 
 ## Resultado das execuções
 
@@ -55,35 +53,47 @@ configfs_read_iter`; `x2=0x23` confirma a leitura de 35 bytes da magic string.
 
 O reclaim, a descoberta KASLR e o pipe não causaram esse panic.
 
-## Correção necessária
+## Correção implementada
 
-1. Substituir o simulador do teste por um modelo fiel ao `strscpy()` em blocos
-   de oito bytes. Antes de cada `pread64()` ou `pwrite64()`, simular a sequência
-   de prefixos e comparar os campos de `configfs_buffer` consumidos pelo kernel.
-   Um plano divergente deve retornar `EILSEQ` sem executar a syscall.
-2. Fazer preflight do readback do scratch assim que `payload_base` for conhecido
-   e antes do trigger futex. Se o plano for irrepresentável, encerrar a tentativa
-   ainda sem mutação e deixar o supervisor obter outro reclaim.
-3. Depois de instalar o pipe R/W, parar de usar ConfigFS AAR para dados do
-   kernel. Guardar o descritor original do `pipe_buffer`, validar as escritas do
-   pipe pelo próprio pipe e converter endereços da imagem para o alias linear.
-   A leitura e a escrita de `selinux_state.enforcing` devem usar esse alias.
-4. Manter a validação em runtime para endereços dinâmicos ainda necessários ao
-   bootstrap. Depois de uma mutação, uma rejeição deve seguir a recuperação e o
-   reboot controlado, nunca tentar a mesma operação com ponteiro divergente.
-5. Separar o log de `private PTY staging failed` em `selinux-read`,
-   `selinux-value`, `umh-data-write` e `tty-ops-write` para preservar o ponto
-   exato de qualquer falha futura.
+1. O simulador agora reproduz a escrita do `strscpy()` em blocos de oito bytes.
+   Cada controle AAR/AAW é simulado antes dos `ioctl`, `pread64` ou `pwrite64`;
+   divergência em campos consumidos por `configfs_buffer` retorna `EILSEQ`.
+2. O payload valida o readback do scratch, a leitura de FOPS e os dois valores
+   usados no alias linear depois do reclaim e antes do trigger futex. Uma
+   geometria rejeitada termina com estado pré-mutação, permitindo nova tentativa.
+3. O backend de pipe guarda o descritor original validado do `pipe_buffer`.
+   Depois da instalação, não existe mais ConfigFS AAR: provas, `init_task`,
+   `tty_operations` e SELinux são lidos pelo pipe. Endereços da imagem usam o
+   alias calculado com `memstart_addr` e `kimage_voffset` do próprio boot.
+4. A escrita e o readback de `selinux_state.enforcing`, a limpeza do owner da
+   FOPS falsa e sua restauração usam pipe R/W. O ConfigFS AAW remanescente fica
+   restrito a forjar e restaurar o descritor do pipe já validado.
+5. O staging da PTY registra separadamente `selinux-alias`, `selinux-read`,
+   `selinux-value`, `umh-data-write` e `tty-ops-write`.
 
-O item 1 elimina leitura silenciosa do endereço errado e panic. Os itens 2 e 3
-são necessários para o exploit continuar funcional em boots cujos endereços
-contêm a geometria de NUL observada.
+## Validação
 
-## Validação exigida
+`tests/test_aar_read_plan.c` reproduz as geometrias exatas. Ele aceita a
+execução bem-sucedida, rejeita com `EILSEQ` a leitura SELinux que perdeu `0x73`
+e a leitura do scratch que originou o panic, e confirma os planos AAW usados.
 
-- teste unitário com as geometrias exatas das três execuções;
-- rejeição antes de syscall para os planos das execuções 2 e 3;
-- build completo do payload e do app;
-- execução em boot limpo confirmando AAR/AAW, pipe, restauração de FOPS, UMH,
-  KernelSU, SELinux enforcing e ausência de novo pstore;
-- campanha em múltiplos boots para cobrir slides e `payload_base` diferentes.
+O APK corrigido foi executado em boot limpo
+`6a6be15d-44c6-4b14-b722-dd94997649b7`. A execução do app
+`9075374d-a736-4da8-b0cd-17ab4bc3b739` concluiu na primeira tentativa:
+
+```text
+KASLR base:       ffffffc008190000
+payload_base:     ffffff8913ab8000
+pipe victim:      ffffff8a21099000
+pipe setup:       12 ms
+UMH:              complete=1 socket=1 restore=1
+root:             35.169 s
+KernelSU control: version=33295 flags=0x5 uapi=4 features=0x2714
+SELinux final:    Enforcing
+pstore final:     vazio
+```
+
+O payload incorporado tem SHA-256
+`9c412f5af77611f61165f82f02e0576e410b8a1fb556748ff6ddf3cb44364997`.
+O APK tem SHA-256
+`2f326cf1ac99e092f849de5934a41d1882c0a1fd3f274b373ba1e1f0103a5ce6`.

