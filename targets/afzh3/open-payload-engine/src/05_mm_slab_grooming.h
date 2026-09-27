@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+void groom_set_cpu(int cpu);
 uint64_t groom_and_install_fops_object(uint64_t kernel_base,
                                         uint64_t ashmem_misc_fops_addr,
                                         uint64_t init_task_addr);

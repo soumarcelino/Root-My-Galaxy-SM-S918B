@@ -17,8 +17,13 @@ int main(void) {
     return 1;
   }
   sigusr1_build_payload(0xdeadbeef000ULL, 0xcafebabe000ULL);
-
-  int ok = sigusr1_fire_and_wait();
-  printf("handler_ok=%d\n", ok);
-  return ok ? 0 : 1;
+  int primary_ok = sigusr1_fire_and_wait();
+  sigusr1_build_pointer_write_payload(0xdeadbeef000ULL, 0xcafebabe000ULL,
+                                      0xfeedface000ULL);
+  int recovery_ok = sigusr1_fire_and_wait();
+  sigusr1_build_null_write_payload(0xdeadbeef000ULL, 0xcafebabe000ULL);
+  int quarantine_ok = sigusr1_fire_and_wait();
+  printf("primary_ok=%d recovery_ok=%d quarantine_ok=%d\n", primary_ok,
+         recovery_ok, quarantine_ok);
+  return primary_ok && recovery_ok && quarantine_ok ? 0 : 1;
 }

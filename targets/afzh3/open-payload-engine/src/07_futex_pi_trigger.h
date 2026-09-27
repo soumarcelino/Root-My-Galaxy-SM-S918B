@@ -107,4 +107,8 @@ int run_futex_trigger_v14_full_staged(
     int32_t *mutation_state, int32_t pending_state, int32_t mutated_state,
     futex_post_trigger_cb post_trigger_cb, void *ctx);
 
+int futex_v14_rewrite_pointer(uint64_t page_base, uint64_t target_addr,
+                              uint64_t replacement_addr);
+int futex_v14_quarantine_pointer(uint64_t page_base, uint64_t target_addr);
+
 #endif
