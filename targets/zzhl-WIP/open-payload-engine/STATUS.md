@@ -34,6 +34,20 @@ uid=0(root) gid=0(root) groups=0(root) context=u:r:kernel:s0
 ```
 
 A evidência está em `evidence/zzhl-fresh/20260927T111906Z-execute/`. O root
-temporário ZZHL está validado. KernelSU permanece `not-requested`: os recursos
-disponíveis não incluem um loader exato para este firmware, portanto nenhum
-artefato AFZH3 foi usado como substituto.
+temporário ZZHL está validado.
+
+O KernelSU Next v3.4.0 foi portado para KDP/RKP/DEFEX e validado novamente em
+boot limpo `b2e9b62d-4082-43e5-b03d-582c78b726bd`. A execução
+`evidence/zzhl-fresh/20260927T114521Z-execute/` concluiu o exploit na primeira
+tentativa, carregou o módulo ZZHL embutido no `ksud`, preservou o boot e
+confirmou:
+
+```text
+KernelSU control verified version=33295 flags=0x5 uapi=4 features=0x2714
+uid=0(root) gid=0(root) groups=0(root) context=u:r:ksu:s0
+Enforcing
+```
+
+O runner seleciona esse loader por padrão e considera a execução aprovada
+somente se o controle KernelSU for verificado. `--no-kernelsu` mantém o modo de
+root temporário para diagnóstico.

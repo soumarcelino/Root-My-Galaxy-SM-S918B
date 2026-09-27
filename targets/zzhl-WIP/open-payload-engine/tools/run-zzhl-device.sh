@@ -13,7 +13,8 @@ Opções:
   --serial SERIAL     Serial ADB.
   --slide-only        Valida identidade, launcher e descoberta KASLR.
   --execute           Executa o port completo uma única vez.
-  --ksud ARQUIVO      Loader KernelSU exato para ZZHL; opcional.
+  --ksud ARQUIVO      Substitui o loader KernelSU Next padrão do ZZHL.
+  --no-kernelsu       Executa somente o root temporário.
   --output DIR        Diretório de evidência.
   -h, --help          Mostra esta ajuda.
 EOF
@@ -22,6 +23,7 @@ EOF
 serial=
 mode=
 ksud=
+kernelsu=1
 output=
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -29,6 +31,7 @@ while [[ $# -gt 0 ]]; do
     --slide-only) mode=slide; shift ;;
     --execute) mode=execute; shift ;;
     --ksud) ksud="${2:?arquivo ausente}"; shift 2 ;;
+    --no-kernelsu) kernelsu=0; shift ;;
     --output) output="${2:?diretório ausente}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) die "opção desconhecida: $1" ;;
@@ -36,6 +39,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "$mode" == slide || "$mode" == execute ]] || die "escolha --slide-only ou --execute"
+if [[ "$kernelsu" == 0 ]]; then
+  ksud=
+fi
 need_cmd "${ADB:-adb}"
 need_cmd sha256sum
 serial="$(resolve_serial "$serial")"
@@ -45,6 +51,10 @@ payload="$repo_dir/build/payload.so"
 helper="$repo_dir/../helper/build/cve-2026-43499-root"
 factory="$repo_dir/build/mm-exec-factory"
 launcher="$repo_dir/build/stability-launcher-zzhl"
+default_ksud="$repo_dir/../kernelsu-next/out/kernelsu-next-zzhl-v3.4.0/ksud-next-v3.4.0"
+if [[ "$mode" == execute && "$kernelsu" == 1 && -z "$ksud" ]]; then
+  ksud="$default_ksud"
+fi
 for artifact in "$payload" "$helper" "$factory" "$launcher"; do
   [[ -x "$artifact" || "$artifact" == "$payload" && -r "$artifact" ]] ||
     die "artefato ausente; compile antes: $artifact"
@@ -163,8 +173,9 @@ fi
 printf '%s\n' "$ksu_state" > "$output/kernelsu-state.txt"
 
 if [[ "$boot_after" == "$boot_before" && "$root_proof" == *'uid=0(root)'* ]] &&
-   grep -q 'stage=temporary-root-ready' "$output/device.log"; then
-  ok "root temporário ZZHL aprovado; KernelSU=$ksu_state; evidência=$output"
+   grep -q 'stage=temporary-root-ready' "$output/device.log" &&
+   [[ -z "$ksud" || "$ksu_state" == verified ]]; then
+  ok "root ZZHL aprovado; KernelSU=$ksu_state; evidência=$output"
   exit 0
 fi
 die "execução incompleta; não repita neste boot; evidência=$output"

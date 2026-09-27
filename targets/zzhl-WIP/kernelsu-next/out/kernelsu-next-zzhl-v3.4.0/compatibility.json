@@ -1,0 +1,21 @@
+{
+  "btf_mismatches": [],
+  "btf_structures": [
+    "cred",
+    "task_struct",
+    "work_struct",
+    "completion",
+    "ucounts",
+    "user_struct",
+    "user_namespace"
+  ],
+  "common_symbol_crcs": 2544,
+  "crc_mismatches": {},
+  "missing_symbols": [],
+  "module": "targets/zzhl-WIP/kernelsu-next/out/kernelsu-next-zzhl-v3.4.0/android13-5.15_kernelsu.ko",
+  "passed": true,
+  "reference_modules": 367,
+  "sha256": "21f41628172ed1e539d25159a5ade23cb9561d7c654c1e793b6d887f25387309",
+  "undefined_symbols": 203,
+  "vermagic": "5.15.197-android13-8-34343818-abS918BXXUAZZHL SMP preempt mod_unload modversions aarch64"
+}

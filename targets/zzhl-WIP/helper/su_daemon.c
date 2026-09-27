@@ -505,7 +505,7 @@ static int run_kernelsu_late_load(struct su_request *request, int conn) {
        * from the running kernel.  Hard-coding android15-6.6 made the shared
        * loader path unusable for exact 6.1 payloads such as E2S. */
       execl(LOGCAT_PATH, "logcat", "late-load", "--kmi",
-            "android13-5.15", "--package-name", "com.resukisu.resukisu",
+            "android13-5.15", "--package-name", "com.rifsxd.ksunext",
             (char *)NULL);
       dprintf(STDERR_FILENO, "late-load: exec: %s\n", strerror(errno));
       _exit(12);

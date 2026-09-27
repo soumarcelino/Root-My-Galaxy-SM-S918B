@@ -1,6 +1,6 @@
 # Root My Galaxy · SM-S918B
 
-**Version 0.6.0** · Samsung Galaxy S23 Ultra (`SM-S918B`, `dm3q`)
+**Version 0.6.1** · Samsung Galaxy S23 Ultra (`SM-S918B`, `dm3q`)
 
 Root My Galaxy provides an Android app and a command-line runner for loading
 KernelSU on specific SM-S918B firmware builds. The app selects a bundled payload
@@ -39,10 +39,10 @@ screen, and the KernelSU Next v3.4.0 manager.
 | `S918BXXSAFZF5` | KernelSU | [`targets/afzf5/`](targets/afzf5/) |
 | `S918BXXSAFZG1` | KernelSU Next v3.3.0 | [`targets/afzg1/`](targets/afzg1/) |
 | `S918BXXSAFZH3` | KernelSU Next v3.4.0 | [`targets/afzh3/`](targets/afzh3/) |
+| `S918BXXUAZZHL` | KernelSU Next v3.4.0 | [`targets/zzhl-WIP/`](targets/zzhl-WIP/) |
 
 The app's [target manifest](app/src/main/assets/targets-v3.json) contains the
-exact build, fingerprint, kernel release, and artifacts for each profile. The
-`zzhl-WIP` directory is work in progress; it is not part of the AFZH3 flow.
+exact build, fingerprint, kernel release, and artifacts for each profile.
 
 ## AFZH3 target
 
@@ -108,7 +108,7 @@ stability-launcher/     AFZH3 launcher and stability gates
 targets/afzf5/          AFZF5 payload, helper, and KernelSU files
 targets/afzg1/          AFZG1 payload, helper, and KernelSU Next files
 targets/afzh3/          AFZH3 open payload, helper, and KernelSU Next files
-targets/zzhl-WIP/       Work in progress for another firmware build
+targets/zzhl-WIP/       ZZHL open payload, helper, and KernelSU Next files
 tools/                  Porting and development utilities
 docs/                   Project guides and screenshots
 ```

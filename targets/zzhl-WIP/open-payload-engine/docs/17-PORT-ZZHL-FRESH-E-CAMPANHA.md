@@ -142,11 +142,12 @@ O runner:
 1. faz preflight e exige estado limpo;
 2. valida a identidade exata do target;
 3. recusa holder, launcher ou socket anterior;
-4. envia os quatro artefatos e confere SHA-256 no aparelho;
+4. envia payload, helper, factory, launcher e loader, conferindo SHA-256;
 5. executa pelo launcher de estabilidade;
 6. registra boot anterior e posterior, retorno ADB, log, trace e prova de root;
 7. nunca repete automaticamente depois de uma mutação;
-8. aceita KernelSU somente por `--ksud ARQUIVO` explícito.
+8. carrega o KernelSU Next ZZHL validado e exige a confirmação do controle;
+9. aceita `--no-kernelsu` para diagnóstico somente com root temporário.
 
 ## Campanha de validação
 
@@ -160,6 +161,7 @@ de evidências é local e ignorado pelo Git por conter coletas grandes.
 | `20260927T111224Z-execute` | `51f88578-a55a-4bbb-9762-5bec755f9ab6` | `f5a1f43f-c866-4a30-9a39-60080785439b` | AAR/AAW passou; watchdog em `fops-restore-futex-start` |
 | `20260927T111614Z-execute` | `f5a1f43f-c866-4a30-9a39-60080785439b` | igual | landing não utilizável; `ENOTTY`, holder preservado e nenhuma repetição |
 | `20260927T111906Z-execute` | `c9356db4-04e7-4175-b1e1-a903fb7b5d02` | igual | sucesso completo do root temporário na primeira tentativa |
+| `20260927T114521Z-execute` | `b2e9b62d-4082-43e5-b03d-582c78b726bd` | igual | root e KernelSU Next v3.4.0 final verificados na primeira tentativa |
 
 Após a terceira execução, as coletas foram feitas com o holder preservado. O
 reboot seguinte foi iniciado manualmente pelo operador e produziu o boot limpo
@@ -191,16 +193,46 @@ uid=0(root) gid=0(root) groups=0(root) context=u:r:kernel:s0
 Permissive
 ```
 
+Esse estado permissivo é intermediário e pertence ao bootstrap temporário. Na
+execução final `20260927T114521Z-execute`, o helper carregou o módulo adaptado,
+restaurou enforcing e confirmou o controle antes de o runner aprovar:
+
+```text
+KernelSU control verified version=33295 flags=0x5 uapi=4 features=0x2714
+uid=0(root) gid=0(root) groups=0(root) context=u:r:ksu:s0
+Enforcing
+```
+
 ## Artefatos da execução aprovada
 
 | Artefato | SHA-256 |
 |---|---|
 | `build/payload.so` | `82fdc998033dcde863bccd41c9baadc4058a76ed6916214ba478ba35456ad4d9` |
-| helper temporário | `ed436f77ad30296e773c906cfaddf1539d3f18bf45cb74b8c353c9ebd435bb1b` |
+| helper temporário | `0e29b9706dac9c4ecef30772776e5647fc92014833417ed5f50cee01d990464a` |
 | `build/mm-exec-factory` | `3422d63142db11de2968febed36bd47d1fb22f232e40875df8c8fb0cf5b90851` |
 | `build/stability-launcher-zzhl` | `77e65c61795534dbbefd62198e20a06cdd4fce56d56570f726cb1dffd80ee0c6` |
+| `ksud-next-v3.4.0` | `971f173977dec6d944f13be16343860218dce82d8431f45300de626fabbfab28` |
 
 Os hashes calculados depois do `adb push` foram idênticos aos arquivos host.
+
+## Perfil Android
+
+O app 0.6.1 contém o perfil exato `dm3q-S918BXXUAZZHL-ksunext`. Ele seleciona
+modelo, build display, fingerprint, kernel release e `uname -v` antes de
+expor o fluxo. Os assets são sincronizados e auditados com:
+
+```sh
+tools/zzhl-app-bundle.py sync
+tools/zzhl-app-bundle.py verify
+```
+
+O APK `app-debug.apk`, SHA-256
+`903a09b192aae533d6ded525e06c38a7e131aec4ad560fc6e8e6c57ab41bafa1`,
+passou nos testes e foi instalado no `RXCX602E20X`. A cópia de `base.apk`
+extraída depois da instalação tem o mesmo hash. O verificador confirmou dentro
+do APK os cinco binários da tabela acima, seus tamanhos e o perfil. O package
+manager registrou `versionCode=36`, `versionName=0.6.1`, e a activity principal
+iniciou corretamente.
 
 ## Verificações locais
 
@@ -220,11 +252,10 @@ compact logging. `shellcheck` não estava instalado e foi marcado como `SKIP`.
 
 ## Limites atuais
 
-- A prova é de root temporário até o próximo reboot.
-- Há uma execução completa aprovada do port ZZHL; ainda não existe campanha de
-  repetibilidade em vários boots.
-- KernelSU está `not-requested`. Não há loader exato para ZZHL nos recursos
-  disponíveis e nenhum loader AFZH3 foi usado como substituto.
+- O módulo KernelSU é carregado em runtime e precisa ser carregado novamente
+  após um reboot.
+- Há duas execuções completas aprovadas em boots distintos, incluindo uma com
+  o módulo KernelSU Next final; ainda não existe uma campanha longa de soak.
 - As evidências brutas ficam fora do Git. Os caminhos, hashes, checkpoints e
   resultados necessários para auditar a campanha estão preservados aqui.
 - Toda nova execução completa requer boot limpo. Depois de qualquer marcador

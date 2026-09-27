@@ -34,9 +34,10 @@ tools/run-zzhl-device.sh --serial RXCX602E20X --execute
 O runner confere a identidade exata do aparelho, exige boot limpo, passa pelo
 launcher de estabilidade e salva toda a execução em `evidence/zzhl-fresh/`.
 
-O root temporário foi validado no aparelho em 2026-09-27, com `uid=0`,
-restauração confirmada de `ashmem_misc.fops` e boot preservado. Consulte
+O root temporário e o KernelSU Next v3.4.0 foram validados no aparelho em
+2026-09-27, com `uid=0`, restauração confirmada de `ashmem_misc.fops`, SELinux
+`Enforcing` após a carga e boot preservado. Consulte
 [`STATUS.md`](STATUS.md) para o estado resumido e
 [`docs/17-PORT-ZZHL-FRESH-E-CAMPANHA.md`](docs/17-PORT-ZZHL-FRESH-E-CAMPANHA.md)
-para a proveniência, implementação, campanha completa, hashes e limites.
-KernelSU ainda requer um loader exato para ZZHL.
+para a proveniência, implementação, campanha completa, hashes e limites. O
+loader exato e sua verificação estão em [`../kernelsu-next/`](../kernelsu-next/).

@@ -29,11 +29,12 @@ Execução completa, somente em boot limpo:
 tools/run-zzhl-device.sh --serial RXCX602E20X --execute
 ```
 
-KernelSU é opcional e só é tentado com um loader exato informado
-explicitamente:
+O KernelSU Next ZZHL é carregado automaticamente. Um loader alternativo pode
+ser informado explicitamente:
 
 ```sh
 tools/run-zzhl-device.sh --serial RXCX602E20X --execute --ksud ARQUIVO
 ```
 
-Não há fallback automático para artefatos de outro firmware.
+Use `--no-kernelsu` apenas para validar o root temporário. Não há fallback
+automático para artefatos de outro firmware.
