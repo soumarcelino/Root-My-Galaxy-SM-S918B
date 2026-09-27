@@ -446,11 +446,11 @@ int root_umh_install_fd_tracked(int fd, uint64_t kernel_base,
     }
   }
   fprintf(stderr,
-          "[root_umh] native PTY work tty=%016llx work=%016llx "
-          "complete=%u socket=%d restore=%d\n",
+          "[root_umh] result complete=%u socket=%d restore=%d "
+          "tty=%016llx work=%016llx\n",
+          complete_done, socket_ok, tail_restored,
           (unsigned long long)tty_object.tty,
-          (unsigned long long)(tty_object.tty + TTY_SAK_WORK_OFF),
-          complete_done, socket_ok, tail_restored);
+          (unsigned long long)(tty_object.tty + TTY_SAK_WORK_OFF));
   result = socket_ok && tail_restored;
 
 out:
