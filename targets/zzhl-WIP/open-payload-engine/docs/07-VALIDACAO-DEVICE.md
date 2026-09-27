@@ -1,5 +1,8 @@
 # Validação no aparelho
 
+> **Escopo histórico:** a campanha abaixo pertence ao engine AFZH3 usado como
+> base. A campanha ZZHL está em `17-PORT-ZZHL-FRESH-E-CAMPANHA.md`.
+
 ## Política
 
 Toda validação final exige duas execuções em reboots limpos independentes. O
@@ -13,8 +16,8 @@ sem `su` e executa o clone pelo contexto shell normal.
 ## Artefato validado
 
 ```text
-Projeto:  /home/matias/Projects/Root-My-Galaxy-SM-S918B/targets/zzhl-WIP/open-payload-engine
-Saída:    build/oss_clone_payload.so
+Projeto:  /home/matias/Projects/Root-My-Galaxy-SM-S918B/targets/afzh3/open-payload-engine
+Saída:    build/payload.so
 Tamanho:  101120 bytes
 SHA-256:  a22ff696a2c096a45c62fbc0bd9c4bf8918d9783886d7227637a5ca980f8a53c
 Runner:   /home/matias/Projects/ksu-payload-functional/simple-root

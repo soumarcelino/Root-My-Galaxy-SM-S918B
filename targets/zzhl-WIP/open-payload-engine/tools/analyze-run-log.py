@@ -13,7 +13,10 @@ PATTERNS = {
     "kaslr": re.compile(r"\[kaslr\] source=(\S+) base=([0-9a-f]+).*p0_offset=([0-9a-f]+)"),
     "groom": re.compile(r"\[groom\] mm leaked=([0-9a-f]+) aligned_base=([0-9a-f]+)"),
     "pipe": re.compile(r"\[pipe_rw\] ready attempt=(\d+)/(\d+).*pipe=(\d+)"),
-    "umh": re.compile(r"\[root_umh\] result wake=(\d+) complete=(\d+) socket=(\d+)"),
+    "umh": re.compile(
+        r"\[root_umh\] result (?:wake=(\d+) )?complete=(\d+) socket=(\d+)"
+    ),
+    "root_cred": re.compile(r"\[root_cred\] result pid=(\d+) helper=(\d+) uid=(\d+) socket=(\d+)"),
     "attempt": re.compile(r"exploit completed attempt=(\d+)/(\d+)"),
     "ksu": re.compile(r"KernelSU control verified version=(\d+) flags=(\S+) uapi=(\d+) features=(\S+)"),
     "uid": re.compile(r"uid=(\d+)\(root\).*context=(\S+)"),
@@ -26,10 +29,28 @@ PIPE_FAILURE = re.compile(
     r"\[pipe_rw\] (setup miss|terminal failure) attempt=(\d+)/(\d+) "
     r"reason=(\S+) stage=(\S+) errno=(-?\d+) elapsed_ms=(\d+)"
 )
+PIPE_TELEMETRY = re.compile(
+    r"\[pipe_rw\] telemetry stage_ms (?P<stages>.*?) total=(?P<total>\d+)ms"
+)
+KS_ORACLE = re.compile(
+    r"\[groom\] ksnitch oracle=(primary|verify) baseline=(\d+) "
+    r"threshold=(\d+) min=(\d+) confirmed=(\d+) pass=(\d+)"
+)
+RECLAIM_BATCH = re.compile(
+    r"\[groom\] mm drain triggers=(\d+) sk_buff reclaim sends=(\d+)/(\d+)"
+)
+RECLAIM_QUIET = re.compile(
+    r"\[groom\] reclaim quiet pass samples=(\d+) streak=(\d+) "
+    r"mm=(\d+)/(\d+) skb=(\d+)/(\d+) kmalloc4k=(\d+)/(\d+)"
+)
+FOPS_LOCAL = re.compile(
+    r"\[groom\] local fake fops owner=0 layout=pass hash=([0-9a-f]+)"
+)
 
 
 def analyze(path: pathlib.Path) -> dict[str, object]:
     text = ANSI.sub("", path.read_text(errors="replace"))
+    text = re.sub(r"\n {2}", " ", text)
     lines = text.splitlines()
     result: dict[str, object] = {
         "path": str(path),
@@ -42,7 +63,18 @@ def analyze(path: pathlib.Path) -> dict[str, object]:
             result[name] = match.groups()
 
     pipe_attempts = []
+    pipe_telemetry = []
     for line in lines:
+        telemetry = PIPE_TELEMETRY.search(line)
+        if telemetry:
+            stages = {
+                name: int(value)
+                for name, value in re.findall(r"([a-z-]+)=(\d+)ms", telemetry["stages"])
+            }
+            pipe_telemetry.append({
+                "stage_ms": stages,
+                "total_ms": int(telemetry["total"]),
+            })
         match = PIPE_READY.search(line)
         if match:
             attempt, limit, pipe, prepare, establish, total = map(int, match.groups())
@@ -62,8 +94,45 @@ def analyze(path: pathlib.Path) -> dict[str, object]:
                 "elapsed_ms": int(elapsed),
             })
     result["pipe_attempts"] = pipe_attempts
+    result["pipe_telemetry"] = pipe_telemetry
+    result["groom_safety"] = {
+        "oracles": [
+            {
+                "name": name,
+                "baseline": int(baseline),
+                "threshold": int(threshold),
+                "minimum": int(minimum),
+                "confirmed": int(confirmed),
+                "pass": passed == "1",
+            }
+            for name, baseline, threshold, minimum, confirmed, passed
+            in KS_ORACLE.findall(text)
+        ],
+        "reclaim_batch": (
+            {
+                "drain_triggers": int(match.group(1)),
+                "sent": int(match.group(2)),
+                "limit": int(match.group(3)),
+            }
+            if (match := RECLAIM_BATCH.search(text)) else None
+        ),
+        "quiet_window": (
+            {
+                "samples": int(match.group(1)),
+                "streak": int(match.group(2)),
+                "mm": [int(match.group(3)), int(match.group(4))],
+                "skb": [int(match.group(5)), int(match.group(6))],
+                "kmalloc4k": [int(match.group(7)), int(match.group(8))],
+            }
+            if (match := RECLAIM_QUIET.search(text)) else None
+        ),
+        "local_fops_hash": (
+            match.group(1) if (match := FOPS_LOCAL.search(text)) else None
+        ),
+    }
     result["mutation"] = {
         "kernel_pending": "stage=kernel-mutation-pending" in text,
+        "credential_pending": "stage=credential-mutation-pending" in text,
         "workqueue_pending": ("stage=workqueue-mutation-pending" in text or
                               "[root_umh] queued" in text),
     }
@@ -89,7 +158,9 @@ def analyze(path: pathlib.Path) -> dict[str, object]:
     result["classification"] = classification
     result["checks"] = {
         "aar_aaw_verified": "[aar_aaw] verify ok" in text,
-        "global_fops_restored": bool(re.search(r"restore ashmem_misc\.fops .*ok=1", text)),
+        "global_fops_restored": bool(re.search(
+            r"restore ashmem_misc\.fops .*(?:confirmed|ok)=1", text
+        )),
         "pipe_ready": "pipe" in result,
         "temporary_root_ready": temporary,
         "kernelsu_verified": ksu,

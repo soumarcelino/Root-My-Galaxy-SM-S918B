@@ -1,0 +1,100 @@
+[  174.330131] [0:   kworker/0:27: 1105] PM: usb_notify: active_count(1), active_time(159744), total_time(159744)
+[  174.330254] [0:   kworker/0:27: 1105] thermal_sys: thermal: cdev
+[  174.364396] [1:           true:23330] Unable to handle kernel paging request at virtual address ffffffc03695bb80
+[  174.364439] [1:           true:23330] PC Code: 36000114 f9400b60 b40005c0 (f9401c08) f9000fe0 eb1b011f 54000560 140003fa 2a1f03e8 089fff08 f8bfc2a8 f1000508 b90002a8 54001140 f8bfc2a8 b4001108 9100e268 d503201f d503201f 52800029 
+[  174.364455] [1:           true:23330] LR Code: 6f6c6220 25206b63 73202c64 68745f71 64616572 0a642520 6f202000 64253d70 6174202c 775f6b73 736b726f 0a64253d (66657200) 6e756f63 3a745f74 74617320 74617275 203b6465 6b61656c 20676e69 
+[  174.364462] [1:           true:23330] Mem abort info:
+[  174.364467] [1:           true:23330]   ESR = 0x96000007
+[  174.364474] [1:           true:23330]   EC = 0x25: DABT (current EL), IL = 32 bits
+[  174.364481] [1:           true:23330]   SET = 0, FnV = 0
+[  174.364488] [1:           true:23330]   EA = 0, S1PTW = 0
+[  174.364493] [1:           true:23330]   FSC = 0x07: level 3 translation fault
+[  174.364501] [1:           true:23330] Data abort info:
+[  174.364505] [1:           true:23330]   ISV = 0, ISS = 0x00000007
+[  174.364512] [1:           true:23330]   CM = 0, WnR = 0
+[  174.364519] [1:           true:23330] swapper pgtable: 4k pages, 39-bit VAs, pgdp=00000000aa81e000
+[  174.364527] [1:           true:23330] [ffffffc03695bb80] pgd=10000000b2c00003, p4d=10000000b2c00003, pud=10000000b2c00003, pmd=18000009b69a7003, pte=0000000000000000
+[  174.364553] [1:           true:23330] Internal error: Oops: 0000000096000007 [#1] PREEMPT SMP
+[  174.364611] [1:           true:23330] sec_arm64_ap_context:sec_arm64_ap_context_on_die() context saved (CPU:1)
+[  174.364617] [1:           true:23330] Modules linked in: camera(OE) kiwi_v2(OE) msm_drm(OE) coresight_tmc(E) max77705_fuelgauge(E) qdss_bridge(E) max77705_charger(E) rmnet_aps(OE) isg6320(E) snd_soc_cs40l26(E) pca9481_charger(E) mhi_dev_uci(E) rmnet_wlan(OE) usb_notifier_qcom(E) phy_msm_snps_eusb2(E) msm_kgsl(OE) usb_f_gsi(E) sec_direct_charger(E) rmnet_perf_tether(OE) ipa_clientsm(OE) rndisipam(OE) stm_ts_spi(E) cps4038_charger(E) usb_f_qdss(E) ipanetm(OE) machine_dlkm(OE) rmnet_perf(OE) sec_tsp_dumpkey(E) dwc3_msm(E) wez02(E) rmnet_shs(OE) mhi_cntrl_qcom(E) sec_battery(E) rmnet_offload(OE) mhi_dev_satellite(E) swr_dmic_dlkm(OE) qrtr_mhi(E) msm_performance(E) rmnet_core(OE) spcom(E) cnss2(OE) pdic_max77705(E) lpass_cdc_wsa_macro_dlkm(OE) lpass_cdc_wsa2_macro_dlkm(OE) sec_common_fn(E) usb_f_ss_mon_gadget(E) ipam(OE) audio_pkt_dlkm(OE) mhi_dev_netdev(E) snd_soc_cs35l43_i2c(E) mhi_dev_dtr(E) sec_cmd(E) coresight_dummy(E) coresight_tpdm(E) slim_qcom_ngd_ctrl(E) coresight_stm(E)
+[  174.364798] [1:           true:23330]  qcom_spmi_adc5_gen3(E) lpass_cdc_rx_macro_dlkm(OE) wcd938x_dlkm(OE) bt_fm_slim(OE) msm_video(OE) gsim(OE) coresight_hwevent(E) qcrypto_msm_dlkm(OE) btpower(OE) sec_qc_qcom_wdt_core(E) sec_thermistor(E) sec_tclm_v2(E) wcd9xxx_dlkm(OE) coresight_replicator(E) qcedev_mod_dlkm(OE) hdcp_qseecom_dlkm(OE) memlat_scmi(E) msm_eva(OE) adsp_loader_dlkm(OE) audio_prm_dlkm(OE) pinctrl_lpi_dlkm(OE) rmnet_ctl(OE) lpass_cdc_va_macro_dlkm(OE) sync_fence(OE) switch_gpio(E) input_booster_lkm(E) mhi_dev_drv(E) swr_ctrl_dlkm(OE) lpass_cdc_tx_macro_dlkm(OE) lpass_cdc_dlkm(OE) stm_ftrace(E) spf_core_dlkm(OE) coresight_tgu(E) mac80211(E) mbhc_dlkm(OE) abc_hub(E) gpr_dlkm(OE) snd_soc_cs35l45_i2c(E) q6_notifier_dlkm(OE) sec_qc_qcom_reboot_reason(E) stm_p_basic(E) mhi(E) cnss_utils(OE) snd_soc_hdmi_codec(E) wlan_firmware_service(OE) flicker_sensor(E) cpufreq_limit(E) coresight_funnel(E) coresight_remote_etm(E) uwb(E) coresight_tpda(E) qrtr_gunyah(E) stm_console(E) coresight_csr(E)
+[  174.364945] [1:           true:23330]  leds_qti_tri_led(E) coresight_cti(E) usb_typec_manager(E) hall_ic(E) plh_scmi(E) stm_p_ost(E) pci_msm_drv(E) sec_arm64_debug(E) msm_hw_fence(OE) rmnet_sch(OE) stmvl53l8(E) fingerprint(E) msm_mmrm(OE) qcom_q6v5_pas(E) input_cs40l26_i2c(E) tz_log_dlkm(OE) slimbus(E) snvm(E) sec_vibrator_inputff_module(E) dropdump(E) sb_core(E) qce50_dlkm(OE) lvstest(E) vibrator_vib_info(E) snd_soc_cirrus_amp(E) cnss_prealloc(OE) wcd938x_slave_dlkm(OE) fsa4480_i2c(E) radio_i2c_rtc6226_qca(OE) industrialio_buffer_cb(E) audpkt_ion_dlkm(OE) extcon_ktm5030(E) qcom_pil_info(E) qcom_lpm(E) cnss_nl(OE) leds_qti_flash(E) flicker_test(E) ep_pcie_drv(E) mhi_dev_net(E) qcom_pon(E) qcom_spmi_temp_alarm(E) qcom_esoc(E) wsa884x_dlkm(OE) sec_tsp_log(E) sdpm_clk(E) qti_cpufreq_cdev(E) bcl_soc(E) snd_event_dlkm(OE) ipa_fmwk(E) sec_qc_hw_param(E) qcom_cpufreq_hw_debug(E) coresight(E) qcom_edac(E) usb_f_ss_acm(E) spss_utils(E) sec_pd(E) i3c_master_msm_geni(E) repeater_qti_pmic_eusb2(E)
+[  174.365092] [1:           true:23330]  qti_qmi_sensor_v2(E) qti_userspace_cdev(E) qti_qmi_cdev(E) memlat_vendor(E) sec_input_notifier(E) wcd_usbss_i2c(E) mfd_max77705(E) extcon_lt8711uxe2(E) fingerprint_sysfs(E) sec_abc_detect_conn(E) common_muic(E) snd_usb_audio_qmi(E) cpufreq_stats_scmi(E) sec_qc_rbcmd(E) sec_secure_touch(E) sec_qc_soc_id(E) hdm(E) qbt2000_spidev(E) smsc75xx(E) qcom_q6v5(E) sec_qc_rst_exinfo(E) cpufreq_stats_vendor(E) kperfmon(E) qti_fixed_regulator(E) if_cb_manager(E) smcinvoke_dlkm(OE) snd_soc_tas5805m(E) cnss_plat_ipc_qmi_svc(OE) snd_soc_wm_adsp(E) sec_qc_rdx_bootdev(E) leds_s2mpb02(E) qrtr_smd(E) sec_reboot_cmd(E) gh_irq_lend(E) qti_glink_adc(E) sec_arm64_fsimd_debug(E) wsa883x_dlkm(OE) nvmem_qfprom(E) icc_test(E) dev_ril_bridge(E) sec_qc_smem(E) smsc95xx(E) stub_dlkm(OE) hung_task_enh(E) leds_qpnp_vibrator_ldo(E) qti_ocp_notifier(E) nb7vpq904m(E) redriver(E) policy_engine(E) nfc_sec(E) cpu_voltage_cooling(E) qcom_va_minidump(E) usb_f_diag(E) cl_dsp(E) dmesg_dumper(E)
+[  174.365220] [1:           true:23330]  qti_devfreq_cdev(E) tc956x_pcie_eth(E) max31760_fan(E) sec_pon_alarm(E) qcom_spss(E) leds_gpio(E) sdhci_msm_sec(E) phy_msm_ssusb_qmp(E) phy_generic(E) realtek(E) rdbg(E) qfprom_sys(E) reboot_mode(E) lt9611uxc(E) spi_msm_geni(E) cfg80211(E) qcom_iommu_debug(E) ehset(E) msm_geni_serial(E) msm_sharedmem(E) qcom_vadc_common(E) mcp25xxfd(E) at803x(E) sg(E) phy_qcom_emu(E) vbus_notifier(E) smsc(E) plh_vendor(E) stm_core(E) qcom_hv_haptics(E) pmic_pon_log(E) swr_haptics_dlkm(OE) repeater_i2c_eusb2(E) phy_msm_m31_eusb2(E) hdmi_dlkm(OE) sec_audio_sysfs(E) ddr_cdev(E) qti_amoled_ecm(E) qti_battery_charger(E) qcom_sysmon(E) hvc_gunyah(E) snd_soc_add2010(E) pdic_notifier_module(E) msm_lmh_dcvs(E) q6_dlkm(OE) ucsi_glink(E) core_hang_detect(E) usbmon(E) repeater(E) altmode_glink(E) panel_event_notifier(E) hwmon(E) hall_ic_notifier(E) frpc_adsprpc(E) wcd_core_dlkm(OE) adsp_sleepmon(E) switch_class(E) q6_pdr_dlkm(OE) qpnp_amoled_regulator(E) swr_dlkm(OE) msm_ext_display(OE)
+[  174.365359] [1:           true:23330]  qcom_i2c_pmic(E) usb_bam(E) sec_ap_pmic(E) glink_probe(E) synx_driver(E) qti_battery_debug(E) charger_ulog_glink(E) hdmi_input_mux(E) pmic_glink_debug(E) snvm_plat(E) snd_debug_proc(E) msm_show_epoch(E) eud(E) sps_drv(E) qcom_glink_spss(E) memlat(E) usb_notify_layer(E) usb_f_ccid(E) usb_f_conn_gadget(E) smp2p(E) sys_pm_vx(E) f_fs_ipc_log(E) usb_f_cdev(E) qcom_ipc_lite(E) i2c_msm_geni(E) qseecom_proxy(E) msm_memshare(E) qsee_ipc_irq_bridge(E) subsystem_sleep_stats(E) pm8941_pwrkey(E) soc_sleep_stats(E) phy_qcom_ufs_qmp_v4_lahaina(E) videocc_crow(E) qcom_cpuss_sleep_stats(E) rimps_log(E) gh_tlmm_vm_mem_access(E) smp2p_sleepstate(E) gh_mem_notifier(E) glink_pkt(E) phy_qcom_ufs_qmp_v4_khaje(E) boot_stats(E) heap_mem_ext_v01(E) cdsp_loader(E) phy_qcom_ufs_qmp_v4(E) pmic_glink(E) debugcc_crow(E) microdump_collector(E) debugcc_kalama(E) pdr_interface(E) qcom_ramdump(E) qmi_helpers(E) phy_qcom_ufs_qmp_v4_kona(E) pinctrl_spmi_mpp(E) gpucc_kalama(E)
+[  174.365480] [1:           true:23330]  adsp_factory_module(E) bam_dma(E) sysmon_subsystem_stats(E) sensors_core(E) gpucc_crow(E) lcd(E) msm_gpi(E) rproc_qcom_common(E) sec_panel_notifier(E) cdsprm(E) camcc_crow(E) qcom_smd(E) qcom_glink_smem(E) pwm_qti_lpg(E) qcom_glink(E) phy_qcom_ufs_qmp_v4_waipio(E) sec_qc_user_reset(E) ssg(E) blk_sec_wb(E) blk_sec_stats(E) msm_show_resume_irq(E) twofish_generic(E) msm_sysstats(E) twofish_common(E) blk_sec_common(E) zram spmi_pmic_arb_debug(E) zsmalloc qrng_dlkm(OE) sec_qc_param(E) sec_qc_summary(E) sec_qc_debug(E) sec_qc_dbg_partition(E) nvme(E) nvme_core(E) bcl_pmic5(E) c1dcvs_scmi(E) c1dcvs_vendor(E) qcom_rimps(E) ufs_qcom(E) ufshcd_crypto_qti(E) msm_qmp(E) qcom_aoss(E) stub_regulator(E) softdog(E) s2mpb03(E) s2mpb02_regulator(E) mfd_s2mpb02(E) s2dos05_regulator(E) pmic_class(E) i2c_gpio(E) sec_qc_upload_cause(E) sec_upload_cause(E) sec_pmsg(E) sec_param(E) sec_crashkey_long(E) sec_crashkey(E) sec_key_notifier(E) rtc_pm8xxx(E) qrtr(E) qcom_reboot_reason(E)
+[  174.365616] [1:           true:23330]  pinctrl_spmi_gpio(E) spmi_pmic_arb(E) qcom_spmi_pmic(E) regmap_spmi(E) qti_regmap_debugfs(E) pmu_scmi(E) pmu_vendor(E) qcom_pmu_lib(E) qcom_llcc_pmu(E) debug_symbol(E) qcom_dload_mode(E) arm_smmu(E) qcom_iommu_util(E) phy_qcom_ufs_qrbtc_sdm845(E) phy_qcom_ufs_qmp_v4_crow(E) phy_qcom_ufs_qmp_v4_kalama(E) phy_qcom_ufs(E) nvmem_qcom_spmi_sdam(E) qnoc_crow(E) qnoc_kalama(E) qnoc_qos(E) pinctrl_kalama(E) pinctrl_crow(E) pinctrl_msm(E) memory_dump_v2(E) mem_buf(E) qcom_dma_heaps(E) msm_dma_iommu_mapping(E) mem_buf_msgq(E) mem_buf_dev(E) mem_hooks(E) llcc_qcom(E) iommu_logger(E) gunyah(E) mdt_loader(E) secure_buffer(E) gh_rm_drv(E) gh_msgq(E) gh_dbl(E) gh_ctrl(E) gh_arm_drv(E) videocc_kalama(E) tcsrcc_kalama(E) dispcc_kalama(E) dispcc_crow(E) dcc_v2(E) crypto_qti_common(E) crypto_qti_hwkm(E) hwkm(E) tmecom_intf(E) cqhci(E) clk_dummy(E) cpu_hotplug(E) thermal_pause(E) sched_walt(E) qcom_cpufreq_hw(E) sec_pm_log(E) bwmon(E) qcom_dcvs(E) dcvs_fp(E) rpmh_regulator(E)
+[  174.365739] [1:           true:23330]  qcom_tsens(E) thermal_minidump(E) qcom_pdc(E) qcom_ipcc(E) camcc_kalama(E) icc_rpmh(E) icc_debug(E) icc_bcm_voter(E) socinfo(E) gcc_kalama(E) gcc_crow(E) clk_qcom(E) gdsc_regulator(E) proxy_consumer(E) debug_regulator(E) clk_rpmh(E) qcom_rpmh(E) cmd_db(E) qcom_ipc_logging(E) sec_debug(E) qcom_cpu_vendor_hooks(E) gh_virt_wdt(E) qcom_wdt_core(E) qcom_scm(E) minidump(E) smem(E) qcom_hwspinlock(E) abc(E) sec_qc_logger(E) sec_arm64_ap_context(E) sec_debug_region(E) sec_log_buf(E) sec_boot_stat(E) sec_class(E)
+[  174.365812] [1:           true:23330] CPU: 1 PID: 23330 Comm: true Tainted: G S      W  OE     5.15.197-android13-8-34343818-abS918BXXUAZZHL #1
+[  174.365819] [1:           true:23330] Hardware name: Samsung DM3Q PROJECT (board-id,13) (DT)
+[  174.365825] [1:           true:23330] pstate: 024000c5 (nzcv daIF +PAN -UAO +TCO -DIT -SSBS BTYPE=--)
+[  174.365831] [1:           true:23330] pc : rt_mutex_adjust_prio_chain+0x4c0/0x14cc
+[  174.365838] [1:           true:23330] lr : max_tt_usecs+0x714f/0x22387
+[  174.365844] [1:           true:23330] sp : ffffffc0366b3bf0
+[  174.365847] [1:           true:23330] x29: ffffffc0366b3c30 x28: ffffffc032f3bb48 x27: ffffffc00add6b38
+[  174.365857] [1:           true:23330] x26: ffffff8a1750a400 x25: ffffffc00add6b38 x24: ffffff8a17509a84
+[  174.365865] [1:           true:23330] x23: 0000000000000000 x22: 0000000000000000 x21: ffffff8a1750a410
+[  174.365872] [1:           true:23330] x20: 0000000000000001 x19: ffffff8a17509200 x18: ffffffc01efaf000
+[  174.365880] [1:           true:23330] x17: 0000000000000078 x16: 0000000000000001 x15: ffffffc00ab07000
+[  174.365887] [1:           true:23330] x14: 0000000000000000 x13: 0000000000000000 x12: ffffffc00aaed000
+[  174.365895] [1:           true:23330] x11: ffffffc00aaed000 x10: 0000000000000078 x9 : 0000000000000000
+[  174.365903] [1:           true:23330] x8 : 0000000000000000 x7 : 00000000000000e0 x6 : ffffffc009d7f662
+[  174.365910] [1:           true:23330] x5 : ffffff8a17509200 x4 : ffffffc00aaed000 x3 : 00000000c0000000
+[  174.365918] [1:           true:23330] x2 : 0000000000000001 x1 : 0000000000000000 x0 : ffffffc03695bb48
+[  174.365926] [1:           true:23330] Call trace:
+[  174.365931] [1:           true:23330]  rt_mutex_adjust_prio_chain+0x4c0/0x14cc
+[  174.365936] [1:           true:23330]  rt_mutex_adjust_pi+0x170/0x310
+[  174.365941] [1:           true:23330]  __sched_setscheduler+0xc3c/0xeec
+[  174.365952] [1:           true:23330]  __do_sys_sched_setattr+0x240/0x3c0
+[  174.365957] [1:           true:23330]  __arm64_sys_sched_setattr+0x20/0x2c
+[  174.365963] [1:           true:23330]  invoke_syscall+0x58/0x13c
+[  174.365971] [1:           true:23330]  el0_svc_common+0xb4/0xf0
+[  174.365976] [1:           true:23330]  do_el0_svc+0x24/0x90
+[  174.365983] [1:           true:23330]  el0_svc+0x20/0x7c
+[  174.365989] [1:           true:23330]  el0t_64_sync_handler+0x84/0xe4
+[  174.365995] [1:           true:23330]  el0t_64_sync+0x1b8/0x1bc
+[  174.366003] [1:           true:23330] Code: 54007480 36000114 f9400b60 b40005c0 (f9401c08) 
+[  174.366010] [1:           true:23330] ---[ end trace 6b35e3432de62bce ]---
+[  174.366016] [1:           true:23330] Kernel panic - not syncing: Oops: Fatal exception
+[  174.366021] [1:           true:23330] SMP: stopping secondary CPUs
+[  174.366038]I[3:           true:23328] sec_arm64_ap_context:__trace_android_vh_ipi_stop() context saved (CPU:3)
+[  174.366051]I[3:           true:23328] VendorHooks: CPU3: stopping
+[  174.366050]I[2:      swapper/2:    0] sec_arm64_ap_context:__trace_android_vh_ipi_stop() context saved (CPU:2)
+[  174.366056]I[3:           true:23328] CPU: 3 PID: 23328 Comm: true Tainted: G S    D W  OE     5.15.197-android13-8-34343818-abS918BXXUAZZHL #1
+[  174.366056]I[0:            cat:23393] sec_arm64_ap_context:__trace_android_vh_ipi_stop() context saved (CPU:0)
+[  174.366069]I[3:           true:23328] Hardware name: Samsung DM3Q PROJECT (board-id,13) (DT)
+[  174.366074]I[3:           true:23328] pstate: 20001000 (nzCv daif -PAN -UAO -TCO -DIT +SSBS BTYPE=--)
+[  174.366080]I[3:           true:23328] pc : 00000071e7b98280
+[  174.366084]I[3:           true:23328] lr : 00000071e7b98250
+[  174.366087]I[3:           true:23328] sp : 0000007161dfbaf0
+[  174.366090]I[3:           true:23328] x29: 0000007161dfbb80 x28: 00000071ecb52060 x27: 00000071eb7ccf80
+[  174.366100]I[3:           true:23328] x26: 0000007161dfbc10 x25: 000000000000543a x24: 0000007161dfbf80
+[  174.366108]I[3:           true:23328] x23: 0000007161dfbc00 x22: 00000071e631dfe0 x21: 000000000002a8fe
+[  174.366115]I[3:           true:23328] x20: 00000071e7bea000 x19: 00000071e7beb744 x18: 000000715ec84000
+[  174.366119]I[3:           true:23328] x17: 00000071e63354c0 x16: 00000071e7ba47b8 x15: 00000000cd39f2e8
+[  174.366123]I[3:           true:23328] x14: 0000000000000001 x13: 000000007fffffff x12: 0000007161dfaf64
+[  174.366127]I[3:           true:23328] x11: 00000071e628881c x10: 0000000000000000 x9 : 00000071e7beb750
+[  174.366131]I[3:           true:23328] x8 : 000000003b544f90 x7 : 7f7f7f7f7f7f7f7f x6 : 000000000000006d
+[  174.366135]I[3:           true:23328] x5 : 000000000000006d x4 : 000000000000006d x3 : 0000000000000000
+[  174.366139]I[3:           true:23328] x2 : 000000000000000a x1 : 0000000000005b20 x0 : 0000000000000001
+[  174.366143]I[2:      swapper/2:    0] VendorHooks: CPU2: stopping
+[  174.366151]I[2:      swapper/2:    0] CPU: 2 PID: 0 Comm: swapper/2 Tainted: G S    D W  OE     5.15.197-android13-8-34343818-abS918BXXUAZZHL #1
+[  174.366158]I[2:      swapper/2:    0] Hardware name: Samsung DM3Q PROJECT (board-id,13) (DT)
+[  174.366163]I[2:      swapper/2:    0] pstate: 22400005 (nzCv daif +PAN -UAO +TCO -DIT -SSBS BTYPE=--)
+[  174.366170]I[2:      swapper/2:    0] pc : cpuidle_enter_state+0x310/0x784
+[  174.366181]I[2:      swapper/2:    0] lr : cpuidle_enter_state+0x69c/0x784
+[  174.366188]I[2:      swapper/2:    0] sp : ffffffc00b0dbd70
+[  174.366192]I[2:      swapper/2:    0] x29: ffffffc00b0dbd80 x28: ffffff804ca261c0 x27: ffffff8062a91210
+[  174.366203]I[2:      swapper/2:    0] x26: ffffff8062a91200 x25: 0000002899068453 x24: ffffffc00ab7ed40
+[  174.366213]I[2:      swapper/2:    0] x23: 0000002899067bc8 x22: 0000000000000000 x21: 0000000000000000
+[  174.366222]I[2:      swapper/2:    0] x20: ffffff80476cb080 x19: ffffff8a7888de80 x18: ffffffc00b095000
+[  174.366232]I[2:      swapper/2:    0] x17: 00000000000003e7 x16: 0000000000000000 x15: 0000000000000008
+[  174.366242]I[2:      swapper/2:    0] x14: ffffffc02dee3bb0 x13: ffffff8a788917a0 x12: ffffffc02dee3ba9
+[  174.366252]I[2:      swapper/2:    0] x11: 0000000000000000 x10: 0000000000000000 x9 : ffffffc00aab5140
+[  174.366261]I[2:      swapper/2:    0] x8 : 00000000000000e0 x7 : 0000000000000001 x6 : 00000028988b56ad
+[  174.366270]I[2:      swapper/2:    0] x5 : 0000000000000000 x4 : 0000002898d2eab1 x3 : 0000000000000000
+[  174.366279]I[2:      swapper/2:    0] x2 : 0000000000000000 x1 : ffffff8a78881420 x0 : 0000000000000001
+[  174.366288]I[2:      swapper/2:    0] Call trace:
+[  174.366292]I[2:      swapper/2:    0]  cpuidle_enter_state+0x310/0x784
+[  174.366299]I[2:      swapper/2:    0]  do_idle+0x304/0x524
+[  174.366299]I[4:      swapper/4:    0] sec_arm64_ap_context:__trace_android_vh_ipi_stop() context saved (CPU:4)

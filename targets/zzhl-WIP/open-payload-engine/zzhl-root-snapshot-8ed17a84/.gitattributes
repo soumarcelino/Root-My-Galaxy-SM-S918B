@@ -1,0 +1,4 @@
+# Preserve captured device data byte-for-byte and keep reviews compact.
+*.txt -diff
+*.btf binary
+*.gz binary

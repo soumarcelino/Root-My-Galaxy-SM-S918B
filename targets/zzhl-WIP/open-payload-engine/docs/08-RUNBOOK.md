@@ -1,5 +1,8 @@
 # Runbook de build e validação
 
+> **Escopo histórico:** o procedimento abaixo pertence ao engine AFZH3 usado
+> como base. Para ZZHL, use `tools/run-zzhl-device.sh` e o relatório 17.
+
 ## Escopo
 
 Procedimento para o aparelho de laboratório autorizado
@@ -38,16 +41,16 @@ limpa.
 ## 4. Build
 
 ```sh
-cd /home/matias/Projects/Root-My-Galaxy-SM-S918B/targets/zzhl-WIP/open-payload-engine
+cd /home/matias/Projects/Root-My-Galaxy-SM-S918B/targets/afzh3/open-payload-engine
 rtk make -B -j2 all so
-rtk sha256sum build/oss_clone_payload.so
+rtk sha256sum build/payload.so
 ```
 
 Saídas esperadas:
 
 ```text
 build/app_main
-build/oss_clone_payload.so
+build/payload.so
 ```
 
 O build validado usa NDK em

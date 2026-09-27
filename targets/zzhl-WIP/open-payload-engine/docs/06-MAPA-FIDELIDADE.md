@@ -1,5 +1,8 @@
 # Mapa de fidelidade ao binário fechado
 
+> **Escopo histórico:** este documento veio do engine AFZH3 usado como base.
+> Valores e resultados ZZHL estão no relatório `17-PORT-ZZHL-FRESH-E-CAMPANHA.md`.
+
 ## Finalidade
 
 Este mapa liga comportamento observado no payload fechado à implementação
@@ -9,17 +12,17 @@ aberta. Ele ajuda revisão, regressão e investigação de novos firmwares.
 
 | Fechado/origem | Implementação aberta | Fidelidade relevante | Estado |
 |---|---|---|---|
-| `_INIT_2` / `0x10a440` | constructor em `main.c` | execução automática por `LD_PRELOAD` | implementado |
-| `FUN_001044f4` | `do_one_attempt()` | limites, CPU0, ordem da tentativa, holder | implementado |
+| `_INIT_2` / `0x10a440` | constructor em `00_orchestrator.c` | execução automática por `LD_PRELOAD` | implementado |
+| `FUN_001044f4` | `do_one_attempt()` | limites, CPU dinâmica, ordem da tentativa, holder | implementado |
 | `FUN_0010757c` | `kaslr_locate_via_tracefs()` | tracefs preferido e fallback P0 | implementado |
-| `FUN_00106288` | `groom.c` | mm order-3, pre/post, skb `0x8e80` | validado no device |
-| `FUN_00104bf0` | `pin_reclaim_to_cpu0()` | repin após priming | implementado/necessário |
-| fake object fechado | `fops_install.c` | FOPS em `A+0x1180` | validado por readback |
-| waiter/owner/consumer | `futex_trigger.c` v14 | handshake e callback no waiter | validado |
-| `FUN_001076c0` | callback em `main.c` | verify, restore, root stage, owner clear | validado |
-| `FUN_00107dd4` | `pipe_physrw.c` prepare | segundo reclaim e bancos 240+240 | validado |
+| `FUN_00106288` | `05_mm_slab_grooming.c` | mm order-3, fábrica pre/post, `close_range`, skb `0x8e80` | build validado; novo soak pendente |
+| `FUN_00104bf0` | `pin_groom_cpu()` | mesma CPU em create/free/reclaim | implementado/necessário |
+| fake object fechado | `04_fake_kernel_objects.c` | FOPS primária em `A+0x1260`, recovery em `A+0x1660` | build validado; boots pendentes |
+| waiter/owner/consumer | `07_futex_pi_trigger.c` v14 | handshake e callback no waiter | validado |
+| `FUN_001076c0` | callback em `00_orchestrator.c` | verify, restore, root stage, owner clear | validado |
+| `FUN_00107dd4` | `09_pipe_buffer_rw.c` prepare | segundo reclaim e bancos 240+240 | validado |
 | `FUN_00108604` | pipe R/W interno | forja temporária do `pipe_buffer` | validado por provas |
-| `FUN_00108fa4` | `root_umh.c` | fake work, contadores, list publish | validado |
+| estratégia nativa | `10_workqueue_umh_root.c` | PTY privado, `do_SAK`, `schedule_work`, restauração | build validado; novo soak pendente |
 | helper fechado | `ksu-helper`/`--umh` | socket temporário e late-load | validado |
 
 ## Constantes com impacto direto
@@ -30,12 +33,13 @@ aberta. Ele ajuda revisão, regressão e investigação de novos firmwares.
 | `0x400` | `mm_struct` alvo | contagem por slab errada |
 | `0x8e80` | skb send | dados não cobrem layout/reclaim esperado |
 | `0xe80` | diferença `A-D` | fake FOPS deslocada |
-| `0x1180` | tabela fake FOPS | landing não verificável |
+| `0x1260` | tabela fake FOPS primária | landing não verificável |
+| `0x1660` | tabela fake FOPS de recuperação | segundo write sem destino seguro |
 | `31/32` | ondas pre/post | target deixa de ocupar posição esperada |
 | `240/240` | bancos pipe | pressão/cache e identificação divergentes |
 | `32` | slots pipe | objetos/páginas insuficientes |
 | `0x7100` | scratch proof | prova pisa em outro layout se movida sem revisão |
-| `0x6000/0x6200` | work/data UMH | sobreposição/campos inválidos |
+| `0x6200/0x6400` | dados UMH/fake tty ops | sobreposição/campos inválidos |
 
 ## Comportamentos deliberadamente preservados
 

@@ -66,6 +66,12 @@ def main() -> int:
         ok &= run(f"bash-n:{script.name}", ["bash", "-n", str(script)], repo)
     for script in sorted((repo / "tools").glob("*.py")):
         ok &= run(f"py-compile:{script.name}", [sys.executable, "-m", "py_compile", str(script)], repo)
+    ok &= run("critical-reclaim-invariant", [
+        sys.executable, str(repo / "tools/check-critical-reclaim.py")
+    ], repo)
+    ok &= run("zzhl-elf-btf", [
+        sys.executable, str(repo / "tools/verify-zzhl-target.py")
+    ], repo)
     ok &= run("target-profile", [sys.executable, str(repo / "tools/audit-profile.py"),
                                   str(repo / args.profile)], repo)
     if shutil.which("shellcheck"):

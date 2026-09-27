@@ -1,0 +1,95 @@
+{
+  "boot_id": "8ed17a84-b88f-4d2e-86b3-64a1eff7b380",
+  "files": {
+    "dmesg.txt": {
+      "bytes": 265355,
+      "sha256": "7fdea115295e338644e50d661cdd58fbf3ea1f7f4a0faa3084e8eb26d092a902"
+    },
+    "dropbox-last-kmsg-index.txt": {
+      "bytes": 10926,
+      "sha256": "8858385db5c3657416dac44df98825ae4e4511bbf7f2c2e808869d4a33586e60"
+    },
+    "dropbox-last-kmsg.txt": {
+      "bytes": 66585,
+      "sha256": "be3fe4e3859bcf08205a60dc8f4b03b791df3a25d1e4abe97cf59bc9724b71d6"
+    },
+    "getprop.txt": {
+      "bytes": 103129,
+      "sha256": "254f467d543e07689cdcbf89175b888362d46dd3057bf56232a2cfb352b8123a"
+    },
+    "kallsyms.txt": {
+      "bytes": 22210067,
+      "sha256": "1c70ee848a1689ce60760d9c5f6257cf899831653a8fd9fb79668db915f2d1f4"
+    },
+    "last_kmsg.txt": {
+      "bytes": 2097136,
+      "sha256": "2033f1fc7442be04b93239315ea5bd689c728d097ef4b9e57a1883cb71faf0d7"
+    },
+    "logcat-all.txt": {
+      "bytes": 31270046,
+      "sha256": "26e11411781659220f6039a0593ac15a161769881533cd3a72fd153a4a67766e"
+    },
+    "logcat-previous.txt": {
+      "bytes": 55,
+      "sha256": "7d74b775ae5cb08ce62ad5a81d0898ad62bbafd289345ce9c0040fa06e1a4749"
+    },
+    "panic-excerpt.txt": {
+      "bytes": 17283,
+      "sha256": "7f8ab0175a81887f328f4b28fbc826184c5ed23eedca118fab435e671b604c5d"
+    },
+    "preflight.json": {
+      "bytes": 551,
+      "sha256": "4a07e519063290737e0b1cb98670a9217c62d60ffdb26a7463930f3ab7749289"
+    },
+    "proc-version.txt": {
+      "bytes": 299,
+      "sha256": "1e96a45d9674b505b4f704f3358960bcaea2104177f225781d88e1bcbb29e062"
+    },
+    "pstore.txt": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "rmg-trace.txt": {
+      "bytes": 8402,
+      "sha256": "e0fbe79c07b8de14fe3200cd81f9b7fd176931694c763f00fee589cf19b06147"
+    },
+    "samsung-lastkmsg-extract.txt": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "samsung-lastkmsg-pull.txt": {
+      "bytes": 121,
+      "sha256": "9a8a60baa5a8186b9cb5f0be2c60624755074d12a7ee175f075d02a32b98124f"
+    },
+    "samsung-lastkmsg-source.txt": {
+      "bytes": 59,
+      "sha256": "61847b9ca2bb766b09ac6e2a18c55c131fee2eeeefdc646b346c55f9e615fb13"
+    },
+    "samsung-lastkmsg-status.txt": {
+      "bytes": 11,
+      "sha256": "30031a9831674dd684c3817399acebc88a116ce5a7a3fbc0cf34d92521a534e6"
+    },
+    "samsung-lastkmsg.log.gz": {
+      "bytes": 910929,
+      "sha256": "6e062f7a65d051796add8e8e93894d4c09d39283a359d887b6e7d7b6e22de7fb"
+    },
+    "samsung-lastkmsg.txt": {
+      "bytes": 2097706,
+      "sha256": "1655c755c2ecd565aa31c314b54108ba9f93e1f64ddc0710ed7ae84347ed6725"
+    },
+    "slabinfo.txt": {
+      "bytes": 38157,
+      "sha256": "f381f1bfa12fc50aa305c2d0c9180297b97f5174b8a5f66d4c2e0e6d09dbe921"
+    },
+    "trace.txt": {
+      "bytes": 444,
+      "sha256": "487c62028d3e71fcb76cb0002f3f4358318387c34d7c175984e0699a3eac013f"
+    },
+    "uptime.txt": {
+      "bytes": 15,
+      "sha256": "d80f49fb0f5ab734bc0bccda9c0c6e39fe8c23eaca71aaa280e6632ddafd1799"
+    }
+  },
+  "root_available": true,
+  "serial": "RXCX602E20X"
+}

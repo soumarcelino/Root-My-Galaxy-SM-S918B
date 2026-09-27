@@ -1,5 +1,8 @@
 # Escopo e metodologia
 
+> **Escopo histórico:** este documento veio do engine AFZH3 usado como base.
+> Valores e resultados ZZHL estão no relatório `17-PORT-ZZHL-FRESH-E-CAMPANHA.md`.
+
 ## Objetivo
 
 O projeto reconstrói em C o comportamento do payload fechado

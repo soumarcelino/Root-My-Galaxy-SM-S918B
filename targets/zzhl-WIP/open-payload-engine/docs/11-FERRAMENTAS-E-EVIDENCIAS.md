@@ -1,5 +1,8 @@
 # Ferramentas, fontes e evidências que concretizaram o port
 
+> **Escopo histórico:** este documento veio do engine AFZH3 usado como base.
+> Ferramentas e evidências ZZHL estão no relatório 17 e em `../tools/README.md`.
+
 ## Visão geral
 
 O resultado não veio de uma única ferramenta. Foi necessário combinar análise
@@ -177,7 +180,7 @@ Essas ferramentas não provam root isoladamente; aumentam rastreabilidade.
 
 ## kernelsnitch
 
-Código incorporado em `src/kernelsnitch/`.
+Código incorporado em `src/03_mm_address_sidechannel/`.
 
 ### Uso
 

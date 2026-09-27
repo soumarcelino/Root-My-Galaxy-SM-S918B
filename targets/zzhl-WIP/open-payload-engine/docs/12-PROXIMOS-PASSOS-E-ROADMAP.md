@@ -1,5 +1,8 @@
 # Próximos passos: confiabilidade, velocidade, estabilidade e evolução
 
+> **Escopo histórico:** este roadmap pertence ao engine AFZH3 usado como base.
+> O estado e os limites ZZHL estão no relatório 17.
+
 ## Objetivo deste roadmap
 
 O projeto já atingiu o marco principal: root end-to-end do código aberto em dois
@@ -296,7 +299,7 @@ mínimo, manifesto que explique qualquer diferença.
 Cobrir sem device:
 
 - tamanhos e offsets de `pipe_buffer`, completion e `subprocess_info`;
-- cálculo `A`, `D`, `A+0x1180`, `A+0x6000`, `A+0x6200`, `A+0x7100`;
+- cálculo `A`, `D`, `A+0x1260`, `A+0x1660`, `A+0x6000`, `A+0x6200`, `A+0x7100`;
 - conversão direct-map→vmemmap;
 - split de leitura/escrita cruzando páginas;
 - construção fake FOPS e work item;
@@ -559,7 +562,7 @@ Objetivo: encontrar limites, não mudar default baseado em um único miss.
 
 ### 7.1 Separar produção de variantes históricas
 
-`futex_trigger.c/.h` acumulam variantes e documentação extensa. Preservar
+`07_futex_pi_trigger.c/.h` acumulam variantes e documentação extensa. Preservar
 histórico, mas considerar:
 
 - `futex_trigger_prod.c` com v14;

@@ -14,11 +14,6 @@ compile_commands.json
 __pycache__/
 *.pyc
 evidence/
-/zzhl-root-snapshot-*/
 
-# Build intermediates and diagnostics. Keep only distributable payloads.
-/build/*
-!/build/app_main
-!/build/oss_clone_payload.so
-!/build/oss_clone_p0_zzhl.so
-!/build/stability-launcher-zzhl
+# Generated target artifacts.
+/build/

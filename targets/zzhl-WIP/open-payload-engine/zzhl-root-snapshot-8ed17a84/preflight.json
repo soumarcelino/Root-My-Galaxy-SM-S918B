@@ -1,0 +1,16 @@
+{
+  "boot_completed": true,
+  "boot_id": "8ed17a84-b88f-4d2e-86b3-64a1eff7b380",
+  "bootreason": "reboot,_(uid:_2000_pid:_27196_processname:_app_process)",
+  "build": "S918BXXUAZZHL",
+  "device": "dm3q",
+  "kernel": "Linux localhost 5.15.197-android13-8-34343818-abS918BXXUAZZHL #1 SMP PREEMPT Fri Aug 28 02:33:56 UTC 2026 aarch64 Toybox",
+  "model": "SM-S918B",
+  "pipe_user_pages_hard": 0,
+  "pipe_user_pages_soft": 16384,
+  "root_works": true,
+  "serial": "RXCX602E20X",
+  "su_present": true,
+  "threads_max": 78499,
+  "uptime_seconds": "946.46"
+}

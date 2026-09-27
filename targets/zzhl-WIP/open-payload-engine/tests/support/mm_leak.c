@@ -8,7 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "kernelsnitch/kernelsnitch.h"
+#include "03_mm_address_sidechannel/mm_address_leak.h"
 #include "mm_leak.h"
 
 #define OSS_MM_STRUCT_SZ 0x400

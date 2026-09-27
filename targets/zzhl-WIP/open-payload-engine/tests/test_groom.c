@@ -4,10 +4,13 @@
  * ever depending on the real kernel target being correct). Test harness
  * only, not part of the ported payload flow. */
 #include <stdio.h>
+#include <stdlib.h>
 
-#include "groom.h"
+#include "05_mm_slab_grooming.h"
 
 int main(void) {
+  const char *cpu = getenv("GROOM_CPU");
+  if (cpu && *cpu) groom_set_cpu(atoi(cpu));
   uint64_t page_base = groom_and_install_fops_object(
       0xffffffc008000000ULL, 0xdeadbeefULL, 0xcafebabeULL);
   if (!page_base) {

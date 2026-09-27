@@ -1,4 +1,4 @@
-# ZZHL firmware dossier
+# Dossiê do firmware ZZHL
 
 Target único: Samsung SM-S918B (`dm3q`), firmware `S918BXXUAZZHL`.
 
@@ -8,61 +8,80 @@ Target único: Samsung SM-S918B (`dm3q`), firmware `S918BXXUAZZHL`.
 |---|---|
 | Fingerprint | `samsung/dm3qxxx/dm3q:17/CP2A.260605.016/S918BXXUAZZHL:user/release-keys` |
 | Kernel | `5.15.197-android13-8-34343818-abS918BXXUAZZHL` |
-| Dispositivo | `RXCX602E20X` |
 | Base estática | `0xffffffc008000000` |
-| Boot analisado | `6584b354-980b-4460-813a-a9255495a906` |
-| Slide deste boot | `0xe8000` |
+| Dispositivo validado | `RXCX602E20X` |
+| Boot da prova final | `c9356db4-04e7-4175-b1e1-a903fb7b5d02` |
+| Slide da prova final | `0xf0000` |
 
-## Fontes e artefatos
+## Fontes
 
 | Item | Local |
 |---|---|
-| Código aberto portado | `/home/matias/Projects/Root-My-Galaxy-SM-S918B/targets/zzhl-WIP/open-payload-engine` |
-| Fonte anterior AFZH3 | `/home/matias/Projects/Root-My-Galaxy-SM-S918B/targets/afzh3/open-payload-engine` |
-| Kernel ELF | `/home/matias/Projects/Root-My-Galaxy-SM-S918B/targets/zzhl-WIP/firmware/vmlinux_ZZHL.elf` |
-| BTF | `/home/matias/Projects/Root-My-Galaxy-SM-S918B/targets/zzhl-WIP/firmware/vmlinux_ZZHL.btf` |
-| Firmware extraído | `/home/matias/Projects/build-do-firmware` |
-| APK fechado extraído | `/home/matias/Downloads/DiamondFox-beta-1.02.100-extracted` |
-| APK decompilado | `/home/matias/Downloads/DiamondFox-beta-1.02.100-decompiled` |
+| Port novo | `targets/zzhl-WIP/open-payload-engine` |
+| Engine-base | `targets/afzh3/open-payload-engine` |
+| Firmware principal | `targets/zzhl-WIP/firmware` |
+| Cópia auxiliar conferida | `/home/matias/Downloads/ZZHL` |
+| Kernel ELF | `firmware/vmlinux_ZZHL.elf` |
+| BTF | `firmware/vmlinux_ZZHL.btf` |
+| Kallsyms | `firmware/kallsyms_ZZHL.kallsyms` |
 
-## Evidência coletada
+Os arquivos de firmware comuns às duas origens têm SHA-256 idêntico. A tabela
+completa de hashes está em
+[17-PORT-ZZHL-FRESH-E-CAMPANHA.md](17-PORT-ZZHL-FRESH-E-CAMPANHA.md).
 
-| Evidência | Conteúdo |
-|---|---|
-| `evidence/zzhl-validation/runtime-kallsyms-unmasked-6584b354.txt` | Símbolos runtime completos do boot analisado |
-| `evidence/zzhl-validation/btf-layouts-6584b354/` | 50 layouts ABI: VFS, pipe, task, cred, futex, SLAB, workqueue, SELinux, configfs, binder |
-| `evidence/zzhl-validation/future-forensics-6584b354/` | dmesg, pstore, logcat, trace, slabinfo, kallsyms, DropBox, Samsung last_kmsg e manifest hashado |
-| `evidence/zzhl-validation/future-reference-6584b354.md` | Tabela de offsets, hashes, ABI e limite conhecido |
-| `/sdcard/Download/rmg-zzhl-forensics-6584b354` | Cópia de recuperação no device |
+## Verificação do target
 
-`evidence/` está no `.gitignore`; preservar antes de limpar o workspace.
+`src/target_zzhl.h` é a única fonte de identidade, símbolos e ABI ZZHL usada
+pelo payload. O comando:
 
-## Estado do port
+```sh
+python3 tools/verify-zzhl-target.py
+```
 
-`src/target_zzhl.h` contém os offsets ZZHL auditados. `tools/check-repo.py`
-valida cada literal e o perfil `tools/profiles/zzhl.json`.
+confere 22 símbolos no ELF, 33 campos e 5 tamanhos no BTF. A auditoria do
+perfil declarativo é executada por:
 
-Os offsets não provam a rota. O clone usa abertura direta de ashmem; o payload
-fechado bem-sucedido usa preflight dentry/fops. A falha anterior
-`try_module_get(x0=0x1270)` é owner inválido na tabela `file_operations`, não
-um endereço de kernel a substituir.
+```sh
+python3 tools/audit-profile.py --profile tools/profiles/zzhl.json
+```
 
-## Procedimento seguro
+O runtime soma somente o slide descoberto no boot atual. Nenhum endereço
+runtime coletado em boot anterior é persistido no target.
 
-1. Primeiro `adb -s RXCX602E20X`; confirmar fingerprint, kernel e boot ID.
-2. Não repetir payload no mesmo boot após marcador de mutação/panic. Coletar
-   logs; reboot; confirmar boot ID novo.
-3. Usar `tools/preflight-device.sh`, `tools/run-zzhl-device.sh` e launcher de
-   estabilidade. Logs live devem ficar em Kitty.
-4. Antes de executar, comparar SHA do payload aberto, bundle runtime e asset
-   APK. Build local não é prova de execução.
-5. Só considerar sucesso com `uid=0(root)`, prova KernelSU e boot íntegro.
+## Estado comprovado
 
-## Revalidação em firmware/boot novo
+Em 2026-09-27 o port novo alcançou root temporário no boot
+`c9356db4-04e7-4175-b1e1-a903fb7b5d02`. O aparelho confirmou:
 
-- Extrair BTF e kallsyms com root; nunca reutilizar slide.
-- Recalcular offsets a partir de `_text`/base estática.
-- Conferir campos BTF usados: `file_operations`, `miscdevice`, `file`,
-  `pipe_inode_info`, `pipe_buffer`, `page`, `task_struct`, `files_struct`,
-  `fdtable`, `rt_mutex_waiter`, `selinux_state`.
-- Comparar ELF/raw e símbolos contra `src/target_zzhl.h` antes de editar.
+```text
+uid=0(root) gid=0(root) groups=0(root) context=u:r:kernel:s0
+```
+
+O mesmo boot permaneceu ativo após KASLR, reclaim, AAR/AAW, instalação do pipe
+R/W, restauração confirmada de `ashmem_misc.fops` e UMH. A campanha completa,
+incluindo duas falhas por watchdog e a correção física final, está no relatório
+do port.
+
+KernelSU não foi validado: nenhum loader exato para ZZHL está disponível. O
+runner não aceita substituição automática por artefato AFZH3.
+
+## Procedimento operacional
+
+1. Usar ADB e confirmar fingerprint, kernel, boot completo e boot ID.
+2. Executar primeiro `--slide-only` ao mudar target, build ou descoberta KASLR.
+3. Usar `tools/run-zzhl-device.sh` para staging, hashes e launcher.
+4. Depois de qualquer mutação ou falha, coletar os dados e reiniciar antes de
+   outra tentativa.
+5. Só declarar root temporário quando o helper retornar `uid=0` e o boot ID
+   permanecer igual.
+6. Só declarar KernelSU quando um loader exato for fornecido por `--ksud` e o
+   controle for verificado explicitamente.
+
+## Revalidação após mudança
+
+- Recalcular símbolos do ELF com base estática `0xffffffc008000000`.
+- Reexecutar o verificador BTF/ELF e a auditoria do perfil.
+- Recompilar payload, factory, launcher, helper e testes.
+- Registrar os hashes host e device depois do `adb push`.
+- Fazer um boot limpo para cada tentativa completa.
+- Preservar logs e forense antes de qualquer reboot após falha.
