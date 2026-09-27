@@ -13,7 +13,7 @@ import sys
 import time
 
 STAGE_RE = re.compile(r"stage=([\w-]+)")
-GATE_SAMPLE_RE = re.compile(r"\[launcher\] gate=(\d+)/(\d+) phase=(\w+)")
+GATE_SAMPLE_RE = re.compile(r"\[launcher\] gate=(\d+)/(\d+)")
 
 STAGE_EMOJI = {
     "preparing-kernel-access": "🔧",
@@ -31,11 +31,10 @@ DEFAULT_STAGE_EMOJI = "⏱️"
 
 # Ordered: first matching pattern wins. (regex, label, emoji)
 MILESTONES = [
-    (re.compile(r"\[launcher\] gate (?:relaxado|conservador):"), "launcher-start", "⚙️"),
+    (re.compile(r"\[launcher\] start profile="), "launcher-start", "⚙️"),
     (re.compile(r"\[launcher\] pipe-gate=pass"), "pipe-gate", "🚰"),
-    (re.compile(r"\[launcher\] cooldown: exigindo"), "cooldown-start", "❄️"),
-    (re.compile(r"\[launcher\] estabilidade máxima confirmada"), "gate-completo", "🟢"),
-    (re.compile(r"\[launcher\] execve: carregando payload"), "execve", "📦"),
+    (re.compile(r"\[launcher\] gate=ready"), "gate-complete", "🟢"),
+    (re.compile(r"\[launcher\] payload=exec"), "execve", "📦"),
     (re.compile(r"waiting for boot allocator quiet window"), "quiet-window", "🕐"),
     (re.compile(r"starting exploit"), "exploit-loop", "🎯"),
     (re.compile(r"exploit attempt="), "exploit-attempt", "🔁"),

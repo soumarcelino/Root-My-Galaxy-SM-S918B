@@ -26,12 +26,32 @@ PATTERNS = {
     "attempt": re.compile(r"exploit completed attempt=(\d+)/(\d+)"),
 }
 
+LEGACY_GATE_FINAL = PATTERNS["gate_final"]
+COMPACT_GATE = re.compile(
+    r"\[launcher\] gate=\d+/\d+ temp=([0-9.]+)C mem=\d+MB"
+)
+COMPACT_UPTIME = re.compile(r"\[launcher\] uptime=(\d+)s")
+
 
 def one_or_many(match: re.Match[str] | None) -> Any:
     if not match:
         return None
     groups = match.groups()
     return groups[0] if len(groups) == 1 else list(groups)
+
+
+def final_gate_metrics(log: str) -> list[str] | None:
+    legacy = LEGACY_GATE_FINAL.search(log)
+    if legacy:
+        return list(legacy.groups())
+    samples = list(COMPACT_GATE.finditer(log))
+    if not samples:
+        return None
+    latest = samples[-1]
+    next_gate = log.find("\n[launcher] gate=", latest.end())
+    window = log[latest.end():next_gate if next_gate >= 0 else None]
+    uptime = COMPACT_UPTIME.search(window)
+    return [latest.group(1), uptime.group(1)] if uptime else None
 
 
 def parse_history(path: pathlib.Path, extract_logs: bool) -> dict[str, Any] | None:
@@ -51,10 +71,12 @@ def parse_history(path: pathlib.Path, extract_logs: bool) -> dict[str, Any] | No
     if not isinstance(value, dict) or "id" not in value or "log" not in value:
         return None
 
-    log = str(value.get("log", ""))
+    raw_log = str(value.get("log", ""))
+    log = re.sub(r"\n {2}", " ", raw_log)
     started = value.get("startedAtMillis")
     completed = value.get("completedAtMillis")
     metrics = {name: one_or_many(pattern.search(log)) for name, pattern in PATTERNS.items()}
+    metrics["gate_final"] = final_gate_metrics(log)
     wall_seconds = None
     if isinstance(started, int) and isinstance(completed, int):
         wall_seconds = round((completed - started) / 1000, 3)
@@ -62,7 +84,7 @@ def parse_history(path: pathlib.Path, extract_logs: bool) -> dict[str, Any] | No
     temporary_root = "stage=temporary-root-ready" in log
     ksu = "KernelSU control verified" in log
     classification = "SUCCEEDED" if succeeded and temporary_root and ksu else str(value.get("result", "UNKNOWN")).upper()
-    log_lines = [line.strip() for line in log.splitlines() if line.strip()]
+    log_lines = [line.strip() for line in raw_log.splitlines() if line.strip()]
     last_log_line = log_lines[-1] if log_lines else None
     error_lines = [
         line for line in log_lines
@@ -89,7 +111,9 @@ def parse_history(path: pathlib.Path, extract_logs: bool) -> dict[str, Any] | No
         "extended_reads": log.count("extended read plan"),
         "checks": {
             "aar_aaw_verified": "[aar_aaw] verify ok" in log,
-            "fops_restored": bool(re.search(r"restore ashmem_misc\.fops .*ok=1", log)),
+            "fops_restored": bool(re.search(
+                r"restore ashmem_misc\.fops .*(?:confirmed|ok)=1", log
+            )),
             "pipe_ready": "[pipe_rw] ready" in log,
             "temporary_root": temporary_root,
             "kernelsu_verified": ksu,
@@ -98,7 +122,9 @@ def parse_history(path: pathlib.Path, extract_logs: bool) -> dict[str, Any] | No
     }
     if extract_logs:
         extracted = path.with_suffix("").with_suffix(".log")
-        extracted.write_text(log + ("\n" if log and not log.endswith("\n") else ""))
+        extracted.write_text(
+            raw_log + ("\n" if raw_log and not raw_log.endswith("\n") else "")
+        )
         result["extracted_log"] = str(extracted)
     return result
 

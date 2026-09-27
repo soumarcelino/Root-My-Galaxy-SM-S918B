@@ -18,6 +18,10 @@ FORBIDDEN = re.compile(
 )
 
 
+def unfold_continuations(value: str) -> str:
+    return re.sub(r"\n {2}", " ", value)
+
+
 def text_evidence(boot: pathlib.Path) -> str:
     selected = []
     for path in boot.rglob("*"):
@@ -50,10 +54,13 @@ def main() -> int:
     for boot in boot_dirs:
         record_path = boot / "record.json"
         record = json.loads(record_path.read_text()) if record_path.is_file() else {}
-        evidence = text_evidence(boot)
+        evidence = unfold_continuations(text_evidence(boot))
         checks = {name: marker in evidence for name, marker in REQUIRED.items()}
         checks["fops_restore_confirmed"] = bool(
-            re.search(r"restore ashmem_misc\.fops.*confirmed=1", evidence)
+            re.search(
+                r"restore ashmem_misc\.fops.*(?:confirmed|ok)=1",
+                evidence,
+            )
         )
         forbidden = sorted(set(match.group(0) for match in FORBIDDEN.finditer(evidence)))
         boot_id = record.get("boot_id", "")

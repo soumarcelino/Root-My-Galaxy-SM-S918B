@@ -61,7 +61,7 @@ STAGES = (
     ("Preparando a mochila", "Enviando helper e payload testados para o celular.", "📦",
      ("preparando payload",)),
     ("Esperando o momento certo", "Launcher local mede temperatura, memória e pressão.", "🌡️",
-     ("[launcher] gate ",)),
+     ("[launcher] start profile=",)),
     ("Iniciando a jornada", "O payload começou; agora cada mudança é acompanhada pelos logs.", "🚀",
      ("starting exploit",)),
     ("Encontrando o kernel", "Descobrindo onde o kernel está carregado neste boot.", "🧭",
@@ -771,16 +771,14 @@ class RootWindow(QMainWindow):
         lowered = line.lower()
         if lowered.startswith("[launcher] gate="):
             match = re.search(
-                r"gate=(\d+/\d+).*temp=([^ ]+) mem=([^ ]+) runnable=(\d+).*"
-                r"psi=([^ ]+)", line
+                r"gate=(\d+/\d+).*temp=([^ ]+) mem=([^ ]+).*state=([^ ]+)", line
             )
             if match:
                 self.stage_description.setText(
                     f"Estável {match.group(1)} · {match.group(2)} · "
-                    f"{match.group(3)} livres · {match.group(4)} tarefas · "
-                    f"PSI {match.group(5)}"
+                    f"{match.group(3)} livres · {match.group(4)}"
                 )
-        elif "[launcher] estabilidade confirmada" in lowered:
+        elif "[launcher] gate=ready" in lowered:
             self.stage_description.setText(
                 "Métricas, slab e capacidade de pipes foram aprovados."
             )

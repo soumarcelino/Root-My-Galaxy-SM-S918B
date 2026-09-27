@@ -13,7 +13,9 @@ PATTERNS = {
     "kaslr": re.compile(r"\[kaslr\] source=(\S+) base=([0-9a-f]+).*p0_offset=([0-9a-f]+)"),
     "groom": re.compile(r"\[groom\] mm leaked=([0-9a-f]+) aligned_base=([0-9a-f]+)"),
     "pipe": re.compile(r"\[pipe_rw\] ready attempt=(\d+)/(\d+).*pipe=(\d+)"),
-    "umh": re.compile(r"\[root_umh\] result wake=(\d+) complete=(\d+) socket=(\d+)"),
+    "umh": re.compile(
+        r"\[root_umh\] result (?:wake=(\d+) )?complete=(\d+) socket=(\d+)"
+    ),
     "root_cred": re.compile(r"\[root_cred\] result pid=(\d+) helper=(\d+) uid=(\d+) socket=(\d+)"),
     "attempt": re.compile(r"exploit completed attempt=(\d+)/(\d+)"),
     "ksu": re.compile(r"KernelSU control verified version=(\d+) flags=(\S+) uapi=(\d+) features=(\S+)"),
@@ -48,6 +50,7 @@ FOPS_LOCAL = re.compile(
 
 def analyze(path: pathlib.Path) -> dict[str, object]:
     text = ANSI.sub("", path.read_text(errors="replace"))
+    text = re.sub(r"\n {2}", " ", text)
     lines = text.splitlines()
     result: dict[str, object] = {
         "path": str(path),
@@ -155,7 +158,9 @@ def analyze(path: pathlib.Path) -> dict[str, object]:
     result["classification"] = classification
     result["checks"] = {
         "aar_aaw_verified": "[aar_aaw] verify ok" in text,
-        "global_fops_restored": bool(re.search(r"restore ashmem_misc\.fops .*ok=1", text)),
+        "global_fops_restored": bool(re.search(
+            r"restore ashmem_misc\.fops .*(?:confirmed|ok)=1", text
+        )),
         "pipe_ready": "pipe" in result,
         "temporary_root_ready": temporary,
         "kernelsu_verified": ksu,
