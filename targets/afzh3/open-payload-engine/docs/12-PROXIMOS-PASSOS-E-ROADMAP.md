@@ -296,7 +296,7 @@ mínimo, manifesto que explique qualquer diferença.
 Cobrir sem device:
 
 - tamanhos e offsets de `pipe_buffer`, completion e `subprocess_info`;
-- cálculo `A`, `D`, `A+0x1180`, `A+0x6000`, `A+0x6200`, `A+0x7100`;
+- cálculo `A`, `D`, `A+0x1260`, `A+0x1660`, `A+0x6000`, `A+0x6200`, `A+0x7100`;
 - conversão direct-map→vmemmap;
 - split de leitura/escrita cruzando páginas;
 - construção fake FOPS e work item;

@@ -15,11 +15,13 @@ semântica de workqueue, rtmutex e estruturas. Ela é compatível com a família
 byte com o kernel do aparelho. BTF/kallsyms/runtime têm precedência para o
 alvo em execução.
 
-## Concorrência da workqueue
+## Workqueue nativa via PTY
 
-O código reduz a janela TOCTOU, mas não possui o lock interno do pool. Carga
-concorrente pode mudar worklist/idle após a última leitura. Dois boots passaram;
-isso não constitui prova matemática de ausência de race.
+O payload não altera mais a lista ou os contadores globais da workqueue.
+`do_SAK()` chama `schedule_work()`, que adquire o lock interno. O risco de
+manutenção passou a ser a validade dos offsets de `tty_struct`,
+`tty_operations`, `do_SAK` e `do_SAK_work`; todos devem ser regenerados ao
+mudar o firmware.
 
 ## Uma execução por boot
 
@@ -32,10 +34,10 @@ por estado residual e não deve ser usada para aceitar/rejeitar mudança.
 Adicionar `fprintf`, alocações, sleeps ou syscalls em janelas críticas pode
 alterar allocator/scheduler. Logs devem ocorrer antes ou depois de:
 
-- ondas de close;
-- send de reclaim;
+- flush dos 38 slabs auxiliares e `close_range()` da referência alvo final;
+- primeiro send de reclaim;
 - sigreturn/sched_setattr;
-- publicação da worklist e wake.
+- publicação e restauração do PTY temporário.
 
 ## Processo holder
 
@@ -49,7 +51,7 @@ parcial improvisado.
 Depois de uma mutação potencialmente irreversível:
 
 - não repetir automaticamente;
-- não tentar “desfazer” lista concorrente sem lock;
+- não fechar o PTY se a restauração do trabalho ficar ambígua;
 - não liberar páginas fake enquanto kernel pode referenciá-las;
 - salvar evidência;
 - reiniciar limpo para próximo teste.
@@ -109,6 +111,7 @@ evidência; não ajustar texto para esconder divergência.
 - configfs não é backend geral para SLUB dinâmico;
 - a ordem de socketpairs é parte da geometria;
 - CPU affinity precisa ser restaurada;
+- o delta exato do reclaim precisa passar antes do futex;
 - root exige `su -c id`, não apenas log interno;
 - final exige dois boots;
 - compatível não significa kernel-fonte exato;

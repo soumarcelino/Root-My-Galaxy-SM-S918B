@@ -1,203 +1,110 @@
-# `root_umh`: usermode helper pela workqueue
+# `root_umh`: usermode helper pela workqueue nativa
 
 ## Objetivo
 
-O estágio constrói um `subprocess_info` e dados auxiliares em memória controlada,
-insere o `work_struct` em `system_unbound_wq` e aguarda o kernel executar
-`call_usermodehelper_exec_work`. O helper sobe o socket temporário que permite o
-late-load do KernelSU.
+O estágio executa `call_usermodehelper_exec_work` usando a API normal da
+workqueue. Um PTY privado fornece um `tty_struct` descartável; `do_SAK()` chama
+`schedule_work(&tty->SAK_work)` e o próprio kernel segura o lock do pool,
+insere a lista, atualiza os contadores e acorda o worker.
 
-## Endereços e layouts
+O payload não escreve mais `system_unbound_wq`, `pool->worklist`, `nr_active`,
+`nr_in_flight` ou `pwq->refcnt`. Isso elimina a corrida que produziu
+`__list_del_entry_valid` e `cancel_work_sync` no panic observado.
 
-Offsets do alvo:
+## Layout AFZH3
 
 ```text
 selinux_enforcing                 K + 0x02d8e5c0
-system_unbound_wq slot            K + 0x02a90800
 call_usermodehelper_exec_work     K + 0x001045d0
-fake work                         A + 0x6000
+do_SAK_work                       K + 0x00bb5f14
+do_SAK                            K + 0x00bb8728
+tty_struct.ops                    +0x018
+tty_struct.SAK_work               +0x2f8
+tty_operations.flush_buffer       +0x0a8
 UMH data                          A + 0x6200
+fake tty_operations              A + 0x6400
 ```
 
-Campos dinâmicos usados:
+Os tamanhos e offsets foram conferidos no BTF AFZH3:
+
+- `tty_struct`: 832 bytes em objeto `kmalloc-1k`;
+- `SAK_work`: 48 bytes;
+- `subprocess_info`: 112 bytes;
+- `tty_operations`: 280 bytes;
+- `completion`: 32 bytes.
+
+O `subprocess_info` começa em `SAK_work` e termina no padding do mesmo objeto
+`kmalloc-1k`. O código salva e restaura os 112 bytes completos.
+
+## Resolução do PTY
+
+Depois de abrir master e slave privados, o payload encontra o `task_struct` do
+PID atual a partir de `init_task.tasks`, resolve `files_struct`, `fdtable`, o
+`struct file` do slave, `tty_file_private` e finalmente `tty_struct`.
+
+Antes de qualquer escrita exige:
+
+- todos os objetos dinâmicos no direct map;
+- `tty.magic == 0x5401`;
+- `tty_file_private.file` igual ao file resolvido;
+- índice do PTY dentro do limite;
+- `tty->ops` dentro da imagem do kernel;
+- `tty->port` válido;
+- `SAK_work` não pendente;
+- lista do work auto-referente;
+- função original exatamente `do_SAK_work`.
+
+Qualquer divergência aborta antes de tocar o PTY.
+
+## Publicação
+
+1. Copiar a tabela original `tty_operations` para `A+0x6400`.
+2. Trocar apenas `flush_buffer` por `do_SAK`.
+3. Copiar o `SAK_work` original e trocar apenas `work.func` por
+   `call_usermodehelper_exec_work`.
+4. Preencher completion, path, argv e envp em `A+0x6200`.
+5. Publicar o `subprocess_info` no PTY.
+6. Publicar temporariamente `tty->ops = A+0x6400`.
+7. Executar `ioctl(slave, TCFLSH, TCOFLUSH)`.
+8. Restaurar imediatamente `tty->ops`.
+
+`TCFLSH/TCOFLUSH` chega a `tty_driver_flush_buffer()`, cuja chamada indireta
+tem a mesma assinatura CFI de `do_SAK(struct tty_struct *)`. `do_SAK()` entrega
+o work a `schedule_work()`; a partir daí nenhuma estrutura global da workqueue
+é alterada pelo payload.
+
+## Completion e restauração
+
+O helper usa uma completion não nula. Isso impede `umh_complete()` de executar
+`kfree()` sobre o objeto embutido no PTY.
+
+O código aguarda:
+
+1. completion, provando que o callback e o `kernel_execve` terminaram;
+2. conexão com `/data/local/tmp/temp_su.sock`;
+3. restauração e leitura byte a byte dos 112 bytes originais.
+
+Os descritores do PTY só são fechados depois dessa prova. Se uma escrita ou
+restauração ficar ambígua, os descritores permanecem abertos e a tentativa é
+marcada irreversível, evitando liberar um `tty_struct` que ainda possa estar
+referenciado pela workqueue.
+
+Se a tentativa falhar após mudar `selinux_enforcing`, o valor original é
+restaurado.
+
+## Provas exigidas
+
+Log de sucesso:
 
 ```text
-wq->dfl_pwq             +0xb0
-pwq->pool               +0x00
-pwq->wq                 +0x08
-pwq->work_color         +0x10
-pwq->refcnt             +0x18
-pwq->nr_in_flight       +0x1c + color*4
-pwq->nr_active          +0x5c
-pwq->max_active         +0x60
-pool->worklist          +0x20
-pool->nr_idle           +0x34
-work->data              +0x00
-work->entry             +0x08
-work->func              +0x18
+[root_umh] native PTY work tty=<direct-map> work=<tty+0x2f8> complete=1 socket=1 restore=1
 ```
 
-`_Static_assert` verifica `subprocess_info` com 112 bytes e completion com 32
-bytes. Uma mudança de compilador que alterasse padding falharia no build.
+O estágio temporário só passa com `socket=1` e `restore=1`. KernelSU e
+`su -c id` continuam sendo provas posteriores e independentes.
 
-## Separação de backends
+## Limites
 
-Configfs permanece somente nos acessos que o fechado faz por esse caminho:
-
-- byte `selinux_enforcing`;
-- slot estático que contém o ponteiro `system_unbound_wq`.
-
-Pipe R/W é obrigatório para:
-
-- `wq->dfl_pwq`;
-- `pwq->pool` e `pwq->wq`;
-- estado, contadores e worklist;
-- blobs fake work/UMH;
-- completion.
-
-Essa distinção é estrutural, não otimização.
-
-## Montagem dos dados UMH
-
-`umh_kernel_data` contém:
-
-- completion inicializada com wait-list auto-referente;
-- path absoluto do helper;
-- argumento `--umh`;
-- UID do processo chamador em texto;
-- `argv = {path, arg, uid, NULL}`;
-- `envp = {NULL}`.
-
-O path é rejeitado se não couber no buffer de 256 bytes. Todos os ponteiros do
-blob são endereços kernel dentro de `A+0x6200`.
-
-O `subprocess_info` fake contém:
-
-- `work.data = pwq | (color << 4) | 5`;
-- `work.entry` inicialmente auto-referente à worklist;
-- `work.func = call_usermodehelper_exec_work`;
-- ponteiros para completion, path, argv e envp.
-
-## Validação de ponteiros
-
-Antes de dereferenciar:
-
-- `wq`, `pwq` e `pool` devem estar no direct-map;
-- `pwq->wq` deve ser exatamente o `wq` lido do slot estático.
-
-Isso impede que uma leitura transitória ou offset incorreto seja usado para
-escrever em endereço arbitrário.
-
-## Espera por pool utilizável
-
-Até 200 iterações de 1 ms verificam:
-
-```text
-worklist.next == &worklist
-worklist.prev == &worklist
-pool->nr_idle > 0
-```
-
-Se a lista continuar ocupada, a tentativa falha antes de qualquer publicação.
-
-## Estado do `pool_workqueue`
-
-O código exige:
-
-- `color < 16`;
-- `refcnt != 0`;
-- `nr_active < max_active`;
-- leitura válida de `nr_in_flight[color]`.
-
-Esses valores determinam `work.data` e os contadores que precisam representar
-o item recém-publicado.
-
-## Escrita dos blobs e revalidação
-
-Primeiro são escritos dados UMH e fake work. Como essa preparação pode levar
-tempo suficiente para outro producer/worker mudar o pool, a lista e `nr_idle`
-são relidos imediatamente antes da mutação dos contadores.
-
-Se o estado mudou, a função retorna sem publicar o item.
-
-## Ordem de publicação
-
-Ordem final:
-
-1. `nr_in_flight[color]++`;
-2. `nr_active++`;
-3. `refcnt++`;
-4. `worklist.prev = fake_entry`;
-5. `worklist.next = fake_entry`;
-6. wake imediato.
-
-As três primeiras escritas ainda permitem rollback limitado se uma delas
-falhar. Depois da primeira escrita da lista, a operação é tratada como
-irreversível.
-
-### Por que não há rollback da lista
-
-Uma função pipe pode ter efetuado a escrita alvo e falhado apenas ao restaurar
-o `pipe_buffer`. Além disso, um worker concorrente pode observar e remover o
-item entre a falha e o rollback. Escrever “estado anterior” cegamente poderia
-corromper uma lista que já mudou.
-
-## Wake da workqueue
-
-`wake_system_unbound()` abre um PTY master, concede/desbloqueia, abre o slave e
-fecha ambos. Esse trabalho provoca atividade no `system_unbound_wq` sem depender
-de outro offset específico do kernel.
-
-Não há log entre ligação final da lista e o primeiro wake. Isso reduz a janela
-em que o item fica publicado sem worker acordado.
-
-## Completion
-
-Após o primeiro wake:
-
-- até 8 ciclos;
-- cada ciclo faz até 250 leituras de 1 ms;
-- ciclos posteriores podem repetir o wake.
-
-O campo completion é lido pelo pipe backend. Falha de leitura encerra a
-tentativa: não se assume que o helper executou.
-
-## Prova por socket
-
-Completion prova que o work item terminou, mas não que o helper estabeleceu o
-canal de root esperado. Depois de completion, o código tenta conectar a
-`/data/local/tmp/temp_su.sock` até 200 vezes com intervalo de 10 ms.
-
-Sucesso de `root_umh_install_fd()` exige socket conectado.
-
-Log final esperado:
-
-```text
-[root_umh] queued ... writes=1/1/1/1/1
-[root_umh] result wake=1 complete=1 socket=1
-```
-
-## Falhas e interpretação
-
-| Log | Significado |
-|---|---|
-| `bad workqueue wq` | slot/offset/base incorreto ou ponteiro transitório |
-| `bad workqueue pwq/pool` | backend pipe ou layout dinâmico inválido |
-| `pwq_wq` diferente | cadeia de ponteiros inconsistente |
-| `pool busy` | estado concorrente; não publicar |
-| `bad pwq state` | color/refcount/capacidade incompatível |
-| `pool changed before publish` | TOCTOU detectado a tempo |
-| `worklist ... write failed` | estado potencialmente irreversível; não repetir no boot |
-| `complete=0` | worker não consumiu ou fake work inválido |
-| `socket=0` | helper terminou sem canal de root utilizável |
-
-## Relação com KernelSU
-
-`root_umh` cria o root temporário necessário ao helper. KernelSU é carregado
-depois, fora deste módulo, pelo `simple-root`. Portanto:
-
-- `root_umh socket=1` é prova do estágio temporário;
-- `KernelSU control verified` prova o late-load;
-- `su -c id` prova a interface final usada pelo operador.
-
-As três provas devem permanecer separadas nos logs.
+Os offsets são específicos do AFZH3. Mudança de firmware exige regenerar BTF e
+kallsyms. O fluxo continua sendo uma mutação de kernel sensível: depois da
+publicação do PTY, uma falha não permite nova tentativa no mesmo boot.

@@ -21,7 +21,7 @@ flowchart TD
     I --> J[Restaura ashmem_misc.fops]
     J --> K[Instala pipe physical R/W]
     K --> L[Constrói subprocess_info]
-    L --> M[Publica na system_unbound_wq]
+    L --> M[PTY privado chama schedule_work]
     M --> N[Completion + temp_su.sock]
     N --> O[temporary-root-ready]
     O --> P[Holder preserva alocações]
@@ -39,7 +39,7 @@ flowchart TD
 No início, o processo:
 
 - eleva os soft limits de `RLIMIT_NOFILE` e `RLIMIT_NPROC` ao hard limit;
-- fixa o fluxo principal em CPU0;
+- seleciona e fixa a CPU mais rápida permitida pelo cpuset;
 - valida `CVE43499_ROOT_HELPER`;
 - prepara estado compartilhado de 0x20 bytes;
 - limita quantidade e duração das tentativas.
@@ -85,12 +85,20 @@ D = A - 0xe80
 ```
 
 O skb enviado tem `0x8e80` bytes. Seus dados começam em `D`. Logo, o conteúdo
-no offset `+0x2000` do buffer do usuário cai em `A+0x1180`, onde a tabela fake
-FOPS é construída. Confundir `D` com `A` desloca todos os ponteiros internos.
+no offset `+0x20e0` do buffer do usuário cai em `A+0x1260`, onde a tabela fake
+FOPS primária é construída. A tabela de recuperação em `+0x24e0` cai em
+`A+0x1660`. Confundir `D` com `A` desloca todos os ponteiros internos.
 
-O reclaim depende de CPU0 porque as listas de páginas são per-CPU.
-`kernelsnitch_bruteforce()` pode limpar afinidade; por isso o código fixa CPU0
-novamente imediatamente após o envio de priming e antes das liberações.
+O reclaim depende de uma única CPU porque as listas de páginas são per-CPU.
+O código seleciona dinamicamente a CPU mais rápida e estável permitida. A
+política considera capacidade, frequência e `core_ctl`, e usa a mesma CPU na
+fábrica exec, criação do alvo, liberações, drains e envio de reclaim.
+
+As gerações pre31/post32 usam o mesmo PID fábrica. O código fecha 62 vizinhos,
+usa 38 slabs auxiliares para expulsar o alvo de `cpu_partial` ainda com o leak
+vivo e libera essa referência conhecida por último. O primeiro `sendmsg()` vem
+imediatamente depois. O fluxo aborta antes do futex se os contadores não
+provarem a devolução de um slab e 32 objetos.
 
 ## 5. Trigger futex/FPSIMD
 
@@ -126,6 +134,14 @@ bloquear indefinidamente o callback.
 A restauração precoce remove o dangling pointer global. O descritor aberto
 continua útil porque o VFS já associou seu `f_op` na abertura.
 
+Se a abertura, a prova ou a primeira AAW falha, o callback ainda está dentro
+do waiter v14. Ele entrega um segundo frame e dispara outro `sched_setattr`.
+Esse write aponta o global para a FOPS de recuperação em `A+0x1660`; o único
+efeito lateral cai em `llseek`, que esse caminho não usa. O novo descritor faz
+a AAW do endereço real. Se isso não for possível, um terceiro frame vermelho,
+sem filhos, escreve zero no global para impedir `misc_open` de chamar
+`try_module_get` com um owner residual.
+
 ## 7. Segundo reclaim: backend físico por pipes
 
 O backend em `src/09_pipe_buffer_rw.c` cria dois bancos de 240 pipes. Após a segunda
@@ -133,24 +149,20 @@ geometria de `mm_struct`, um slab order-3 é reclamado por objetos de pipe. O
 código identifica um `pipe_buffer`, confirma o victim por alteração controlada
 do comprimento e prova leitura e escrita numa região scratch de `payload_base`.
 
-Esse backend é necessário porque os objetos `pool_workqueue` e estruturas
-associadas estão em SLUB dinâmico. Ler esses objetos pelo caminho configfs
-acionava HARDENED_USERCOPY.
+Esse backend fornece a leitura/escrita física usada nas estruturas dinâmicas e
+na resolução do PTY. Ele também evita usar configfs em objetos SLUB, caminho
+que anteriormente acionava HARDENED_USERCOPY.
 
 ## 8. Publicação do usermode helper
 
-`src/10_workqueue_umh_root.c` usa configfs somente para:
+`src/10_workqueue_umh_root.c` abre um PTY privado, resolve seu `tty_struct` pela
+tabela de descritores e valida `magic`, ops, port e o `SAK_work` original. Uma
+cópia de `tty_operations` troca apenas `flush_buffer` por `do_SAK`.
 
-- alterar `selinux_enforcing` conforme o fluxo fechado;
-- ler o slot estático `system_unbound_wq`.
-
-Todos os campos dinâmicos de `workqueue_struct`, `pool_workqueue`, pool,
-contadores, lista, blobs e completion usam pipe R/W.
-
-O código valida ponteiros direct-map, relação `pwq->wq`, lista vazia, worker
-idle, cor, refcount e limites active/max. Depois escreve os blobs, revalida o
-pool, atualiza contadores, publica a lista e força atividade na workqueue pela
-abertura/fechamento de PTY.
+`TCFLSH/TCOFLUSH` chama `do_SAK(tty)`, que executa
+`schedule_work(&tty->SAK_work)`. O kernel segura o lock do pool e atualiza lista
+e contadores. Depois da completion, os 112 bytes usados como
+`subprocess_info` são restaurados e conferidos antes de fechar o PTY.
 
 ## 9. Completion, socket e holder
 

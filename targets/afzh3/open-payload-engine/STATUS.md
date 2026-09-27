@@ -8,6 +8,162 @@ laboratory research. Matching open kernel source is under
 `/home/matias/Projects/SM-S918B_16_Opensource/`; closed reference payload is
 `/home/matias/Projects/ksu-payload-functional/assets/ksu-payload`.
 
+## Exact-length ConfigFS AAR — 2026-09-27
+
+The last panic was traced to the AAR position calculation, not to FOPS or the
+PTY path. An eight-byte read at `ffffff8923636588` moved the encoded page
+pointer forward by 213 bytes to avoid embedded NULs and reduced the file
+position by the same amount. The address still resolved correctly, but
+`configfs_read_iter()` passed 221 bytes to `copy_to_iter()` before the iterator
+clamped the userspace result to eight. Hardened Usercopy therefore rejected a
+221-byte source beginning at offset eight of a `kmalloc-128` object.
+
+The read plan now always uses the exact page pointer and
+`offset = OSS_CONFIGFS_COUNT - len`. The existing descending-prefix encoder
+reconstructs embedded NULs, so pointer displacement is unnecessary. Before
+`pread64()`, the payload proves both `page + offset == target` and
+`OSS_CONFIGFS_COUNT - offset == len`; invalid, empty or overflowing plans are
+rejected before entering the kernel. All engine ConfigFS AAR calls pass
+through this function.
+
+The host regression test reproduces the old `8 + 213 = 221` crash geometry,
+proves the new checked length is exactly eight, models embedded-NUL encoding,
+and covers overflow rejection. A clean-device campaign then crossed AAR
+verification, FOPS restoration and direct pipe resolution on three distinct
+boot IDs with no usercopy abort, panic or spontaneous reboot. The third boot
+also completed temporary root and KernelSU. The first two stopped later at
+private PTY staging; that independent reliability issue does not affect the
+proof for this panic class. Payload SHA-256 is
+`62e6563f43945ac790b4678cb3e5398067692057fd270960f3a7b4d511a763d5`;
+evidence is in
+`evidence/reliability/20260927T-usercopy-exact-soak3-v2/`; its strict validator
+produced `pass_usercopy_path_all_boots: true` in `usercopy-proof.json`. The
+detailed analysis is in `docs/16-CONFIGFS-AAR-EXACT-LENGTH.md`.
+
+## Residual-safe FOPS and second-write recovery — 2026-09-27
+
+The primary fake FOPS moved from `A+0x1180` to `A+0x1260`. Live BTF and the
+captured AFZH3 exec auxv show that the old owner slot overlaps
+`mm_struct.saved_auxv[3]`, whose residual value is `0x1270`; this explains the
+observed `try_module_get -> misc_open` panic when reclaim did not fully replace
+the object. At `A+0x1260`, owner and the callbacks needed for open/AAR/AAW land
+on zero residual fields of the dead `mm_struct`.
+
+The same skb now carries a recovery FOPS at `A+0x1660`. If the primary open,
+verification or restore write fails, the waiter reuses the v14 consumer for a
+second RB write and publishes the recovery table. An fd opened through that
+table writes the real `ashmem_fops` address back and confirms it by readback.
+If this path cannot perform the AAW, a final red leaf write sets the global
+pointer to NULL so later misc opens fail closed instead of dereferencing a
+residual module owner.
+
+The host layout test, the complete API 35 shared-object build and the isolated
+device SIGUSR1 test pass. The device test reported `primary_ok=1`,
+`recovery_ok=1`, and `quarantine_ok=1` on boot ID
+`64d4d263-f6e8-4ee5-ab52-93bd290ba561`. Full runtime validation requires a
+clean boot because that boot already has root. The resulting payload is
+156200 bytes with SHA-256
+`41e8980402880ef067e636c397f2c264f461e17615d808d73376184832a71601`.
+
+## Deterministic final-reference reclaim — 2026-09-26
+
+SLUB tracing identified why the exact reclaim intermittently reported
+`object_drop=0`: the target slab became empty during the bulk close and could
+remain frozen in the selected CPU's `cpu_partial` list. Its cached `pobjects`
+value was stale, so later refills did not reliably select or unfreeze that
+specific slab.
+
+The target leak descriptor is now kept alive while the other 62 critical
+references are closed. One reference from each of the 32 prepare slabs and
+six spray slabs is then released on the same CPU, forcing the per-CPU partial
+chain through `__unfreeze_partials()` while the target still contains its one
+known live object. The leak descriptor is released last by its own
+`close_range()`, immediately followed by the skb sends. The gate treats
+`active_objs` as telemetry and requires the allocator proof that matters:
+exactly 32 total objects, one active slab and one total slab disappear.
+
+CPU selection moved to `00_cpu_discovery.c`. It intersects the effective
+affinity mask with scheduler capacity, maximum frequency and Samsung
+`core_ctl` state, rejects paused/not-preferred CPUs when a stable candidate is
+available, and revalidates the chosen CPU before every critical allocator
+transition. On this device it selects stable CPU3 instead of the faster but
+frequently paused CPU5/CPU6 choices.
+
+The isolated non-mutating device harness passed 6/6 consecutive runs after
+the reclaim correction, including 3/3 after CPU revalidation was integrated.
+Every run reported `active_drop=1/1`, `object_drop=32/32`,
+`active_slab_drop=1/1`, `slab_drop=1/1`, and `pass=1`. A separate discovery
+test constrained to CPUs 0-6 selected CPU3 with capacity 811, 2803200 kHz,
+`paused=0`, and `not_preferred=0`.
+
+The final payload is 153896 bytes with SHA-256
+`410e6e1b073fdbb78618329224b83940f4f17c39daee45eddc630dac640934a2`.
+APK version 0.6.0 (`versionCode` 35), SHA-256
+`2f44e20205ef65b7f67e0e2552520766695012f04466fc98a7d4f766d0c67d09`,
+was installed on `RXCX602E20X`. The pulled APK matched the local build, and all
+three embedded assets matched their local artifacts. Full root/boot validation
+of this exact APK remains pending. The complete investigation and maintenance
+record is in
+`docs/15-RECLAIM-DETERMINISTICO-E-CPU-DISCOVERY.md`.
+
+## Superseded critical CPU reclaim correction — 2026-09-26
+
+The optimized bulk factory and 192-object spray remain on the fastest CPU
+allowed by the app cpuset. After KernelSnitch setup, the parent now returns to
+CPU0 before creating the pre/leak/post `mm_struct` objects and stays there for
+their release and the skb reclaim. This restores the allocator invariant used
+by the validated path: the critical order-3 slab is created, freed, and
+reclaimed on one CPU. Previously only the children moved to CPU0 after
+`clone()`, which was too late because `copy_mm()` had already allocated their
+`mm_struct` on the parent's faster CPU. The second of three app runs exposed
+that mismatch as the repeated `misc_open -> try_module_get` panic with stale
+`mm_struct` value `0x1270` in the fake-FOPS owner slot.
+
+The app history writer also uses `AtomicFile` for running entries so a kernel
+reboot cannot leave a truncated all-zero JSON record.
+
+The engine, host layout checks, Android unit tests, APK assembly, and
+`tools/check-repo.py` pass. The embedded payload is 147912 bytes with SHA-256
+`f80e4629d04f97059ba23752af4935147f7adc877eec8659da5180269607011c`;
+the exec factory remains
+`3422d63142db11de2968febed36bd47d1fb22f232e40875df8c8fb0cf5b90851`.
+APK version 0.6.0 (`versionCode` 35), SHA-256
+`4663d5831d8264036b6e46f1e1d588f24085a8c299b5211a7a4e8ca2b3c97042`,
+was installed on `RXCX602E20X`; the pulled installed APK and both embedded
+assets match the local build. Runtime boot validation of this exact artifact
+is still pending.
+
+## Execve mm factory and cpuset-aware grooming CPU — 2026-09-26
+
+The 1024-object prepare phase now uses one persistent worker and 1024 `execve`
+generations. Each `/proc/<pid>/mem` descriptor pins the current generation's
+`mm_struct`; the worker then replaces its address space for the next object.
+The original count and the later 192-object spray remain unchanged. A 10-second
+factory deadline, protocol magic, executable preflight, SIGPIPE guard, and
+fail-closed cleanup cover worker failures.
+
+Before grooming, the payload reads its effective affinity mask and selects the
+allowed CPU with the greatest scheduler `cpu_capacity`, using maximum frequency
+and CPU number as tie breakers. The bulk factory and spray use that CPU. The
+critical pre/leak/post allocation, release, and reclaim use CPU0, followed by
+the futex stage's existing CPU placement.
+
+An isolated device run on `RXCX602E20X` created and pinned exactly 1024
+generations in 232623 microseconds on CPU5, the fastest CPU available to that
+test process. This validates the factory protocol, not the full exploit. The
+engine and focused tests built without warnings; host layout/read-plan checks
+and `tools/check-repo.py` passed. Artifact SHA-256 values are
+`12a145c2a4d5c49bb3034b7f013b29af4dd0159b2680a96f46423c1f46afd6a0`
+for `build/payload.so` and
+`3422d63142db11de2968febed36bd47d1fb22f232e40875df8c8fb0cf5b90851`
+for `build/mm-exec-factory`.
+
+The app bundles both artifacts plus the updated launcher, and
+`testDebugUnitTest`/`assembleDebug` passed. APK version 0.6.0 (`versionCode` 35)
+was installed on the device. Its on-device SHA-256 matches the build at
+`0fd7aa14cb6cc51ce99e6bba2fe63b7e34e3033ec36f59827cb87063adb79240`.
+The exact APK has not run the root flow on a clean boot yet.
+
 ## Direct pipe resolution with hardened-usercopy guard — 2026-09-26
 
 The deterministic pipe resolver is enabled by default. It walks
@@ -4206,3 +4362,49 @@ Both external identities were
 `uid=0(root) gid=0(root) groups=0(root) context=u:r:ksu:s0`. No panic or hidden
 reboot occurred. The cumulative result is now 4 successful clean boots across
 two independent 2-reboot campaigns.
+
+## NATIVE WORKQUEUE AND EXACT RECLAIM HARDENING (2026-09-26)
+
+Two panic signatures from the latest five app executions were separated from
+an unrelated USB test:
+
+- `misc_open -> try_module_get` with owner `0x1270`: the target `mm_struct`
+  slab had not been completely reclaimed by the fake FOPS skb;
+- `__list_del_entry_valid -> cancel_work_sync`: manual publication had
+  corrupted a shared workqueue list without `pool->lock`.
+
+The first groom now selects one allowed high-capacity CPU and uses it for the
+prepare factory, spray, target creation, frees, drains and skb reclaim. One
+factory PID creates the pre31 and post32 generations by `execve`, around the
+separate KernelSnitch target. The 63 target references and 16 late partial-list
+triggers are duplicated into a contiguous range and released by one
+`close_range()`. The first `sendmsg()` follows immediately, without yield,
+sleep, log or allocator work. The attempt then requires exact deltas of 79
+active objects, 32 total objects, one active slab and one total slab. A mismatch
+stops before the futex/global mutation.
+
+The root stage no longer reads or writes `system_unbound_wq`, pwq, pool,
+worklist or counters. It resolves a private PTY through the current task's file
+table, verifies the AFZH3 `tty_struct`, overlays `SAK_work` with a temporary
+`subprocess_info`, and points a copied `tty_operations.flush_buffer` at
+`do_SAK`. `TCFLSH/TCOFLUSH` reaches `schedule_work()`, so the kernel performs
+list insertion and accounting under the native lock. Original ops are restored
+immediately; all 112 overwritten bytes are restored and verified after
+completion. Ambiguous restoration keeps the PTY pinned and makes the attempt
+terminal.
+
+AFZH3 BTF and reference kallsyms confirmed `tty_struct.SAK_work=0x2f8`,
+`tty_operations.flush_buffer=0xa8`, `do_SAK_work=K+0x00bb5f14`, and
+`do_SAK=K+0x00bb8728`. A non-exploit device probe on `RXCX602E20X` passed both
+`close_range` at FD 8192 and normal PTY `TCFLSH/TCOFLUSH`.
+
+Local acceptance passed `check-repo.py --build`, every focused NDK/host test,
+target-profile audit, source/artifact reclaim invariants, Android unit tests,
+and `assembleDebug`. Candidate hashes:
+
+- payload: `b741f8fdd851474e287fb76ccf6ea6744d516c02180f9c287618ed11aaa17d97`;
+- factory: `3422d63142db11de2968febed36bd47d1fb22f232e40875df8c8fb0cf5b90851`;
+- APK: `d9f42f2d1cdeb084528c4bb3b28a6f4b87c9831e23c7fd48dd669f157208a678`.
+
+The candidate has not executed the exploit on-device yet. It must pass the
+fresh boot campaign before replacing the last validated payload profile.

@@ -15,34 +15,46 @@ Complete source chain is connected:
 2. Tracefs resolves KASLR; grooming leaks an `mm_struct` candidate and derives
    aligned base `A = candidate & ~0x7fff`.
 3. Reclaim sends the closed layout as an exact `0x8e80` skb buffer. Its data
-   starts at `D = A - 0xe80`; therefore buffer `+0x2000` lands at live address
-   `A+0x1180`. The builder emits one fake FOPS table at that buffer offset.
-   The order-3 drain is split exactly 16 prepare slabs before and 16 after the
-   target/leak phase. Reclaim tries at most 64 nonblocking sends.
+   starts at `D = A - 0xe80`; therefore buffer `+0x20e0` lands at live address
+   `A+0x1260`. The builder emits the primary fake FOPS there and a recovery
+   table at buffer `+0x24e0`, live address `A+0x1660`.
+   One exec factory PID creates the pre31/post32 critical generations around
+   the leak process. CPU discovery selects the fastest stable CPU allowed by
+   the cpuset and excludes Samsung `core_ctl` paused/not-preferred CPUs. The
+   62 surrounding references are released first; 38 distinct partial slabs
+   then force the target out of `cpu_partial` while its known leak reference
+   remains alive. That reference is released last and immediately followed by
+   the first of at most 64 nonblocking sends. The attempt continues only after
+   an exact one-slab/32-object reclaim proof.
 4. Futex trigger v14 uses the closed globals' page offsets, installs SIGUSR1
    from the waiter, and performs the `-1 → gate → SIGUSR1 → 1 → sched_setattr`
    handshake. The consumer delay is zeroed after `WAIT_REQUEUE_PI`; the main
-   thread sleeps 10 ms while waiting instead of occupying CPU0.
+   thread sleeps 10 ms while waiting instead of occupying the groom CPU.
 5. Immediate callback opens the shell-accessible ashmem alias. Discovery tries
    `/dev/ashmem<boot_id>`, then matching `/dev/ashmem*` character devices with
    the canonical `st_rdev`; an inaccessible path aborts before grooming.
 6. AAR/AAW verifies the corrupted `ashmem_misc.fops` and restores the global
-   pointer before the root stage.
+   pointer before the root stage. If primary verification fails, a second v14
+   write publishes the recovery table and restores the real pointer by AAW.
+   A final null write quarantines the global if restoration cannot run.
 7. `pipe_physrw` reproduces the closed 2-bank pipe geometry and provides the
-   dynamic physical read/write backend. Configfs remains limited to SELinux
-   state and the static workqueue slot, matching the closed payload.
-8. `root_umh` publishes the work item, validates completion/root socket, and
-   late-loads KernelSU.
+   dynamic physical read/write backend.
+8. `root_umh` resolves a private PTY, uses `do_SAK()` to enter the kernel's
+   native `schedule_work()` path, restores the complete temporary object,
+   validates completion/root socket, and late-loads KernelSU. It never writes
+   a global workqueue list or counter.
 
 Android app and shared-object variants compile. Host geometry test passes. The
-current artifact `94b6b79ed338bb50abbdcf17dca9c48ef2f7517b414df0249dc6a9566bc27ced`
+last validated artifact `94b6b79ed338bb50abbdcf17dca9c48ef2f7517b414df0249dc6a9566bc27ced`
 passed a 3/3 clean-boot soak with the screen left on and a load/thermal/PSI gate.
 Every run reached `temporary-root-ready`, verified KernelSU control, returned
 `uid=0(root)` from `/system/bin/su -c id`, and restored SELinux enforcing. The
 payload additionally required matching dual KernelSnitch oracles, 3× timing
 confirmation, 57/64 reclaim sends, and a quiet three-sample slab window before
 global pointer mutation. This is evidence for the tested artifact and device,
-not a guarantee against every kernel state.
+not a guarantee against every kernel state. The native PTY work submission,
+exact reclaim gate, relocated FOPS and second-write recovery are newer source
+changes and require a fresh boot campaign before replacing that baseline.
 
 ## Method
 
@@ -59,6 +71,9 @@ The complete technical package is indexed in [`docs/README.md`](docs/README.md).
 It covers methodology, architecture, root causes, pipe physical R/W, workqueue
 UMH, binary-fidelity mapping, two-reboot validation, operational runbook,
 forensics, maintenance limits, and the tools/evidence used during the port.
+The complete SLUB trace investigation, deterministic final-reference reclaim,
+CPU discovery policy and 6/6 isolated validation are in
+[`docs/15-RECLAIM-DETERMINISTICO-E-CPU-DISCOVERY.md`](docs/15-RECLAIM-DETERMINISTICO-E-CPU-DISCOVERY.md).
 
 ## Tools
 
@@ -66,22 +81,27 @@ Reusable porting and debug scripts are documented in
 [`tools/README.md`](tools/README.md). The suite includes read-only device
 preflight, forensic collection, BTF layout extraction, kallsyms offset
 derivation with masked-address rejection, build manifests, ELF comparison,
-run-log classification, target profiles, repository checks, and a gated
-two-clean-reboot validator.
+run-log classification, app-history/panic analysis, verified APK bundling and
+installation, critical-reclaim regression checks, target profiles, repository
+checks, and a gated two-clean-reboot validator. The end-to-end operational
+workflow is documented in
+[`docs/14-AUTOMACAO-OPERACIONAL.md`](docs/14-AUTOMACAO-OPERACIONAL.md).
 
 ## Main components
 
 | Component | Role |
 |---|---|
 | `src/00_orchestrator.c` | Constructor/executable entry, limits, attempt supervisor, complete chain wiring. |
+| `src/00_cpu_discovery.c` | Cpuset, capacity, frequency and Samsung `core_ctl` aware CPU selection and validation. |
 | `src/01_kernel_base_tracefs.c`, `src/02_slab_cache_probe.c` | Kernel-base discovery and slab telemetry. |
 | `src/03_mm_address_sidechannel/` | Futex-hash timing side channel for the `mm_struct` address leak. |
 | `src/04_fake_kernel_objects.c` | Exact fake waiter/FOPS/task buffer layout using aligned base A. |
 | `src/05_mm_slab_grooming.c` | Exact object leak, split drain, and skb reclaim lifecycle. |
+| `factory/mm_exec_factory.c` | Freestanding execve worker for the 1024 prepare objects and the pre31/post32 critical generations. |
 | `src/06_signal_frame_payload.c`, `src/07_futex_pi_trigger.c` | FPSIMD transport and v14 futex/scheduler trigger. |
 | `src/08_ashmem_configfs_rw.c` | Ashmem alias discovery, kernel read/write wrappers, verification. |
 | `src/09_pipe_buffer_rw.c` | Closed-layout pipe-buffer physical read/write backend. |
-| `src/10_workqueue_umh_root.c` | Workqueue usermode-helper root stage. |
+| `src/10_workqueue_umh_root.c` | Private-PTY usermode-helper submission through native `schedule_work()`. |
 | `src/90_diagnostic_checkpoint.h` | Optional durable checkpoints tagged with boot ID. |
 
 Focused diagnostics live under `tests/`; their support-only implementations
@@ -94,8 +114,8 @@ skb delivery is implemented in `src/05_mm_slab_grooming.c`.
 Set `ANDROID_NDK_HOME` to an NDK containing the requested API compiler, then:
 
 ```sh
-make          # build/app_main
-make so       # build/payload.so
+make          # build/app_main and build/mm-exec-factory
+make so       # build/payload.so and build/mm-exec-factory
 make tests    # build focused diagnostics under build/tests/
 ```
 

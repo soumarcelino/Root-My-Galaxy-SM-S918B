@@ -30,13 +30,18 @@ Arquivo  build/payload.so
 Tamanho  101120 bytes
 ```
 
+Esse artefato pertence à estratégia anterior de publicação manual. O source
+atual usa PTY privado com `schedule_work()` nativo e um gate exato de reclaim;
+ele compila e passa os checks locais, mas ainda precisa de uma nova campanha de
+boots antes de substituir a evidência acima.
+
 ## Índice
 
 1. [Escopo e metodologia](01-ESCOPO-E-METODOLOGIA.md): objetivo, fontes,
    hierarquia de evidência e critérios de fidelidade.
 2. [Arquitetura e fluxo](02-ARQUITETURA-E-FLUXO.md): visão completa desde o
    constructor até KernelSU e `su`.
-3. [Causas raiz e correções](03-CAUSAS-RAIZ-E-CORRECOES.md): quatro bloqueios
+3. [Causas raiz e correções](03-CAUSAS-RAIZ-E-CORRECOES.md): bloqueios
    principais, falhas menores e hipóteses descartadas.
 4. [Backend físico por pipes](04-PIPE-PHYSRW.md): geometria, reclaim,
    descoberta do victim, leitura/escrita e lifetimes.
@@ -62,7 +67,13 @@ Tamanho  101120 bytes
 13. [Resolução direta do pipe](13-RESOLUCAO-DIRETA-PIPE.md): eliminação do
     reclaim no caminho normal, guard local contra Hardened Usercopy, política
     fail-closed, desempenho e validação em três boots.
-14. [Ferramentas de porting e debug](../tools/README.md): scripts reutilizáveis
+14. [Automação operacional](14-AUTOMACAO-OPERACIONAL.md): build e instalação
+    verificáveis, coleta das execuções do app, análise de panic e proteção da
+    invariante de CPU do reclaim.
+15. [Reclaim determinístico e CPU discovery](15-RECLAIM-DETERMINISTICO-E-CPU-DISCOVERY.md):
+    investigação SLUB, traces, tentativas descartadas, algoritmo final,
+    fail-closed, validação 6/6 e artefatos instalados.
+16. [Ferramentas de porting e debug](../tools/README.md): scripts reutilizáveis
     para preflight, forense, comparação ELF, manifests, perfis, análise de logs,
     checks locais e validação em dois reboots.
 
@@ -71,6 +82,7 @@ Tamanho  101120 bytes
 | Arquivo | Responsabilidade |
 |---|---|
 | `src/00_orchestrator.c` | Supervisor, limites, tentativa completa e callback imediato. |
+| `src/00_cpu_discovery.c` | Seleção e revalidação de CPU com cpuset, capacidade, frequência e `core_ctl`. |
 | `src/01_kernel_base_tracefs.c` | Descoberta da base KASLR por tracefs. |
 | `src/02_slab_cache_probe.c` | Leitura da geometria e ocupação dos slabs. |
 | `src/03_mm_address_sidechannel/` | Vazamento de endereço de `mm_struct` por temporização de futex. |
@@ -80,7 +92,7 @@ Tamanho  101120 bytes
 | `src/07_futex_pi_trigger.c` | Trigger futex/FPSIMD, variante v14 e serviço assíncrono. |
 | `src/08_ashmem_configfs_rw.c` | Alias ashmem, AAR/AAW inicial e restauração. |
 | `src/09_pipe_buffer_rw.c` | Backend físico por pipes equivalente ao estágio fechado. |
-| `src/10_workqueue_umh_root.c` | Publicação da workqueue e execução do helper de root. |
+| `src/10_workqueue_umh_root.c` | PTY privado, workqueue nativa e execução do helper de root. |
 | `src/90_diagnostic_checkpoint.h` | Checkpoints opcionais identificados pelo boot. |
 | `Makefile` | Build PIE e `LD_PRELOAD` com NDK Android. |
 
@@ -93,8 +105,8 @@ Tamanho  101120 bytes
   restauração do ponteiro global.
 - “configfs AAR/AAW”: primitiva inicial, adequada aos acessos estáticos que o
   binário fechado também realiza por esse caminho.
-- “pipe R/W”: primitiva física instalada depois, usada para objetos SLUB
-  dinâmicos e dados de workqueue.
+- “pipe R/W”: primitiva física instalada depois, usada para objetos SLUB,
+  resolução e restauração do PTY.
 - “reboot limpo”: novo `boot_id`, boot concluído, firmware conferido e `su`
   ausente antes da execução.
 

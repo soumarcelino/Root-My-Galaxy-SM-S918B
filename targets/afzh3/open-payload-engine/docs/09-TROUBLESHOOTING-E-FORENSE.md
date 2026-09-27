@@ -44,17 +44,23 @@ Registrar `/proc/slabinfo` e não repetir dezenas de vezes no mesmo boot.
 
 Comparar:
 
-- `got` versus `want=A+0x1180`;
+- `got` versus `want=A+0x1260`;
 - alias ashmem escolhido;
 - `st_rdev` canônico;
 - base `A`, não `D`;
-- repin CPU0 após kernelsnitch;
+- mesma CPU dinâmica em criação, liberação e reclaim;
 - split 16/16 da preparação;
 - pre31/post32 e ordem de close;
-- tamanho exato `0x8e80`.
+- tamanho exato `0x8e80`;
+- log `exact reclaim ... pass=1`.
 
 Se a abertura ashmem falha depois do trigger, tratar como mutação terminal;
 liberar/repetir pode deixar o kernel usando página reciclada.
+
+Na fonte atual, verificar também `second write ... scheduled=1` e
+`real ashmem fops restored`. Se a restauração não abrir, exigir
+`null quarantine scheduled=1`. Esses logs comprovam o agendamento do write;
+a confirmação do ponteiro real ainda depende do readback AAR.
 
 ## Pipe backend não fica ready
 
@@ -93,8 +99,18 @@ Assinaturas:
 - panic logo após publicação/wake;
 - UFS ou outro work entrando na mesma pool.
 
-Coletar last_kmsg. Verificar se o pool mudou entre validação e publicação. Não
-adicionar rollback cego depois da escrita da lista.
+O payload atual não escreve listas ou contadores de workqueue. Se essa
+assinatura reaparecer, confirmar o hash do payload instalado: ela indica
+artefato antigo, outra escrita no kernel ou corrupção anterior. No caminho
+novo, conferir `native PTY work ... complete=1 socket=1 restore=1`.
+
+## Reclaim exato rejeitado
+
+Se aparecer `exact reclaim proof rejected`, a tentativa parou antes do futex.
+Conferir CPU esperada/real, estado `core_ctl`, contagens `cage=62`, `seed=38` e
+`final_release=1`, suporte a `close_range` e os deltas de objetos/slabs.
+`active_drop` é telemetria. Não relaxar o gate para forçar execução: a rejeição
+segura evita o panic de owner residual.
 
 ## Panic em rt_mutex
 

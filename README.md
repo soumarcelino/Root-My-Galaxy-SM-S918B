@@ -75,6 +75,24 @@ installing it, check that the detected firmware matches a bundled profile
 before starting the root flow. Shizuku is optional and is used only when its
 mode is enabled in the app.
 
+The installation screen starts with **Step 0**, which blocks all preparation
+and runner startup until boot uptime reaches 60 seconds. It displays a live
+countdown and progress bar. The AFZH3 launcher independently enforces the same
+minimum, requires five stable samples, and waits two seconds after its final
+check before invoking the payload.
+
+Immediately before the AFZH3 payload starts, the launcher and app perform a
+one-byte quiet-window handshake. The app removes its animated installer,
+stops log, uptime, progress and performance polling, then acknowledges the
+launcher. The launcher calls `execve` without emitting another log, and the app
+does not resume polling for at least five seconds.
+
+Before collecting stability samples, the app force-stops other user packages
+through Shizuku. The native launcher also runs `am kill-all`, which removes
+background system and user processes that Android marks safe to kill. The Root
+My Galaxy package, Shizuku service and essential persistent framework remain
+alive so the launcher and quiet-window handshake can finish.
+
 For the AFZH3 command-line flow, use the
 [simple-root runner](simple-root/README.md). It builds and stages the AFZH3
 payload and launcher, then checks temporary root and KernelSU. Start from a
