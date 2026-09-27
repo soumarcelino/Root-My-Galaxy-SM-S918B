@@ -21,6 +21,11 @@ exigem serial explícito quando uma ação pode alterar estado.
 | `validate-two-boots.sh` | Bash | **sim** | campanha final 2-reboots com gates |
 | `soak-boots.sh` | Bash | **sim** | soak retomável de 3 boots e resumo comparável |
 | `summarize-soak.py` | Python | não | agrega sucesso e duração por perfil do soak |
+| `check-critical-reclaim.py` | Python | não | impede regressão da CPU crítica do reclaim |
+| `afzh3-app-bundle.py` | Python | não | sincroniza e confere payload/factory/launcher/APK |
+| `build-install-app.sh` | Bash | opcional | build, testes, APK e instalação verificável |
+| `collect-app-runs.sh` | Bash | não | últimos históricos do app, logcat e panic |
+| `analyze-app-runs.py` | Python | não | tempos, sucesso, JSON corrompido e assinatura do panic |
 
 ## 1. Preflight do device
 
@@ -130,7 +135,8 @@ Offsets de símbolos de um snapshot kallsyms:
 
 ```sh
 rtk tools/derive-symbol-offsets.py evidence/kallsyms.txt \
-  --base-symbol _text --symbol init_task --symbol system_unbound_wq \
+  --base-symbol _text --symbol init_task --symbol do_SAK \
+  --symbol do_SAK_work --symbol call_usermodehelper_exec_work \
   --output evidence/symbol-offsets.json
 ```
 
@@ -138,7 +144,7 @@ Layouts BTF locais:
 
 ```sh
 rtk tools/extract-btf-layouts.sh --btf evidence/vmlinux.btf \
-  --struct pipe_buffer --struct pool_workqueue \
+  --struct pipe_buffer --struct tty_struct --struct tty_operations \
   --output evidence/btf-layouts
 ```
 
@@ -236,6 +242,63 @@ recomendado. `TOTAL_BOOTS` e `BATCH_SIZE` alteram o tamanho quando necessário.
 6. Validar harnesses antes do payload completo.
 7. Usar campanha 2-boots somente quando gates do port estiverem completos.
 8. Fazer soak maior antes de declarar estável.
+
+## 10. Bundle e instalação do app AFZH3
+
+Pipeline completo sem alterar o device:
+
+```sh
+tools/build-install-app.sh
+```
+
+Com instalação e comparação do APK puxado do aparelho:
+
+```sh
+tools/build-install-app.sh --install --serial RXCX602E20X
+```
+
+Uso separado do sincronizador/verificador:
+
+```sh
+tools/afzh3-app-bundle.py sync
+tools/afzh3-app-bundle.py verify
+```
+
+## 11. Últimas execuções do aplicativo
+
+```sh
+tools/collect-app-runs.sh --serial RXCX602E20X --count 3
+```
+
+O resultado inclui os JSONs originais, estado do device, logcat, last_kmsg
+disponível, snapshot dos slabs, relatório Markdown/JSON e manifest de hashes.
+`--forensics` integra a coleta geral; `--deep` inclui canais privilegiados
+maiores quando root já funciona.
+
+Reanálise sem device:
+
+```sh
+tools/analyze-app-runs.py evidence/app-runs/CASO \
+  --json evidence/app-runs/CASO/analysis.json \
+  --markdown evidence/app-runs/CASO/analysis.md
+```
+
+## 12. Invariante da CPU crítica
+
+```sh
+tools/check-critical-reclaim.py
+tools/check-critical-reclaim.py --artifact build/payload.so
+```
+
+O check exige seleção e revalidação dinâmica de uma CPU estável, uma fábrica
+crítica por `execve`, ausência de `sched_yield()`, leak conhecido liberado por
+último, flush de `cpu_partial` por 38 slabs distintos e gate exato de 32
+objetos/um slab. `check-repo.py` executa a verificação de fonte automaticamente.
+
+O fluxo detalhado, arquivos produzidos e procedimento pós-crash estão em
+[`docs/14-AUTOMACAO-OPERACIONAL.md`](../docs/14-AUTOMACAO-OPERACIONAL.md).
+A análise de SLUB e a validação da ordem protegida estão em
+[`docs/15-RECLAIM-DETERMINISTICO-E-CPU-DISCOVERY.md`](../docs/15-RECLAIM-DETERMINISTICO-E-CPU-DISCOVERY.md).
 
 ## Saídas e versionamento
 

@@ -21,6 +21,7 @@ Outras opções:
   --runner ARQUIVO          Padrão: ../ksu-payload-functional/simple-root.
   --evidence-dir DIR        Padrão: evidence/campaigns/<UTC>.
   --timeout SEGUNDOS        Timeout por runner; padrão 600.
+  --host-min-uptime SEG     Aguarda ADB estável após este uptime; padrão 65.
   --pre-mutation-retries N  Novas execuções somente antes de mutação; padrão 1.
   --quiet-seconds N         Janela quieta após boot/entre retries; padrão 120.
   --skip-host-quiet         Delega estabilidade exclusivamente ao launcher.
@@ -38,6 +39,7 @@ expect_sha256=
 runner="$repo_dir/../../../../ksu-payload-functional/simple-root"
 evidence_dir=
 runner_timeout=600
+host_min_uptime=65
 pre_mutation_retries=1
 quiet_seconds=120
 max_temp_mc=45000
@@ -53,6 +55,7 @@ while [[ $# -gt 0 ]]; do
     --runner) runner="${2:?runner ausente}"; shift 2 ;;
     --evidence-dir) evidence_dir="${2:?diretório ausente}"; shift 2 ;;
     --timeout) runner_timeout="${2:?timeout ausente}"; shift 2 ;;
+    --host-min-uptime) host_min_uptime="${2:?uptime ausente}"; shift 2 ;;
     --pre-mutation-retries) pre_mutation_retries="${2:?retries ausente}"; shift 2 ;;
     --quiet-seconds) quiet_seconds="${2:?janela quieta ausente}"; shift 2 ;;
     --skip-host-quiet) skip_host_quiet=1; shift ;;
@@ -99,6 +102,8 @@ fi
   die "payload divergente: obtido=$payload_sha256 esperado=${expect_sha256,,}"
 [[ "$runner_timeout" =~ ^[0-9]+$ ]] && (( runner_timeout >= 60 )) ||
   die "--timeout deve ser inteiro >= 60"
+[[ "$host_min_uptime" =~ ^[0-9]+$ ]] && (( host_min_uptime >= 0 )) ||
+  die "--host-min-uptime deve ser inteiro >= 0"
 [[ "$pre_mutation_retries" =~ ^[0-9]+$ ]] && (( pre_mutation_retries <= 3 )) ||
   die "--pre-mutation-retries deve estar entre 0 e 3"
 [[ "$quiet_seconds" =~ ^[0-9]+$ ]] || die "--quiet-seconds deve ser inteiro >= 0"
@@ -189,6 +194,31 @@ pathlib.Path(sys.argv[1]).write_text(json.dumps({
 PY
 }
 
+wait_for_stable_adb() {
+  local expected_boot_id="$1" deadline=$((SECONDS + 180)) stable=0
+  local current_boot_id uptime uptime_seconds
+  note "aguardando ADB estável após uptime ${host_min_uptime}s"
+  while (( SECONDS < deadline )); do
+    current_boot_id="$(adb_shell "$serial" cat /proc/sys/kernel/random/boot_id 2>/dev/null | strip_cr || true)"
+    uptime="$(adb_shell "$serial" cat /proc/uptime 2>/dev/null | strip_cr || true)"
+    uptime="${uptime%% *}"
+    uptime_seconds="${uptime%%.*}"
+    if [[ "$current_boot_id" == "$expected_boot_id" &&
+          "$uptime_seconds" =~ ^[0-9]+$ ]] &&
+       (( uptime_seconds >= host_min_uptime )); then
+      ((stable += 1))
+      if (( stable >= 5 )); then
+        note "ADB estável: uptime=${uptime_seconds}s amostras=$stable"
+        return 0
+      fi
+    else
+      stable=0
+    fi
+    sleep 1
+  done
+  die "ADB não estabilizou no mesmo boot em 180s"
+}
+
 wait_for_clean_boot() {
   local number="$1"
   local preflight="$campaign/boot${number}-preflight.json"
@@ -206,6 +236,7 @@ wait_for_clean_boot() {
   [[ "$completed" == 1 ]] || die "Boot $number não concluiu em 180s"
   local boot_id
   boot_id="$(adb_shell "$serial" cat /proc/sys/kernel/random/boot_id | strip_cr)"
+  wait_for_stable_adb "$boot_id"
   grep -Fxq "$boot_id" "$seen_file" && die "boot_id reutilizado: $boot_id"
   printf '%s\n' "$boot_id" >> "$seen_file"
   "$script_dir/preflight-device.sh" --serial "$serial" --expect-build "$expect_build" \

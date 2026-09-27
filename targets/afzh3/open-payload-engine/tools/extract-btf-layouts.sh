@@ -50,7 +50,7 @@ if [[ -n "$serial" ]]; then
 fi
 [[ -s "$btf" ]] || die "BTF ausente ou vazio: $btf"
 if [[ ${#structs[@]} -eq 0 ]]; then
-  structs=(pipe_buffer pool_workqueue worker_pool workqueue_struct work_struct subprocess_info completion)
+  structs=(pipe_buffer work_struct subprocess_info completion tty_struct tty_operations tty_file_private file files_struct fdtable task_struct)
 fi
 
 found=0
