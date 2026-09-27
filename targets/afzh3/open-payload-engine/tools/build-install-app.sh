@@ -64,7 +64,7 @@ if (( install_apk )); then
 fi
 
 note "compilando engine, factory e checks focados"
-make -C "$repo_dir" so all tests test-aar-read-plan test-fops-layout
+make -C "$repo_dir" so all tests test-aar-read-plan test-fops-layout test-compact-log
 python3 "$script_dir/check-critical-reclaim.py" \
   --artifact "$repo_dir/build/payload.so"
 
@@ -72,7 +72,9 @@ note "compilando stability launcher"
 mkdir -p "$project_dir/stability-launcher/build"
 "$launcher_cc" -O2 -Wall -Wextra -Werror -fPIE \
   -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
+  -include "$project_dir/native/compact_log.h" \
   "$project_dir/stability-launcher/stability-launcher.c" \
+  "$project_dir/native/compact_log.c" \
   -pie -Wl,-z,relro,-z,now \
   -o "$project_dir/stability-launcher/build/stability-launcher"
 

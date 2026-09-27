@@ -72,7 +72,9 @@ printf '[*] Compilando stability-launcher para Android ARM64/API 35\n'
 mkdir -p "$LAUNCHER_DIR/build" "$ASSET_DIR"
 "$LAUNCHER_CC" -O2 -Wall -Wextra -Werror -fPIE \
   -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
+  -include "$PROJECT_DIR/native/compact_log.h" \
   "$LAUNCHER_DIR/stability-launcher.c" \
+  "$PROJECT_DIR/native/compact_log.c" \
   -pie -Wl,-z,relro,-z,now -o "$LAUNCHER_DIR/build/stability-launcher"
 install -m 755 "$LAUNCHER_DIR/build/stability-launcher" "$ASSET_DIR/stability-launcher"
 
