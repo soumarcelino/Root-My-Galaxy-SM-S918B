@@ -228,7 +228,7 @@ Os hashes calculados depois do `adb push` foram idênticos aos arquivos host.
 
 ## Perfil Android
 
-O app 0.6.0-beta-2 contém o perfil exato `dm3q-S918BXXUAZZHL-ksunext`. Ele seleciona
+O app 0.6.0-beta-3 contém o perfil exato `dm3q-S918BXXUAZZHL-ksunext`. Ele seleciona
 modelo, build display, fingerprint, kernel release e `uname -v` antes de
 expor o fluxo. Os assets são sincronizados e auditados com:
 
@@ -241,7 +241,7 @@ O APK `app-debug.apk`, SHA-256
 `cd2b2391da8ef681b22a6c05ed64ae1c69986c2c4301fd89c315480059eedde4`,
 passou nos testes. O verificador confirmou dentro do APK os cinco binários da
 tabela acima, seus tamanhos e o perfil. O `apkanalyzer` confirmou
-`versionCode=37` e `versionName=0.6.0-beta-2`.
+`versionCode=38` e `versionName=0.6.0-beta-3`.
 
 ## Verificações locais
 
