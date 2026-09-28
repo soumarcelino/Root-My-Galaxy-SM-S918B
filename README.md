@@ -1,103 +1,168 @@
 # Root My Galaxy · SM-S918B
 
-**Version 0.6.0-beta-3** · Samsung Galaxy S23 Ultra (`SM-S918B`, `dm3q`)
+**Version 0.6.0-beta-3** · Samsung Galaxy S23 Ultra (`SM-S918B` / `SM-S918N`, `dm3q`)
 
-Root My Galaxy provides an Android app and a command-line runner for loading
-KernelSU on specific SM-S918B firmware builds. The app selects a bundled payload
-using the device's exact build and kernel identity. The AFZH3 and One UI 9 ZZHL
-paths use the open payload engine, a stability launcher, and KernelSU Next
-**v3.4.0**.
+[Latest pre-release: v0.6.0-beta-3](https://github.com/soumarcelino/Root-My-Galaxy-SM-S918B/releases/tag/v0.6.0-beta-3)
+
+**One click Root.**
+
+Root My Galaxy is our attempt to make rooting a supported Galaxy S23 Ultra feel
+almost boring: open the app, tap once, and let it cook. The modern flow runs on
+**BOPE :: the Brazilian Open Payload Engine**, a fully open rewrite built from
+scratch to be quick, readable, and seriously stable. Most successful runs get
+root in **under 5 seconds**.
+
+And the newest port, made for `S918BXXUAZZI8`, is something special. It came
+from deep analysis, stubborn debugging, hundreds of reboots and executions,
+and optimization after optimization. Every failed run left a clue, and every
+reboot pushed BOPE forward, until a difficult port became a state-of-the-art
+engine. The result: after stabilization, BOPE reaches root in an honestly
+**impressive 2 seconds**, a tiny number carrying a huge amount of work.
+
+Modern targets use BOPE exclusively. The old FZF5 profile remains available as
+a clearly marked legacy compatibility target.
 
 [Releases](https://github.com/soumarcelino/Root-My-Galaxy-SM-S918B/releases) ·
 [Documentation](docs/README.md)
 
-Use this project only on devices you own or are authorized to test. A matching
-model alone is insufficient: payloads and kernel modules are tied to a specific
-firmware build.
+Each target is tied to an exact model, firmware, kernel, and fingerprint. Think
+of it as a key cut for one very specific lock: matching only the phone model is
+not enough.
 
 ## App screenshots
 
-AFZH3 installation flow: stabilization checks, the app's root verification
-screen, and the KernelSU Next v3.4.0 manager.
+One UI 9 ZZI8 validation: Root My Galaxy completing the payload in **2 seconds** and KernelSU Next v3.4.0 running on the exact `S918BXXUAZZI8` kernel.
 
 <table>
   <tr>
-    <th>Stability readings</th>
-    <th>Root active</th>
+    <th>Root My Galaxy</th>
     <th>KernelSU Next v3.4.0</th>
   </tr>
   <tr>
-    <td><img src="docs/assets/screenshots/root-my-galaxy-2026-09-25-222857.jpg" alt="Root My Galaxy displaying temperature and available memory during stabilization" width="280"></td>
-    <td><img src="docs/assets/screenshots/root-my-galaxy-2026-09-25-223609.jpg" alt="Root My Galaxy showing Root Active and KernelSU Next verified" width="280"></td>
-    <td><img src="docs/assets/screenshots/kernelsu-next-2026-09-25-223940.jpg" alt="KernelSU Next manager showing v3.4.0 working on the AFZH3 kernel" width="280"></td>
+    <td><img src="docs/assets/screenshots/root-my-galaxy-zzi8-beta3.jpg" alt="Root My Galaxy v0.6.0-beta-3 showing root active on S918BXXUAZZI8" width="320"></td>
+    <td><img src="docs/assets/screenshots/kernelsu-next-zzi8.jpg" alt="KernelSU Next v3.4.0 working with the S918BXXUAZZI8 kernel" width="320"></td>
   </tr>
 </table>
 
-## Firmware profiles
+## Targets
 
-| Firmware | Root integration | Project files |
-| --- | --- | --- |
-| `S918BXXSAFZF5` | KernelSU | [`targets/afzf5/`](targets/afzf5/) |
-| `S918BXXSAFZG1` | KernelSU Next v3.3.0 | [`targets/afzg1/`](targets/afzg1/) |
-| `S918BXXSAFZH3` | KernelSU Next v3.4.0 | [`targets/afzh3/`](targets/afzh3/) |
-| `S918BXXUAZZHL` | KernelSU Next v3.4.0 | [`targets/zzhl/`](targets/zzhl/) |
+These are all payload profiles currently shipped in the app:
 
-The app's [target manifest](app/src/main/assets/targets-v3.json) contains the
-exact build, fingerprint, kernel release, and artifacts for each profile.
+| Device | Firmware | System | Payload | Root integration | Target files |
+| --- | --- | --- | --- | --- | --- |
+| `SM-S918B` | `S918BXXUAZZI8` | One UI 9 / Android 17 | **BOPE :: Brazilian Open Payload Engine (State of Art Engine)** | KernelSU Next v3.4.0 | [`targets/zzi8-WIP/`](targets/zzi8-WIP/) |
+| `SM-S918B` | `S918BXXUAZZHL` | One UI 9 / Android 17 | **BOPE :: Brazilian Open Payload Engine (State of Art Engine)** | KernelSU Next v3.4.0 | [`targets/zzhl/`](targets/zzhl/) |
+| `SM-S918B` | `S918BXXSAFZH3` | One UI 8.5 / Android 16 | **BOPE-Beta :: Brazilian Open Payload Engine** | KernelSU Next v3.4.0 | [`targets/afzh3/`](targets/afzh3/) |
+| `SM-S918B` | `S918BXXSAFZG1` | One UI 8.5 / Android 16 | **BOPE-Beta :: Brazilian Open Payload Engine** | KernelSU Next v3.3.0 | [`targets/afzg1/`](targets/afzg1/) |
+| `SM-S918N` | `S918NKSS8FZG1` | One UI 8.5 / Android 16 | **BOPE-Beta :: Brazilian Open Payload Engine** | KernelSU Next | App-bundled profile |
+| `SM-S918B` | `S918BXXSAFZF5` | One UI 8.5 / Android 16 | **Old Chinese Payload** | KernelSU | [`targets/afzf5/`](targets/afzf5/) |
 
-## AFZH3 target
+The app's [target manifest](app/src/main/assets/targets-v3.json) is the source of
+truth for the exact build display, fingerprint, kernel release, and binaries.
+If those values do not match, the app stops instead of gambling with the wrong
+payload.
 
-The current AFZH3 integration targets Android 16 and this exact device build:
+## So, what is BOPE?
 
-```text
-model: SM-S918B
-device: dm3q
-build display: BP4A.251205.006.S918BXXSAFZH3
-kernel release: 5.15.189-android13-8-33413713-abS918BXXSAFZH3
-kernel build: #1 SMP PREEMPT Tue Aug 11 06:33:52 UTC 2026
-```
+BOPE is the part that gets its hands dirty. It replaces the old closed chinese payload
+path with an engine anyone can read, audit, port, and improve. Each firmware
+keeps its own addresses and constants in its target file, while the shared
+exploit code stays reusable and much easier to reason about.
 
-The AFZH3 KernelSU Next v3.4.0 module is built for Samsung's AFZH3 kernel.
-The generic v3.4.0 module is incompatible with this target; see the
-[AFZH3 KernelSU guide](targets/afzh3/kernelsu-next/README.md) for build and
-compatibility details.
+The One UI 9 ports also gained stricter preflight checks, deterministic retries,
+a linear SELinux alias path, and much clearer staging errors. Add the stability
+launcher and the result is a payload that knows when to go, when to wait, and
+when to stop before touching the wrong firmware.
 
-## Build and use
+Want to see what happens under the hood? Open the
+[complete BOPE ZZI8 execution flowchart](targets/zzi8-WIP/brazilian-open-payload-engine/docs/FULL-EXECUTION-FLOW.md)
+to follow the engine visually, from its first preflight check to KernelSU Next
+and final root verification.
 
-To build the Android debug APK, install the Android SDK and JDK, then run:
+## Stability Launcher
+
+A fresh Android boot may look calm, but under the hood it is chaos: apps wake
+up, services fight for CPU, memory and I/O, the phone heats up, and kernel slabs
+keep moving. BOPE is sensitive to timing, so launching in the middle of that
+party can make a reliable exploit feel like a coin toss.
+
+The Stability Launcher is BOPE's traffic light. It waits for Android and the
+minimum uptime, then watches memory, temperature, runnable tasks, system
+pressure, `mm_struct` slab activity, and pipe capacity. It only turns green
+after consecutive clean samples; if the phone gets noisy, the count starts
+again. A cool and clearly idle device gets the fast lane.
+
+Once the runway is clear, the launcher steps aside and BOPE takes off. That wait
+is measured separately, which is why ZZI8's impressive **2 seconds** represent
+the payload itself, after the launcher handled the chaos.
+
+[Explore the complete visual BOPE ZZI8 execution flow](targets/zzi8-WIP/brazilian-open-payload-engine/docs/FULL-EXECUTION-FLOW.md),
+from the Stability Launcher and KASLR discovery to the futex trigger, pipe R/W,
+temporary root, KernelSU Next, and every retry boundary.
+
+## Run Simple Root
+
+`simple-root` is the hands-on command-line route. Right now it builds and runs
+the **AFZH3** stack: BOPE, the stability launcher, the helper, and KernelSU Next.
+Connect one authorized device through ADB, start from a clean boot, and run:
 
 ```sh
-cd app
-./gradlew assembleDebug
+cd simple-root
+./simple-root.sh
 ```
 
-The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. After
-installing it, check that the detected firmware matches a bundled profile
-before starting the root flow. Shizuku is optional and is used only when its
-mode is enabled in the app.
+If more than one device is connected, pass the serial explicitly:
 
-The installation screen starts with **Step 0**, which blocks all preparation
-and runner startup until boot uptime reaches 60 seconds. It displays a live
-countdown and progress bar. The AFZH3 launcher independently enforces the same
-minimum, requires five stable samples, and waits two seconds after its final
-check before invoking the payload.
+```sh
+./simple-root.sh RXCX602E20X
+```
 
-Immediately before the AFZH3 payload starts, the launcher and app perform a
-one-byte quiet-window handshake. The app removes its animated installer,
-stops log, uptime, progress and performance polling, then acknowledges the
-launcher. The launcher calls `execve` without emitting another log, and the app
-does not resume polling for at least five seconds.
+The runner checks the firmware, builds everything it needs, stages the files in
+`/data/local/tmp`, waits for the stability gate, launches BOPE, loads KernelSU,
+and finishes by checking `su -c id`. The full walkthrough lives in the
+[Simple Root guide](simple-root/README.md).
 
-Before collecting stability samples, the app force-stops other user packages
-through Shizuku. The native launcher also runs `am kill-all`, which removes
-background system and user processes that Android marks safe to kill. The Root
-My Galaxy package, Shizuku service and essential persistent framework remain
-alive so the launcher and quiet-window handshake can finish.
+## Build the payloads
 
-For the AFZH3 command-line flow, use the
-[simple-root runner](simple-root/README.md). It builds and stages the AFZH3
-payload and launcher, then checks temporary root and KernelSU. Start from a
-clean boot and follow the runner's device checks before attempting a run.
+Use Android NDK `28.2.13676358` or set `ANDROID_NDK_HOME` to another compatible
+NDK. Every BOPE target has its own build directory, so rebuilding one firmware
+does not silently mix it with another.
+
+### ZZI8 :: BOPE
+
+```sh
+cd targets/zzi8-WIP/brazilian-open-payload-engine
+python3 tools/verify-zzi8-target.py
+make clean all so
+```
+
+### ZZHL :: BOPE
+
+```sh
+cd targets/zzhl/brazilian-open-payload-engine
+python3 tools/verify-zzhl-target.py
+make clean all so
+```
+
+### AFZH3 :: BOPE-Beta
+
+```sh
+make -C targets/afzh3/brazilian-open-payload-engine clean all so
+```
+
+For the old FZF5 source tree, build its legacy payload from the repository root:
+
+```sh
+make TARGET=dm3q-S918BXXSAFZF5
+```
+
+The AFZG1 and `SM-S918N` FZG1 profiles currently use their verified prebuilt
+payload artifacts. Their buildable KernelSU Next component is separate; AFZG1
+can be rebuilt with:
+
+```sh
+targets/afzg1/kernelsu-next/build-afzg1.sh
+```
 
 ## Repository layout
 
@@ -106,31 +171,39 @@ app/                    Android app and bundled target profiles
 RootMyGalaxyDesktop/    Desktop GUI and helper source
 simple-root/            AFZH3 command-line runner
 stability-launcher/     AFZH3 launcher and stability gates
-targets/afzf5/          AFZF5 payload, helper, and KernelSU files
-targets/afzg1/          AFZG1 payload, helper, and KernelSU Next files
-targets/afzh3/          AFZH3 open payload, helper, and KernelSU Next files
-targets/zzhl/       ZZHL open payload, helper, and KernelSU Next files
+targets/                Firmware targets, payloads, helpers, and KernelSU files
 tools/                  Porting and development utilities
 docs/                   Project guides and screenshots
 ```
 
-For implementation details, see the [AFZH3 open payload engine](targets/afzh3/brazilian-open-payload-engine/README.md),
-the [KernelSU Next v3.4.0 guide](targets/afzh3/kernelsu-next/README.md), and
-the [documentation index](docs/README.md). The older porting guides under
-`docs/` describe the AFZF5/AFZG1 workflows and should not be used to prepare
-AFZH3 app assets.
+For implementation details, visit the
+[ZZI8 BOPE source](targets/zzi8-WIP/brazilian-open-payload-engine/README.md), the
+[ZZHL BOPE source](targets/zzhl/brazilian-open-payload-engine/README.md), the
+[AFZH3 BOPE source](targets/afzh3/brazilian-open-payload-engine/README.md), or
+the [documentation index](docs/README.md).
 
 ## Credits
 
-This SM-S918B adaptation builds on
-[youyoudezhuzhu/rmg-f731u](https://github.com/youyoudezhuzhu/rmg-f731u).
+The app started from [BuSung-dev/Root-My-Galaxy](https://github.com/BuSung-dev/Root-My-Galaxy),
+which provided the base Android application.
+
+The first closed payloads came from
+[youyoudezhuzhu/rmg-f731u](https://github.com/youyoudezhuzhu/rmg-f731u) and made
+the original SM-S918B adaptation possible.
+
+**ChatGPT Daybreak Blue** helped decompile and understand the secret Chinese
+code, then supported BOPE's ground-up rewrite all the way to its current
+state-of-the-art form.
+
+**Claude** contributed general improvements and additional support
+throughout the work led with Daybreak Blue.
 
 ## 🇧🇷 É Brazuca também?
 
-Deixe um apoio usando Pix 💙
+Deixe um apoio usando Pix.
 
-Sua ajuda motiva expandir esse trabalho pra novos devices, e é um jeito de
-agradecer pelas noites sem dormir por trás desse port :)
+Sua ajuda motiva expandir esse trabalho pra novos devices e é um jeito de
+agradecer pelas noites sem dormir por trás desse port.
 
 <p align="center">
   <img src="docs/assets/screenshots/PixApoiaOBrazuca.png" alt="QR Code Pix para apoiar o projeto" width="220">
