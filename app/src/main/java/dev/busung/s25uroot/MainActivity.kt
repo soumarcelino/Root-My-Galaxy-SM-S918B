@@ -73,6 +73,7 @@ import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Handshake
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.LightMode
@@ -149,6 +150,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.busung.s25uroot.ui.theme.ColorScheme_success
 import dev.busung.s25uroot.ui.theme.RootMyGalaxyTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -620,8 +622,43 @@ private fun OverviewPage(
             }
         }
         item { InstallStatusCard(installState, onInstall) }
+        installState.supportHelp?.let { help ->
+            item { FirmwarePortHelpCard(help) }
+        }
         item { DeviceCard(device) }
         item { HowItWorksCard() }
+    }
+}
+
+@Composable
+private fun FirmwarePortHelpCard(message: String) {
+    val context = LocalContext.current
+    val success = ColorScheme_success
+    Card(
+        onClick = { openProjectIssues(context) },
+        modifier = Modifier.fillMaxWidth().animateContentSize(),
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = CardDefaults.cardColors(
+            containerColor = success.container,
+            contentColor = success.onContainer,
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Icon(
+                Icons.Rounded.Handshake,
+                contentDescription = null,
+                modifier = Modifier.size(44.dp),
+            )
+            Text(
+                text = message,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
     }
 }
 
@@ -778,6 +815,7 @@ private fun InstallStatusCard(installState: InstallUiState, onInstall: () -> Uni
             clickHaptic(view)
             when {
                 installState.busy -> Unit
+                installState.supportHelp != null -> openProjectIssues(context)
                 installState.phase == InstallPhase.Installed -> {
                     openKernelSuManager(context)
                 }

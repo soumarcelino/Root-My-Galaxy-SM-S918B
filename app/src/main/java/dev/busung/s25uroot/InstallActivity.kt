@@ -43,6 +43,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Handshake
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material3.AlertDialog
@@ -263,6 +264,9 @@ private fun InstallScreen(
                 } else {
                     StatusProgressCard(installState, uninstallRoot)
                 }
+                installState.supportHelp?.let { help ->
+                    FirmwarePortHelpCard(help)
+                }
                 if (installState.rebootRequired) {
                     FatalRebootCard(installState)
                 }
@@ -316,6 +320,38 @@ private fun InstallScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun FirmwarePortHelpCard(message: String) {
+    val context = LocalContext.current
+    val success = ColorScheme_success
+    Card(
+        onClick = { openProjectIssues(context) },
+        modifier = Modifier.fillMaxWidth().animateContentSize(),
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = CardDefaults.cardColors(
+            containerColor = success.container,
+            contentColor = success.onContainer,
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Icon(
+                Icons.Rounded.Handshake,
+                contentDescription = null,
+                modifier = Modifier.size(44.dp),
+            )
+            Text(
+                text = message,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
     }
 }
@@ -431,6 +467,7 @@ private fun SuccessCard(installState: InstallUiState, uninstallRoot: Boolean) {
 
 @Composable
 private fun StatusProgressCard(installState: InstallUiState, uninstallRoot: Boolean) {
+    val context = LocalContext.current
     val failed = installState.phase == InstallPhase.Failed
     val waitingForUptime = installState.phase == InstallPhase.WaitingForUptime
     val requestedProgress = if (waitingForUptime || installState.phase == InstallPhase.Checking ||
@@ -455,7 +492,10 @@ private fun StatusProgressCard(installState: InstallUiState, uninstallRoot: Bool
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .animateContentSize(),
+            .animateContentSize()
+            .clickable(enabled = installState.supportHelp != null) {
+                openProjectIssues(context)
+            },
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(
             containerColor = if (failed) {

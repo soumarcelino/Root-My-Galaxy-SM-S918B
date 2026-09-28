@@ -49,6 +49,7 @@ data class InstallUiState(
     val rebootInProgress: Boolean = false,
     val rebootError: String? = null,
     val failureDetail: String? = null,
+    val supportHelp: String? = null,
 ) {
     val busy: Boolean
         get() = phase in setOf(
@@ -141,6 +142,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                     log = "$probe\n[app] support=failed type=${error.javaClass.simpleName}" +
                         detail?.let { " message=${it.replace('\n', ' ')}" }.orEmpty(),
                     failureDetail = detail,
+                    supportHelp = (error as? UnsupportedFirmwareException)?.helpMessage,
                 )
             }
         }
@@ -543,6 +545,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         mutableState.value = mutableState.value.copy(
             rebootRequired = rebootRequired,
             failureDetail = detail,
+            supportHelp = (error as? UnsupportedFirmwareException)?.helpMessage,
         )
         finishHistory(InstallRunResult.Failed)
     }

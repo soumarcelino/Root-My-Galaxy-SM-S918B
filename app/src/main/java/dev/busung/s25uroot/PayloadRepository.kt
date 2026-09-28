@@ -31,13 +31,9 @@ class PayloadRepository(private val context: Context) {
         .filter { it.matches(snapshot) }
         .maxByOrNull { it.specificity }
         ?: throw UnsupportedFirmwareException(
-            buildString {
-                append(context.getString(R.string.error_firmware_unsupported, snapshot.buildId))
-                if (snapshot.isOneUi9) {
-                    append("\n\n")
-                    append(context.getString(R.string.error_firmware_one_ui_9_help))
-                }
-            },
+            message = context.getString(R.string.error_firmware_unsupported, snapshot.buildId),
+            helpMessage = context.getString(R.string.error_firmware_one_ui_9_help)
+                .takeIf { snapshot.isOneUi9 },
         )
 
     fun resolveTarget(profileId: String): TargetProfile = loadTargets()
@@ -230,4 +226,7 @@ class PayloadRepository(private val context: Context) {
     }
 }
 
-class UnsupportedFirmwareException(message: String) : IllegalStateException(message)
+class UnsupportedFirmwareException(
+    message: String,
+    val helpMessage: String?,
+) : IllegalStateException(message)
