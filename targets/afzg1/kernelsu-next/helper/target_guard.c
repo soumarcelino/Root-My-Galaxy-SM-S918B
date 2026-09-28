@@ -60,7 +60,6 @@ int rmg_target_validate(FILE *stream, int verbose) {
       {"ro.product.model", TARGET_MODEL},
       {"ro.product.device", TARGET_DEVICE},
       {"ro.build.display.id", TARGET_BUILD_DISPLAY},
-      {"ro.build.fingerprint", BUILD_FINGERPRINT},
       {"ro.build.version.sdk", TARGET_ANDROID_SDK},
       {"ro.product.cpu.abi", TARGET_ABI},
   };

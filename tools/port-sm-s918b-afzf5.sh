@@ -141,7 +141,6 @@ check_device() {
   test "$model" = "$TARGET_MODEL" || die "unexpected model: ${model}"
   test "$device" = "$TARGET_DEVICE" || die "unexpected device: ${device}"
   test "$display" = "$TARGET_BUILD_DISPLAY" || die "unexpected build display: ${display}"
-  test "$fingerprint" = "$TARGET_FINGERPRINT" || die "unexpected fingerprint: ${fingerprint}"
   test "$kernel_release" = "$TARGET_KERNEL_RELEASE" || die "unexpected kernel release: ${kernel_release}"
   test "$kernel_version" = "$TARGET_KERNEL_VERSION" || die "unexpected kernel version: ${kernel_version}"
   test "$sdk" = "$TARGET_SDK" || die "unexpected SDK: ${sdk}"

@@ -37,7 +37,6 @@ Uso:
 
 Variáveis:
   ANDROID_SERIAL, ZZHL_ASSETS
-  FORCE_UNSUPPORTED=1   ignora a checagem de fingerprint (não recomendado)
   ADB_RETRY_COUNT, ADB_RETRY_WAIT     tolerância a quedas transitórias de USB/adb
   ROOT_TOTAL_BUDGET, ROOT_CONFIRM_GRACE  janelas de espera pela confirmação de root
   EXPLOIT_ATTEMPTS (padrão 1)  tentativas do helper por boot; ver comentário no script
@@ -91,37 +90,35 @@ root_alive() {
 # offsets do helper são fixos para S918BXXUAZZHL; rodar contra outro
 # device/build não falha "de forma segura", tende a crashar o kernel.
 check_target() {
-  local out model device fingerprint boot_completed idline context
-  out="$(adb_shell "getprop ro.product.model; getprop ro.product.device; getprop ro.build.fingerprint; getprop sys.boot_completed; id; cat /proc/self/attr/current")" || {
+  local out model device build kernel_release fingerprint boot_completed idline context
+  out="$(adb_shell "getprop ro.product.model; getprop ro.product.device; getprop ro.build.version.incremental; uname -r; getprop ro.build.fingerprint; getprop sys.boot_completed; id; cat /proc/self/attr/current")" || {
     echo "não foi possível consultar o dispositivo para validação" >&2
     return 1
   }
   model="$(sed -n '1p' <<<"$out" | tr -d '\r')"
   device="$(sed -n '2p' <<<"$out" | tr -d '\r')"
-  fingerprint="$(sed -n '3p' <<<"$out" | tr -d '\r')"
-  boot_completed="$(sed -n '4p' <<<"$out" | tr -d '\r')"
-  idline="$(sed -n '5p' <<<"$out" | tr -d '\r')"
-  context="$(sed -n '6p' <<<"$out" | tr -d '\r')"
+  build="$(sed -n '3p' <<<"$out" | tr -d '\r')"
+  kernel_release="$(sed -n '4p' <<<"$out" | tr -d '\r')"
+  fingerprint="$(sed -n '5p' <<<"$out" | tr -d '\r')"
+  boot_completed="$(sed -n '6p' <<<"$out" | tr -d '\r')"
+  idline="$(sed -n '7p' <<<"$out" | tr -d '\r')"
+  context="$(sed -n '8p' <<<"$out" | tr -d '\r')"
 
   local ok=1
   [[ "${model//_/-}" == "SM-S918B" ]] || { echo "modelo inesperado: $model" >&2; ok=0; }
   [[ "$device" == "dm3q" ]] || { echo "device codename inesperado: $device" >&2; ok=0; }
+  [[ "$build" == "S918BXXUAZZHL" ]] || { echo "build inesperado: $build" >&2; ok=0; }
+  [[ "$kernel_release" == "5.15.197-android13-8-34343818-abS918BXXUAZZHL" ]] || {
+    echo "kernel inesperado: $kernel_release" >&2; ok=0;
+  }
   [[ "$boot_completed" == "1" ]] || { echo "Android ainda não terminou de bootar" >&2; ok=0; }
   [[ "$idline" == uid=2000\(shell\)* ]] || { echo "identidade adb inesperada: $idline" >&2; ok=0; }
   [[ "$context" == "u:r:shell:s0" ]] || { echo "contexto SELinux inesperado: $context" >&2; ok=0; }
-  if [[ "$fingerprint" != *ZZHL* ]]; then
-    echo "fingerprint não contém ZZHL: $fingerprint" >&2
-    if [[ "${FORCE_UNSUPPORTED:-0}" == "1" ]]; then
-      echo "FORCE_UNSUPPORTED=1: continuando mesmo assim" >&2
-    else
-      ok=0
-    fi
-  fi
   if (( ! ok )); then
     echo "dispositivo não corresponde ao perfil esperado (S918BXXUAZZHL); abortando para não arriscar crash" >&2
     return 1
   fi
-  echo "[*] alvo confirmado: ${model//_/-}/$device fingerprint=$fingerprint" >&2
+  echo "[*] alvo confirmado: ${model//_/-}/$device build=$build kernel=$kernel_release fingerprint=$fingerprint" >&2
 }
 
 stage() {

@@ -519,8 +519,7 @@ static int target_matches(void) {
          strcmp(info.release, TARGET_KERNEL_RELEASE) == 0 &&
          property_equals("ro.product.model", TARGET_MODEL) &&
          property_equals("ro.product.device", TARGET_DEVICE) &&
-         property_equals("ro.build.version.incremental", TARGET_BUILD) &&
-         property_equals("ro.build.fingerprint", TARGET_FINGERPRINT);
+         property_equals("ro.build.version.incremental", TARGET_BUILD);
 }
 
 static int app_main(void) {

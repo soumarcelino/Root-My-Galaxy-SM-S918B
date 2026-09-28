@@ -36,7 +36,6 @@ data class TargetProfile(
 
     fun matchesExactBuild(snapshot: DeviceSnapshot): Boolean =
         (buildDisplays.isEmpty() || snapshot.buildId in buildDisplays) &&
-            (fingerprints.isEmpty() || snapshot.fingerprint in fingerprints) &&
             (kernelReleases.isEmpty() || snapshot.kernelRelease in kernelReleases) &&
             (kernelVersionInfos.isEmpty() || snapshot.kernelVersionInfo in kernelVersionInfos)
 
@@ -44,7 +43,7 @@ data class TargetProfile(
         matchesDevice(snapshot) && matchesKernelVersion(snapshot) && matchesExactBuild(snapshot)
 
     val specificity: Int
-        get() = listOf(buildDisplays, fingerprints, kernelReleases, kernelVersionInfos)
+        get() = listOf(buildDisplays, kernelReleases, kernelVersionInfos)
             .count { it.isNotEmpty() }
 
     val supportedModels: String

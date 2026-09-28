@@ -26,7 +26,8 @@ a clearly marked legacy compatibility target.
 [Releases](https://github.com/soumarcelino/Root-My-Galaxy-SM-S918B/releases) ·
 [Documentation](docs/README.md)
 
-Each target is tied to an exact model, firmware, kernel, and fingerprint. Think
+Each target is tied to an exact model, firmware, and kernel. Regional
+fingerprint prefixes are recorded for diagnostics but do not block a match. Think
 of it as a key cut for one very specific lock: matching only the phone model is
 not enough.
 
@@ -61,9 +62,9 @@ These are all payload profiles currently shipped in the app:
 | `SM-S918B` | `S918BXXSAFZF5` | One UI 8.5 / Android 16 | **Old Chinese Payload** | KernelSU | [`targets/afzf5/`](targets/afzf5/) |
 
 The app's [target manifest](app/src/main/assets/targets-v3.json) is the source of
-truth for the exact build display, fingerprint, kernel release, and binaries.
-If those values do not match, the app stops instead of gambling with the wrong
-payload.
+truth for the exact build display, kernel release, kernel version, and binaries.
+Fingerprints remain diagnostic metadata so regional product names such as
+`dm3qxxx` and `dm3qxeea` can share an otherwise identical firmware target.
 
 ## So, what is BOPE?
 

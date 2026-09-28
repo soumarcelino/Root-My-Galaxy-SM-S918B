@@ -8,8 +8,9 @@ and verifies `su -c id`.
 
 The target is hardcoded to `targets/zzi8-WIP/`. There is no environment or
 command-line target selector. Before compiling or staging anything, the runner
-requires an exact match for model, device, build display, fingerprint, kernel
-release, and kernel version. Every other firmware is rejected.
+requires an exact match for model, device, build display, kernel release, and
+kernel version. Regional fingerprint prefixes are diagnostic only. Every other
+firmware is rejected.
 
 ## Exact target
 

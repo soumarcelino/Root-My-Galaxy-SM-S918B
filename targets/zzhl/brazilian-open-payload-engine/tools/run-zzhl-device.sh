@@ -75,8 +75,6 @@ fingerprint="$(adb_shell "$serial" getprop ro.build.fingerprint | strip_cr)"
 kernel="$(adb_shell "$serial" uname -r | strip_cr)"
 boot_before="$(adb_shell "$serial" cat /proc/sys/kernel/random/boot_id | strip_cr)"
 [[ "$model" == SM-S918B && "$device" == dm3q ]] || die "modelo/device divergente: $model/$device"
-[[ "$fingerprint" == samsung/dm3qxxx/dm3q:17/CP2A.260605.016/S918BXXUAZZHL:user/release-keys ]] ||
-  die "fingerprint divergente: $fingerprint"
 [[ "$kernel" == 5.15.197-android13-8-34343818-abS918BXXUAZZHL ]] ||
   die "kernel divergente: $kernel"
 

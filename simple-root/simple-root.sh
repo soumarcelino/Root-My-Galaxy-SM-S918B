@@ -33,7 +33,6 @@ TARGET_DESCRIPTION='latest One UI 9 Beta 2 firmware'
 TARGET_MODEL=SM-S918B
 TARGET_DEVICE=dm3q
 TARGET_BUILD_DISPLAY=CP2A.260605.016.S918BXXUAZZI8
-TARGET_FINGERPRINT=samsung/dm3qxxx/dm3q:17/CP2A.260605.016/S918BXXUAZZI8:user/release-keys
 TARGET_KERNEL_RELEASE=5.15.197-android13-8-34343818-abS918BXXUAZZI8
 TARGET_KERNEL_VERSION='#1 SMP PREEMPT Mon Sep 14 06:56:00 UTC 2026'
 
@@ -58,13 +57,11 @@ fi
 device_model="$("${adb_cmd[@]}" shell getprop ro.product.model | tr -d '\r')"
 device_name="$("${adb_cmd[@]}" shell getprop ro.product.device | tr -d '\r')"
 device_build="$("${adb_cmd[@]}" shell getprop ro.build.display.id | tr -d '\r')"
-device_fingerprint="$("${adb_cmd[@]}" shell getprop ro.build.fingerprint | tr -d '\r')"
 device_kernel_release="$("${adb_cmd[@]}" shell uname -r | tr -d '\r')"
 device_kernel_version="$("${adb_cmd[@]}" shell uname -v | tr -d '\r')"
 if [[ "$device_model" != "$TARGET_MODEL" ||
       "$device_name" != "$TARGET_DEVICE" ||
       "$device_build" != "$TARGET_BUILD_DISPLAY" ||
-      "$device_fingerprint" != "$TARGET_FINGERPRINT" ||
       "$device_kernel_release" != "$TARGET_KERNEL_RELEASE" ||
       "$device_kernel_version" != "$TARGET_KERNEL_VERSION" ]]; then
   printf 'Incompatible firmware. simple-root supports only %s, the %s.\n' \

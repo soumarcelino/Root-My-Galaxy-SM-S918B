@@ -61,10 +61,6 @@ TARGET_MODEL = "SM-S918B"
 TARGET_DEVICE = "dm3q"
 TARGET_BUILD = "S918BXXUAZZI8"
 TARGET_BUILD_DISPLAY = "CP2A.260605.016.S918BXXUAZZI8"
-TARGET_FINGERPRINT = (
-    "samsung/dm3qxxx/dm3q:17/CP2A.260605.016/"
-    "S918BXXUAZZI8:user/release-keys"
-)
 TARGET_KERNEL_RELEASE = "5.15.197-android13-8-34343818-abS918BXXUAZZI8"
 TARGET_KERNEL_VERSION = "#1 SMP PREEMPT Mon Sep 14 06:56:00 UTC 2026"
 TARGET_DESCRIPTION = "latest One UI 9 Beta 2 firmware"
@@ -521,7 +517,6 @@ class RootWindow(QMainWindow):
             "target_model": TARGET_MODEL,
             "target_device": TARGET_DEVICE,
             "target_display": TARGET_BUILD_DISPLAY,
-            "target_fingerprint": TARGET_FINGERPRINT,
             "target_kernel_release": TARGET_KERNEL_RELEASE,
             "target_kernel_version": TARGET_KERNEL_VERSION,
         }

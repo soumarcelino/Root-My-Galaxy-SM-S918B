@@ -16,5 +16,6 @@ Output: `RootMyGalaxyDesktop/helper-src/helper-readable`
 
 The desktop application always delegates execution to
 [`simple-root/simple-root.sh`](../../simple-root/simple-root.sh). Both layers
-independently require the exact ZZI8 model, device, build display, fingerprint,
-kernel release, and kernel version before the payload may run.
+independently require the exact ZZI8 model, device, build display, kernel
+release, and kernel version before the payload may run. Regional fingerprint
+prefixes are collected for diagnostics but do not block execution.
