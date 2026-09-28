@@ -15,6 +15,7 @@ int rmg_log_fprintf(FILE *stream, const char *format, ...);
 int rmg_log_printf(const char *format, ...);
 int rmg_log_puts(const char *text);
 void rmg_log_perror(const char *text);
+void rmg_log_success(int elapsed_seconds);
 
 #ifdef __cplusplus
 }

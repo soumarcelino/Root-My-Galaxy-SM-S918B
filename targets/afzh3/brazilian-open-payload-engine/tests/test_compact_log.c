@@ -7,8 +7,11 @@
 static int capture_logs(char *output, size_t capacity) {
   FILE *capture = tmpfile();
   if (!capture) return 0;
+  int saved_stdout = dup(STDOUT_FILENO);
   int saved_stderr = dup(STDERR_FILENO);
-  if (saved_stderr < 0 || dup2(fileno(capture), STDERR_FILENO) < 0) {
+  if (saved_stdout < 0 || saved_stderr < 0 ||
+      dup2(fileno(capture), STDOUT_FILENO) < 0 ||
+      dup2(fileno(capture), STDERR_FILENO) < 0) {
     fclose(capture);
     return 0;
   }
@@ -21,9 +24,13 @@ static int capture_logs(char *output, size_t capacity) {
   fprintf(stderr, "[pipe_rw] terminal failure stage=proof\n");
   fprintf(stderr,
           "[launcher] gate=1/2 temp=37.0C mem=6800MB runnable=1 load=3.0\n");
+  rmg_log_success(47);
+  fflush(stdout);
   fflush(stderr);
 
-  int restored = dup2(saved_stderr, STDERR_FILENO) >= 0;
+  int restored = dup2(saved_stdout, STDOUT_FILENO) >= 0 &&
+                 dup2(saved_stderr, STDERR_FILENO) >= 0;
+  close(saved_stdout);
   close(saved_stderr);
   rewind(capture);
   size_t used = fread(output, 1, capacity - 1U, capture);
@@ -45,12 +52,18 @@ int main(void) {
   if (strstr(output, "[launcher] gate=1/2 temp=37.0C") == NULL) return 5;
   if (strstr(output, "selection page=7") != NULL) return 6;
   if (strstr(output, "terminal failure") == NULL) return 7;
+  if (strstr(output, "BOPE :: Success\n        Root achieved in 47 seconds\n") == NULL) return 11;
+  if (!strstr(output, "Root achieved in 47 seconds\n") ||
+      strcmp(output + strlen(output) - strlen("Root achieved in 47 seconds\n"),
+             "Root achieved in 47 seconds\n") != 0) return 12;
 
   const char *cursor = output;
   while (*cursor != '\0') {
     const char *newline = strchr(cursor, '\n');
     size_t length = newline ? (size_t)(newline - cursor) : strlen(cursor);
-    if (length == 0U || cursor[0] != '[') return 8;
+    if (length == 0U ||
+        (cursor[0] != '[' && strncmp(cursor, "BOPE :: Success", 15) != 0 &&
+         strncmp(cursor, "        Root achieved in ", 25) != 0)) return 8;
     if (!newline) break;
     cursor = newline + 1;
   }

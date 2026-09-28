@@ -524,6 +524,10 @@ static int target_matches(void) {
 }
 
 static int app_main(void) {
+  struct timespec payload_started;
+  if (clock_gettime(CLOCK_MONOTONIC, &payload_started) == -1) {
+    fatal_usage();
+  }
 
   if (setvbuf(stdin, NULL, _IONBF, 0) == -1 ||
       setvbuf(stdout, NULL, _IONBF, 0) == -1 ||
@@ -727,6 +731,20 @@ static int app_main(void) {
   }
 
   munmap(shared, sizeof(*shared));
+  if (success) {
+    struct timespec payload_finished;
+    if (clock_gettime(CLOCK_MONOTONIC, &payload_finished) == -1) {
+      fatal_usage();
+    }
+    long elapsed_seconds = payload_finished.tv_sec - payload_started.tv_sec;
+    if (payload_finished.tv_nsec > payload_started.tv_nsec) {
+      elapsed_seconds++;
+    }
+    if (elapsed_seconds < 1) {
+      elapsed_seconds = 1;
+    }
+    rmg_log_success((int)elapsed_seconds);
+  }
   return success ? 0 : -1;
 }
 

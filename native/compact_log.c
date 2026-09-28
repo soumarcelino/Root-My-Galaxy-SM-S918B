@@ -218,6 +218,17 @@ int rmg_log_puts(const char *text) {
   return 0;
 }
 
+
+void rmg_log_success(int elapsed_seconds) {
+  rmg_flush_state(stdout, &rmg_stdout_state);
+  rmg_flush_state(stderr, &rmg_stderr_state);
+  flockfile(stdout);
+  (void)fprintf(stdout, "BOPE :: Success\n        Root achieved in %d seconds\n",
+                elapsed_seconds);
+  (void)fflush(stdout);
+  funlockfile(stdout);
+}
+
 void rmg_log_perror(const char *text) {
   int saved_errno = errno;
   if (text && text[0] != '\0') {
