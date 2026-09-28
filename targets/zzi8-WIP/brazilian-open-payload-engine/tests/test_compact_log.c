@@ -13,6 +13,7 @@ static int capture_logs(char *output, size_t capacity) {
     return 0;
   }
 
+  fprintf(stderr, "Brazilian Open Payload Engine initialized\n");
   fprintf(stderr, "\x1b[33m[*] \x1b[0mstage=temporary-root-ready\n");
   fprintf(stderr, "[pipe_rw] telemetry stage_ms");
   fprintf(stderr, " locate=120ms reclaim=13ms verify=4ms total=137ms\n");
@@ -35,6 +36,7 @@ int main(void) {
   char output[4096];
   if (!capture_logs(output, sizeof(output))) return 1;
   if (strchr(output, '\x1b') != NULL) return 2;
+  if (strstr(output, "[BOPE] Brazilian Open Payload Engine initialized\n") == NULL) return 10;
   if (strstr(output, "stage=temporary-root-ready") == NULL) return 3;
   if (strstr(output, "[pipe_rw] telemetry stage_ms") == NULL) return 4;
   if (strstr(output, "[pipe_rw] telemetry stage_ms locate=120ms reclaim=13ms "

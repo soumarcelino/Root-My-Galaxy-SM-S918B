@@ -531,6 +531,8 @@ static int app_main(void) {
     fatal_usage();
   }
 
+  puts("[BOPE] Brazilian Open Payload Engine initialized");
+
   if (!target_matches()) {
     fprintf(stderr,
             "[target] refused: expected %s/%s build=%s kernel=%s\n",

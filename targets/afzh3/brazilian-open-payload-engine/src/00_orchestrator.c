@@ -445,6 +445,8 @@ static int app_main(void) {
     fatal_usage();
   }
 
+  puts("[BOPE] Brazilian Open Payload Engine initialized");
+
   int boot_quiet_sec = env_int_clamped("BOOT_QUIET_SEC", 120, 0, 300);
   struct timespec boot_now;
   if (clock_gettime(CLOCK_BOOTTIME, &boot_now) == -1) {

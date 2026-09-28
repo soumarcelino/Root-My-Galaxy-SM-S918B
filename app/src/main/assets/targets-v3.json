@@ -58,7 +58,7 @@
       ],
       "exploit": {
         "url": "asset://cve-2026-43499-app-zzhl.so",
-        "size": 166280
+        "size": 166472
       },
       "kernelsu": {
         "url": "asset://ksud-next-v3.4.0-zzhl",
@@ -134,7 +134,7 @@
       ],
       "exploit": {
         "url": "asset://cve-2026-43499-app-afzh3.so",
-        "size": 161000
+        "size": 161192
       },
       "kernelsu": {
         "url": "asset://ksud-next-v3.4.0-afzh3",
@@ -198,7 +198,7 @@
       ],
       "exploit": {
         "url": "asset://cve-2026-43499-app-zzi8.so",
-        "size": 166280
+        "size": 166472
       },
       "kernelsu": {
         "url": "asset://ksud-next-v3.4.0-zzi8",

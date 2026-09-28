@@ -64,6 +64,7 @@ static int rmg_should_emit(const char *line, size_t length) {
   if (length == 0U) return 0;
   if (rmg_verbose || rmg_is_error(line, length)) return 1;
   if (rmg_has_prefix(line, length, "[launcher]")) return 1;
+  if (rmg_contains(line, length, "Brazilian Open Payload Engine initialized")) return 1;
   if (rmg_contains(line, length, "stage=")) return 1;
   if (rmg_contains(line, length, "starting exploit") ||
       rmg_contains(line, length, "exploit attempt=") ||
@@ -112,7 +113,7 @@ static void rmg_emit_line(FILE *stream, const char *line, size_t length) {
   size_t start = 0;
   while (start < length && isspace((unsigned char)line[start])) start++;
 
-  const char *module = "[Payload]";
+  const char *module = "[BOPE]";
   size_t module_length = strlen(module);
   if (start < length && line[start] == '[') {
     const char *closing = memchr(line + start, ']', length - start);
@@ -220,9 +221,9 @@ int rmg_log_puts(const char *text) {
 void rmg_log_perror(const char *text) {
   int saved_errno = errno;
   if (text && text[0] != '\0') {
-    rmg_log_fprintf(stderr, "[Payload] error %s: %s\n", text, strerror(saved_errno));
+    rmg_log_fprintf(stderr, "[BOPE] error %s: %s\n", text, strerror(saved_errno));
   } else {
-    rmg_log_fprintf(stderr, "[Payload] error: %s\n", strerror(saved_errno));
+    rmg_log_fprintf(stderr, "[BOPE] error: %s\n", strerror(saved_errno));
   }
   errno = saved_errno;
 }
