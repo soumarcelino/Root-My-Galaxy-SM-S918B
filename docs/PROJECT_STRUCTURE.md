@@ -4,7 +4,8 @@
 
 - `app/`: standalone Android Gradle project, including wrapper, settings,
   source, assets, and build output.
-- `RootMyGalaxyDesktop/`: desktop GUI and helper source; the GUI runs `simple-root/`.
+- `RootMyGalaxyDesktop/`: English ZZI8-only desktop GUI and canonical helper
+  build; the GUI always runs the fixed `simple-root/` ZZI8 path.
 - `Makefile`: native build entry point; it selects sources inside each
   firmware's `payload/src/` and `helper/` directories.
 - `tools/`: shared porting tools.

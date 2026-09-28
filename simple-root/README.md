@@ -1,65 +1,94 @@
-# Simple Root
+# Simple Root :: ZZI8, the latest One UI 9 Beta 2 firmware
 
-`simple-root.sh` builds the AFZH3 payload and stability launcher, stages their
-assets on an Android device, runs the launcher gate, loads the payload through
-`LD_PRELOAD`, loads KernelSU, and checks `su -c id`.
+`simple-root.sh` is the hands-on command-line route for the exact
+`SM-S918B / S918BXXUAZZI8`, the latest One UI 9 Beta 2 firmware. It builds
+BOPE and the ZZI8 Stability Launcher, stages their assets through ADB, obtains
+temporary root, late-loads KernelSU Next v3.4.0, restores SELinux enforcing,
+and verifies `su -c id`.
 
-The runner always uses `targets/afzh3/` for the payload engine, helper, and
-KernelSU artifacts. It does not select a firmware target from the environment.
+The target is hardcoded to `targets/zzi8-WIP/`. There is no environment or
+command-line target selector. Before compiling or staging anything, the runner
+requires an exact match for model, device, build display, fingerprint, kernel
+release, and kernel version. Every other firmware is rejected.
+
+## Exact target
+
+```text
+model: SM-S918B
+device: dm3q
+build: S918BXXUAZZI8 (latest One UI 9 Beta 2 firmware)
+build display: CP2A.260605.016.S918BXXUAZZI8
+fingerprint: samsung/dm3qxxx/dm3q:17/CP2A.260605.016/S918BXXUAZZI8:user/release-keys
+kernel release: 5.15.197-android13-8-34343818-abS918BXXUAZZI8
+kernel version: #1 SMP PREEMPT Mon Sep 14 06:56:00 UTC 2026
+```
 
 ## Build and assets
 
 At each run, the script:
 
-1. Verifies the AFZH3 KernelSU Next v3.4.0 hashes and module compatibility,
-   then copies `ksud-next-v3.4.0` to `assets/ksud-selected` and
-   `android13-5.15_kernelsu.ko` to `assets/android13-5.15_kernelsu.ko`.
-   The helper starts `ksud-selected`, which contains the module for late-load.
-2. Compiles `../stability-launcher/stability-launcher.c` for Android ARM64/API
-   35 and copies the binary to `assets/stability-launcher`.
-3. Builds only the shared-library target in `../targets/afzh3/brazilian-open-payload-engine/`
-   and copies `build/payload.so` plus `build/mm-exec-factory` to `assets/`.
-4. Builds the AFZH3 helper in `targets/afzh3/helper/` for Android ARM64/API 35 and
-   copies it to `assets/ksu-helper`.
+1. Confirms that the connected device matches the complete latest One UI 9
+   Beta 2 firmware (`ZZI8`) identity.
+2. Verifies the latest One UI 9 Beta 2 firmware's ZZI8 KernelSU Next v3.4.0
+   SHA-256 manifest, Samsung KDP marker, and exact kernel vermagic.
+3. Verifies `src/target.h` independently against the latest One UI 9 Beta 2
+   firmware's ZZI8 ELF and BTF through `tools/bope-verify-target`.
+4. Builds the latest One UI 9 Beta 2 firmware's ZZI8 engine `so` target, which
+   produces BOPE, the mm factory, and `stability-launcher-zzi8` with its
+   target-specific gate.
+5. Builds the open ZZI8 helper for the latest One UI 9 Beta 2 firmware, used by
+   the usermode-helper and KernelSU late-load paths.
 
-The payload itself is produced by the open payload engine. `app_main` is not
-built by this runner; the runner requests only the engine's `so` target. The
-Android NDK must be installed. `ANDROID_NDK_HOME` or `ANDROID_NDK_ROOT` may
-select an NDK; the script falls back to NDK `28.2.13676358` under
+The Android NDK must be installed. `ANDROID_NDK_HOME` or `ANDROID_NDK_ROOT` may
+select it; the script falls back to NDK `28.2.13676358` under
 `$HOME/Android/Sdk/ndk/`.
 
-The resulting asset set is:
+The resulting runtime bundle is:
 
-| Asset | Source |
+| Asset | Latest One UI 9 Beta 2 firmware (`ZZI8`) source |
 | --- | --- |
-| `assets/payload.so` | `targets/afzh3/brazilian-open-payload-engine/build/payload.so` |
-| `assets/mm-exec-factory` | `targets/afzh3/brazilian-open-payload-engine/build/mm-exec-factory` |
-| `assets/stability-launcher` | `stability-launcher/build/stability-launcher` |
-| `assets/ksu-helper` | `targets/afzh3/helper/su_daemon.c` via `targets/afzh3/helper/build/cve-2026-43499-root` |
-| `assets/ksud-selected` | `targets/afzh3/kernelsu-next/out/kernelsu-next-afzh3-v3.4.0/ksud-next-v3.4.0` |
-| `assets/android13-5.15_kernelsu.ko` | `targets/afzh3/kernelsu-next/out/kernelsu-next-afzh3-v3.4.0/android13-5.15_kernelsu.ko` |
+| `assets/payload.so` | `targets/zzi8-WIP/brazilian-open-payload-engine/build/payload.so` |
+| `assets/mm-exec-factory` | `targets/zzi8-WIP/brazilian-open-payload-engine/build/mm-exec-factory` |
+| `assets/stability-launcher` | `targets/zzi8-WIP/brazilian-open-payload-engine/build/stability-launcher-zzi8` |
+| `assets/ksu-helper` | `targets/zzi8-WIP/helper/build/cve-2026-43499-root` |
+| `assets/ksud-selected` | `targets/zzi8-WIP/kernelsu-next/out/kernelsu-next-zzi8-v3.4.0/ksud-next-v3.4.0` |
+| `assets/android13-5.15_kernelsu.ko` | `targets/zzi8-WIP/kernelsu-next/out/kernelsu-next-zzi8-v3.4.0/android13-5.15_kernelsu.ko` |
+
+`ksud-selected` contains the audited ZZI8 module for the latest One UI 9 Beta 2
+firmware, used for late-load. The separate `.ko` copy stays in the bundle as
+inspectable compatibility evidence.
 
 ## Run
 
-Pass the ADB serial when multiple devices are connected:
+Start from a clean boot of ZZI8, the latest One UI 9 Beta 2 firmware. With
+exactly one authorized ADB device:
+
+```sh
+cd simple-root
+./simple-root.sh
+```
+
+Pass the serial explicitly when more than one device is connected:
 
 ```sh
 ./simple-root.sh RXCX602E20X
 ```
 
-With exactly one authorized ADB device, the serial may be omitted:
+The runner copies the six assets to `/data/local/tmp/simple-root/`, validates
+ELF magic while staging runtime files, and starts the Stability Launcher. The
+launcher waits for a stable allocator/system window and permits up to three
+bounded BOPE attempts. BOPE retries only before kernel mutation; a post-mutation
+failure requires a clean reboot.
 
-```sh
-./simple-root.sh
-```
+After temporary root, the helper late-loads KernelSU Next, checks its control
+channel, restores SELinux enforcing, and waits up to 30 seconds for
+`uid=0(root)`. On success, the script opens `adb shell su`.
 
-After building and validating assets, the script copies the six listed files
-to `/data/local/tmp/simple-root/`. It also stages the runtime files
-at their individual paths in `/data/local/tmp`, validates ELF magic, starts the
-stability launcher, then waits for temporary root, KernelSU late-load, and
-`uid=0(root)`. The asset bundle is copied even when root is already active;
-payload attempts are limited to one per launcher invocation.
+If root is already active, the script still rebuilds and stages the exact ZZI8
+bundle for the latest One UI 9 Beta 2 firmware, reports the existing root
+identity, and exits without another payload attempt.
 
-`SLIDE_P0_OFFSET` may be set only to a known offset for the current boot. The
-runner also accepts integer overrides for `FUTEX_WAIT_SEC`,
-`KSNITCH_REPEAT`, `KSNITCH_APPENDED`, `PIPE_DETERMINISTIC`, and `RMG_TRACE_FILE`.
+`SLIDE_P0_OFFSET` may be set only to a known aligned offset for the current boot.
+The runner also accepts integer diagnostic overrides for `FUTEX_WAIT_SEC`,
+`KSNITCH_REPEAT`, `KSNITCH_APPENDED`, `PIPE_DETERMINISTIC`, and
+`RMG_TRACE_FILE`. These do not change the firmware target.
