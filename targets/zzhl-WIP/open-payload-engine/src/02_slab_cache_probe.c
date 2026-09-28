@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "02_slab_cache_probe.h"
+#include "target.h"
 
 int read_named_slabinfo(const char *name, struct mm_slabinfo *out) {
   if (!name || !*name || !out) {
@@ -38,5 +39,5 @@ int read_named_slabinfo(const char *name, struct mm_slabinfo *out) {
 }
 
 int read_mm_slabinfo(struct mm_slabinfo *out) {
-  return read_named_slabinfo("mm_struct", out);
+  return read_named_slabinfo(TARGET_MM_CACHE_NAME, out);
 }

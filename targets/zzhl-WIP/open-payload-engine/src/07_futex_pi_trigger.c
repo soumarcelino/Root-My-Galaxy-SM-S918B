@@ -21,6 +21,7 @@
 #include "07_futex_pi_trigger.h"
 #include "09_pipe_buffer_rw.h"
 #include "06_signal_frame_payload.h"
+#include "target.h"
 
 #define FUTEX_LOCK_PI 6
 #define FUTEX_UNLOCK_PI 7
@@ -64,7 +65,7 @@ struct local_sched_attr {
 };
 
 struct v14_state_page {
-  unsigned char pad[0x730];
+  unsigned char pad[TARGET_FUTEX_V14_STATE_BASE_OFF];
   atomic_int waiter_tid;       /* +0x730 */
   atomic_int route_done;       /* +0x734 */
   uint32_t pi_chain;           /* +0x738 */
@@ -88,24 +89,24 @@ struct v14_state_page {
 #define V14_OFFSET_ASSERT(field, expected)                                  \
   _Static_assert(offsetof(struct v14_state_page, field) == (expected),      \
                  "v14 state offset mismatch: " #field)
-V14_OFFSET_ASSERT(waiter_tid, 0x730);
-V14_OFFSET_ASSERT(route_done, 0x734);
-V14_OFFSET_ASSERT(pi_chain, 0x738);
-V14_OFFSET_ASSERT(waiter_ready, 0x73c);
-V14_OFFSET_ASSERT(owner_started, 0x740);
-V14_OFFSET_ASSERT(waiter_waiting, 0x744);
-V14_OFFSET_ASSERT(wait, 0x748);
-V14_OFFSET_ASSERT(pi_target, 0x74c);
-V14_OFFSET_ASSERT(sched_done, 0x750);
-V14_OFFSET_ASSERT(gate, 0x754);
-V14_OFFSET_ASSERT(owner_acquired, 0x758);
-V14_OFFSET_ASSERT(attempt_count, 0x75c);
-V14_OFFSET_ASSERT(success_count, 0x760);
-V14_OFFSET_ASSERT(stop, 0x764);
-V14_OFFSET_ASSERT(delay_us, 0x768);
-V14_OFFSET_ASSERT(state, 0x76c);
-V14_OFFSET_ASSERT(secondary_0, 0x770);
-V14_OFFSET_ASSERT(secondary_1, 0x774);
+V14_OFFSET_ASSERT(waiter_tid, TARGET_FUTEX_V14_WAITER_TID_OFF);
+V14_OFFSET_ASSERT(route_done, TARGET_FUTEX_V14_ROUTE_DONE_OFF);
+V14_OFFSET_ASSERT(pi_chain, TARGET_FUTEX_V14_PI_CHAIN_OFF);
+V14_OFFSET_ASSERT(waiter_ready, TARGET_FUTEX_V14_WAITER_READY_OFF);
+V14_OFFSET_ASSERT(owner_started, TARGET_FUTEX_V14_OWNER_STARTED_OFF);
+V14_OFFSET_ASSERT(waiter_waiting, TARGET_FUTEX_V14_WAITER_WAITING_OFF);
+V14_OFFSET_ASSERT(wait, TARGET_FUTEX_V14_WAIT_OFF);
+V14_OFFSET_ASSERT(pi_target, TARGET_FUTEX_V14_PI_TARGET_OFF);
+V14_OFFSET_ASSERT(sched_done, TARGET_FUTEX_V14_SCHED_DONE_OFF);
+V14_OFFSET_ASSERT(gate, TARGET_FUTEX_V14_GATE_OFF);
+V14_OFFSET_ASSERT(owner_acquired, TARGET_FUTEX_V14_OWNER_ACQUIRED_OFF);
+V14_OFFSET_ASSERT(attempt_count, TARGET_FUTEX_V14_ATTEMPT_COUNT_OFF);
+V14_OFFSET_ASSERT(success_count, TARGET_FUTEX_V14_SUCCESS_COUNT_OFF);
+V14_OFFSET_ASSERT(stop, TARGET_FUTEX_V14_STOP_OFF);
+V14_OFFSET_ASSERT(delay_us, TARGET_FUTEX_V14_DELAY_US_OFF);
+V14_OFFSET_ASSERT(state, TARGET_FUTEX_V14_STATE_OFF);
+V14_OFFSET_ASSERT(secondary_0, TARGET_FUTEX_V14_SECONDARY_0_OFF);
+V14_OFFSET_ASSERT(secondary_1, TARGET_FUTEX_V14_SECONDARY_1_OFF);
 #undef V14_OFFSET_ASSERT
 
 static struct v14_state_page g_v14_state __attribute__((aligned(4096)));
@@ -129,7 +130,7 @@ static void spin_wait_cycles(uint64_t cycles) {
 }
 
 static uint64_t supervisor_attempt_delay_cycles(void) {
-  static const uint64_t kDelayTable[8] = {0, 16, 32, 48, 64, 96, 128, 24};
+  static const uint64_t kDelayTable[] = TARGET_FUTEX_DELAY_TABLE;
   const char *env = getenv("S23_SUPERVISOR_ATTEMPT");
   int idx_1based = 1;
   if (env != NULL && env[0] != '\0') {
@@ -145,7 +146,7 @@ static long sched_setattr_tid(int tid, int nice_value) {
   memset(&attr, 0, sizeof(attr));
   attr.size = sizeof(attr);
   attr.sched_nice = nice_value;
-  return syscall(0x112, tid, &attr, 0);
+  return syscall(SYS_sched_setattr, tid, &attr, 0);
 }
 
 static long sched_setattr_tid_v4(int tid, int nice_value) {
@@ -154,7 +155,7 @@ static long sched_setattr_tid_v4(int tid, int nice_value) {
   attr.size = sizeof(attr);
   attr.sched_policy = 3; /* SCHED_BATCH */
   attr.sched_nice = nice_value;
-  return syscall(0x112, tid, &attr, 0);
+  return syscall(SYS_sched_setattr, tid, &attr, 0);
 }
 
 static uint32_t f_wait;
@@ -173,7 +174,7 @@ static atomic_int g_use_sigusr1;
 static uint64_t g_sigusr1_page_base;
 static uint64_t g_sigusr1_ashmem_target;
 
-#define WAIT_SEC 8
+#define WAIT_SEC TARGET_FUTEX_WAIT_SEC
 
 static int g_futex_wait_sec = WAIT_SEC;
 
@@ -210,7 +211,7 @@ static void *waiter_thread_fn(void *arg) {
 
   atomic_store(&waiter_ready, 1);
   while (!atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   struct timespec timeout;
@@ -261,7 +262,7 @@ static void *owner_thread_fn(void *arg) {
     return NULL;
   }
   while (!atomic_load(&waiter_ready)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
   atomic_store(&owner_started, 1);
   if (futex_op(&f_pi_chain, FUTEX_LOCK_PI, 0, NULL, NULL, 0) != 0) {
@@ -296,13 +297,13 @@ int run_futex_trigger_cb(futex_post_trigger_cb post_trigger_cb, void *ctx) {
   }
 
   while (!atomic_load(&waiter_waiting) || !atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   long requeue_ret = 0;
   int requeue_errno = 0;
   int polls = 0;
-  while (polls < 1000) {
+  while (polls < TARGET_FUTEX_LEGACY_POLL_COUNT) {
     polls++;
     errno = 0;
     requeue_ret =
@@ -312,7 +313,7 @@ int run_futex_trigger_cb(futex_post_trigger_cb post_trigger_cb, void *ctx) {
     if (requeue_ret != 0) {
       break;
     }
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
   fprintf(stderr, "[futex] cmp_requeue_pi ret=%ld errno=%d polls=%d\n",
           requeue_ret, requeue_errno, polls);
@@ -322,7 +323,7 @@ int run_futex_trigger_cb(futex_post_trigger_cb post_trigger_cb, void *ctx) {
   atomic_store(&deadlock_seen, 1);
 
   while (!atomic_load(&route_done)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
   if (!atomic_load(&waiter_ok)) {
     fprintf(stderr, "[futex] waiter route not ok, aborting before trigger\n");
@@ -411,13 +412,13 @@ int run_futex_trigger_success_cb(futex_post_trigger_cb post_trigger_cb,
     return 0;
   }
   while (!atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
   if (pthread_create(&waiter, NULL, waiter_thread_fn_no_deadlock, NULL) != 0) {
     return 0;
   }
   while (!atomic_load(&waiter_waiting)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   /* Expect a REAL success here (ret >= 0), not EDEADLK. */
@@ -434,7 +435,7 @@ int run_futex_trigger_success_cb(futex_post_trigger_cb post_trigger_cb,
   }
 
   while (!atomic_load(&route_done)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
   if (!atomic_load(&waiter_ok)) {
     fprintf(stderr, "[futex-v2] waiter route not ok, aborting before trigger\n");
@@ -537,13 +538,13 @@ int run_futex_trigger_v3_cb(futex_post_trigger_cb post_trigger_cb, void *ctx) {
     return 0;
   }
   while (!atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
   if (pthread_create(&waiter, NULL, waiter_thread_fn_two_locks, NULL) != 0) {
     return 0;
   }
   while (!atomic_load(&waiter_waiting)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   errno = 0;
@@ -560,7 +561,7 @@ int run_futex_trigger_v3_cb(futex_post_trigger_cb post_trigger_cb, void *ctx) {
   atomic_store(&g_requeue_succeeded, 1);
 
   while (!atomic_load(&route_done)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
   if (!atomic_load(&waiter_ok)) {
     fprintf(stderr, "[futex-v3] waiter route not ok, aborting before trigger\n");
@@ -660,10 +661,10 @@ int run_futex_trigger_v4_cb(futex_post_trigger_cb post_trigger_cb, void *ctx) {
   }
 
   while (!atomic_load(&waiter_waiting) && !atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
-  usleep(100000);
+  usleep(TARGET_FUTEX_PAUSE_USEC);
 
   long requeue_ret = 0;
   int requeue_errno = 0;
@@ -683,7 +684,7 @@ int run_futex_trigger_v4_cb(futex_post_trigger_cb post_trigger_cb, void *ctx) {
   atomic_store(&deadlock_seen, 1);
 
   while (!atomic_load(&route_done)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
   if (!atomic_load(&waiter_ok)) {
     fprintf(stderr, "[futex-v4] waiter route not ok, aborting before trigger\n");
@@ -790,10 +791,10 @@ int run_futex_trigger_v5_cb(futex_post_trigger_cb post_trigger_cb, void *ctx) {
   }
 
   while (!atomic_load(&waiter_waiting) && !atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
-  usleep(100000);
+  usleep(TARGET_FUTEX_PAUSE_USEC);
 
   errno = 0;
   long requeue_ret = futex_op(&f_wait, 12 /* FUTEX_CMP_REQUEUE_PI */, 1,
@@ -805,10 +806,10 @@ int run_futex_trigger_v5_cb(futex_post_trigger_cb post_trigger_cb, void *ctx) {
   atomic_store(&deadlock_seen, 1);
 
   while (!atomic_load(&route_done)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
   while (!atomic_load(&g_consumer_done)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
   fprintf(stderr,
           "[futex-v5] consumer done: sched_setattr ret=%ld errno=%d\n",
@@ -876,7 +877,7 @@ static void *waiter_thread_fn_v6(void *arg) {
 
   atomic_store(&waiter_ready, 1);
   while (!atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   struct timespec timeout;
@@ -902,10 +903,10 @@ static void *waiter_thread_fn_v6(void *arg) {
     fprintf(stderr, "[futex-v6] sigusr1 fire_and_wait=%d\n", sig_ok);
     if (sig_ok) {
 
-      for (int spins = 0; spins < 20000 &&
+      for (int spins = 0; spins < TARGET_FUTEX_HANDSHAKE_SPINS &&
                            !atomic_load(&g_sched_setattr_done);
            spins++) {
-        usleep(1000);
+        usleep(TARGET_FUTEX_POLL_USEC);
       }
 
       if (atomic_load(&g_sched_setattr_ok) && g_post_cb != NULL) {
@@ -1002,10 +1003,10 @@ int run_futex_trigger_v6_cb(futex_post_trigger_cb post_trigger_cb, void *ctx) {
   }
 
   while (!atomic_load(&waiter_waiting) && !atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
-  usleep(100000);
+  usleep(TARGET_FUTEX_PAUSE_USEC);
 
   errno = 0;
   long requeue_ret = futex_op(&f_wait, 12 /* FUTEX_CMP_REQUEUE_PI */, 1,
@@ -1016,7 +1017,7 @@ int run_futex_trigger_v6_cb(futex_post_trigger_cb post_trigger_cb, void *ctx) {
   atomic_store(&deadlock_seen, 1); /* real app_main never checks this ret */
 
   while (!atomic_load(&route_done)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   if (!atomic_load(&waiter_ok)) {
@@ -1063,7 +1064,7 @@ static void *waiter_thread_fn_v7(void *arg) {
 
   atomic_store(&waiter_ready, 1);
   while (!atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   struct timespec timeout;
@@ -1091,10 +1092,10 @@ static void *waiter_thread_fn_v7(void *arg) {
 
       atomic_store(&g_sigusr1_done, 1);
 
-      for (int spins = 0; spins < 20000 &&
+      for (int spins = 0; spins < TARGET_FUTEX_HANDSHAKE_SPINS &&
                            !atomic_load(&g_sched_setattr_done);
            spins++) {
-        usleep(1000);
+        usleep(TARGET_FUTEX_POLL_USEC);
       }
       if (atomic_load(&g_sched_setattr_ok) && g_post_cb != NULL) {
         fprintf(stderr,
@@ -1199,10 +1200,10 @@ int run_futex_trigger_v7_cb(futex_post_trigger_cb post_trigger_cb, void *ctx) {
   }
 
   while (!atomic_load(&waiter_waiting) && !atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
-  usleep(100000);
+  usleep(TARGET_FUTEX_PAUSE_USEC);
 
   errno = 0;
   long requeue_ret = futex_op(&f_wait, 12 /* FUTEX_CMP_REQUEUE_PI */, 1,
@@ -1213,7 +1214,7 @@ int run_futex_trigger_v7_cb(futex_post_trigger_cb post_trigger_cb, void *ctx) {
   atomic_store(&deadlock_seen, 1);
 
   while (!atomic_load(&route_done)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   if (!atomic_load(&waiter_ok)) {
@@ -1257,7 +1258,7 @@ static void *owner_thread_fn_v8(void *arg) {
     return NULL;
   }
   while (!atomic_load(&waiter_ready)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
   atomic_store(&owner_started, 1);
   errno = 0;
@@ -1286,7 +1287,7 @@ static void *waiter_thread_fn_v8(void *arg) {
 
   atomic_store(&waiter_ready, 1);
   while (!atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   struct timespec timeout;
@@ -1322,10 +1323,10 @@ static void *waiter_thread_fn_v8(void *arg) {
 
       atomic_store(&g_sigusr1_done, 1);
 
-      for (int spins = 0; spins < 20000 &&
+      for (int spins = 0; spins < TARGET_FUTEX_HANDSHAKE_SPINS &&
                            !atomic_load(&g_sched_setattr_done);
            spins++) {
-        usleep(1000);
+        usleep(TARGET_FUTEX_POLL_USEC);
       }
       if (atomic_load(&g_sched_setattr_ok) && g_post_cb != NULL) {
         fprintf(stderr,
@@ -1351,9 +1352,9 @@ static void *waiter_thread_fn_v8(void *arg) {
   }
   /* owner_acquired may never come if owner was interrupted rather than
    * genuinely acquiring -- bound this wait instead of waiting forever. */
-  for (int spins = 0; spins < 2000 && !atomic_load(&owner_acquired);
+  for (int spins = 0; spins < TARGET_FUTEX_OWNER_SPINS && !atomic_load(&owner_acquired);
        spins++) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   atomic_store(&route_done, 1);
@@ -1439,10 +1440,10 @@ int run_futex_trigger_v8_cb(futex_post_trigger_cb post_trigger_cb, void *ctx) {
   }
 
   while (!atomic_load(&waiter_waiting) && !atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
-  usleep(100000);
+  usleep(TARGET_FUTEX_PAUSE_USEC);
 
   errno = 0;
   long requeue_ret = futex_op(&f_wait, 12 /* FUTEX_CMP_REQUEUE_PI */, 1,
@@ -1453,7 +1454,7 @@ int run_futex_trigger_v8_cb(futex_post_trigger_cb post_trigger_cb, void *ctx) {
   atomic_store(&deadlock_seen, 1);
 
   while (!atomic_load(&route_done)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   if (!atomic_load(&waiter_ok)) {
@@ -1496,7 +1497,7 @@ static void *waiter_thread_fn_v9(void *arg) {
 
   atomic_store(&waiter_ready, 1);
   while (!atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   struct timespec timeout;
@@ -1534,14 +1535,14 @@ static void *waiter_thread_fn_v9(void *arg) {
        * thread's own UNLOCK_PI below could wake it up the ordinary
        * way instead -- v8 sent the signal then proceeded almost
        * immediately, very likely losing that race every time. */
-      usleep(300000);
+      usleep(TARGET_FUTEX_LONG_PAUSE_USEC);
 
       atomic_store(&g_sigusr1_done, 1);
 
-      for (int spins = 0; spins < 20000 &&
+      for (int spins = 0; spins < TARGET_FUTEX_HANDSHAKE_SPINS &&
                            !atomic_load(&g_sched_setattr_done);
            spins++) {
-        usleep(1000);
+        usleep(TARGET_FUTEX_POLL_USEC);
       }
       if (atomic_load(&g_sched_setattr_ok) && g_post_cb != NULL) {
         fprintf(stderr,
@@ -1564,9 +1565,9 @@ static void *waiter_thread_fn_v9(void *arg) {
     atomic_store(&route_done, 1);
     return NULL;
   }
-  for (int spins = 0; spins < 2000 && !atomic_load(&owner_acquired);
+  for (int spins = 0; spins < TARGET_FUTEX_OWNER_SPINS && !atomic_load(&owner_acquired);
        spins++) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   atomic_store(&route_done, 1);
@@ -1618,10 +1619,10 @@ int run_futex_trigger_v9_cb(futex_post_trigger_cb post_trigger_cb, void *ctx) {
   }
 
   while (!atomic_load(&waiter_waiting) && !atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
-  usleep(100000);
+  usleep(TARGET_FUTEX_PAUSE_USEC);
 
   errno = 0;
   long requeue_ret = futex_op(&f_wait, 12 /* FUTEX_CMP_REQUEUE_PI */, 1,
@@ -1632,7 +1633,7 @@ int run_futex_trigger_v9_cb(futex_post_trigger_cb post_trigger_cb, void *ctx) {
   atomic_store(&deadlock_seen, 1);
 
   while (!atomic_load(&route_done)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   if (!atomic_load(&waiter_ok)) {
@@ -1675,7 +1676,7 @@ static void *waiter_thread_fn_v10(void *arg) {
 
   atomic_store(&waiter_ready, 1);
   while (!atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   struct timespec timeout;
@@ -1729,9 +1730,9 @@ static void *waiter_thread_fn_v10(void *arg) {
     atomic_store(&route_done, 1);
     return NULL;
   }
-  for (int spins = 0; spins < 2000 && !atomic_load(&owner_acquired);
+  for (int spins = 0; spins < TARGET_FUTEX_OWNER_SPINS && !atomic_load(&owner_acquired);
        spins++) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   atomic_store(&route_done, 1);
@@ -1787,10 +1788,10 @@ int run_futex_trigger_v10_cb(futex_post_trigger_cb post_trigger_cb,
   }
 
   while (!atomic_load(&waiter_waiting) && !atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
-  usleep(100000);
+  usleep(TARGET_FUTEX_PAUSE_USEC);
 
   errno = 0;
   long requeue_ret = futex_op(&f_wait, 12 /* FUTEX_CMP_REQUEUE_PI */, 1,
@@ -1801,7 +1802,7 @@ int run_futex_trigger_v10_cb(futex_post_trigger_cb post_trigger_cb,
   atomic_store(&deadlock_seen, 1);
 
   while (!atomic_load(&route_done)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   if (!atomic_load(&waiter_ok)) {
@@ -1852,7 +1853,7 @@ static void *waiter_thread_fn_v11(void *arg) {
 
   atomic_store(&waiter_ready, 1);
   while (!atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   struct timespec timeout;
@@ -1915,9 +1916,9 @@ static void *waiter_thread_fn_v11(void *arg) {
     atomic_store(&route_done, 1);
     return NULL;
   }
-  for (int spins = 0; spins < 2000 && !atomic_load(&owner_acquired);
+  for (int spins = 0; spins < TARGET_FUTEX_OWNER_SPINS && !atomic_load(&owner_acquired);
        spins++) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   atomic_store(&route_done, 1);
@@ -1972,10 +1973,10 @@ int run_futex_trigger_v11_cb(futex_post_trigger_cb post_trigger_cb,
   }
 
   while (!atomic_load(&waiter_waiting) && !atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
-  usleep(100000);
+  usleep(TARGET_FUTEX_PAUSE_USEC);
 
   errno = 0;
   long requeue_ret = futex_op(&f_wait, 12 /* FUTEX_CMP_REQUEUE_PI */, 1,
@@ -1986,7 +1987,7 @@ int run_futex_trigger_v11_cb(futex_post_trigger_cb post_trigger_cb,
   atomic_store(&deadlock_seen, 1);
 
   while (!atomic_load(&route_done)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   if (!atomic_load(&waiter_ok)) {
@@ -2030,7 +2031,7 @@ static void *waiter_thread_fn_v12(void *arg) {
 
   atomic_store(&waiter_ready, 1);
   while (!atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   struct timespec timeout;
@@ -2059,7 +2060,8 @@ static void *waiter_thread_fn_v12(void *arg) {
       atomic_store(&g_sigusr1_done, 1);
 
       for (uint64_t spins = 0;
-           spins < 0x3b9ac9ffULL && !atomic_load(&g_sched_setattr_done);
+           spins < TARGET_FUTEX_LONG_SPIN_MAX &&
+           !atomic_load(&g_sched_setattr_done);
            spins++) {
         __asm__ volatile("yield" ::: "memory");
       }
@@ -2085,9 +2087,9 @@ static void *waiter_thread_fn_v12(void *arg) {
     atomic_store(&route_done, 1);
     return NULL;
   }
-  for (int spins = 0; spins < 2000 && !atomic_load(&owner_acquired);
+  for (int spins = 0; spins < TARGET_FUTEX_OWNER_SPINS && !atomic_load(&owner_acquired);
        spins++) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   atomic_store(&route_done, 1);
@@ -2142,10 +2144,10 @@ int run_futex_trigger_v12_cb(futex_post_trigger_cb post_trigger_cb,
   }
 
   while (!atomic_load(&waiter_waiting) && !atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
-  usleep(100000);
+  usleep(TARGET_FUTEX_PAUSE_USEC);
 
   errno = 0;
   long requeue_ret = futex_op(&f_wait, 12 /* FUTEX_CMP_REQUEUE_PI */, 1,
@@ -2156,7 +2158,7 @@ int run_futex_trigger_v12_cb(futex_post_trigger_cb post_trigger_cb,
   atomic_store(&deadlock_seen, 1);
 
   while (!atomic_load(&route_done)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   if (!atomic_load(&waiter_ok)) {
@@ -2200,7 +2202,7 @@ static void *waiter_thread_fn_v13(void *arg) {
 
   atomic_store(&waiter_ready, 1);
   while (!atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   struct timespec timeout;
@@ -2233,12 +2235,13 @@ static void *waiter_thread_fn_v13(void *arg) {
                 "[futex-v13] tgkill(owner tid=%d, SIGUSR2) ret=%ld errno=%d\n",
                 otid, kret, errno);
       }
-      usleep(300000);
+      usleep(TARGET_FUTEX_LONG_PAUSE_USEC);
       atomic_store(&g_sigusr1_done, 1);
 
       /* axis B: swapped to v12's busy-spin. */
       for (uint64_t spins = 0;
-           spins < 0x3b9ac9ffULL && !atomic_load(&g_sched_setattr_done);
+           spins < TARGET_FUTEX_LONG_SPIN_MAX &&
+           !atomic_load(&g_sched_setattr_done);
            spins++) {
         __asm__ volatile("yield" ::: "memory");
       }
@@ -2263,9 +2266,9 @@ static void *waiter_thread_fn_v13(void *arg) {
     atomic_store(&route_done, 1);
     return NULL;
   }
-  for (int spins = 0; spins < 2000 && !atomic_load(&owner_acquired);
+  for (int spins = 0; spins < TARGET_FUTEX_OWNER_SPINS && !atomic_load(&owner_acquired);
        spins++) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   atomic_store(&route_done, 1);
@@ -2319,10 +2322,10 @@ int run_futex_trigger_v13_cb(futex_post_trigger_cb post_trigger_cb,
   }
 
   while (!atomic_load(&waiter_waiting) && !atomic_load(&owner_started)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
-  usleep(100000);
+  usleep(TARGET_FUTEX_PAUSE_USEC);
 
   errno = 0;
   long requeue_ret = futex_op(&f_wait, 12 /* FUTEX_CMP_REQUEUE_PI */, 1,
@@ -2333,7 +2336,7 @@ int run_futex_trigger_v13_cb(futex_post_trigger_cb post_trigger_cb,
   atomic_store(&deadlock_seen, 1);
 
   while (!atomic_load(&route_done)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
 
   if (!atomic_load(&waiter_ok)) {
@@ -2464,7 +2467,7 @@ static int futex_v14_followup_write(uint64_t page_base,
   atomic_store(&g_v14_state.state, epoch);
 
   for (uint64_t spins = 0;
-       spins <= 0x3b9ac9ffULL &&
+       spins <= TARGET_FUTEX_LONG_SPIN_MAX &&
            !atomic_load(&g_v14_state.sched_done) &&
            !atomic_load(&g_v14_state.stop);
        spins++) {
@@ -2513,7 +2516,7 @@ static void *waiter_thread_fn_v14(void *arg) {
   atomic_store(&g_v14_state.waiter_ready, 1);
   while (!atomic_load(&g_v14_state.owner_started) &&
          !atomic_load(&g_v14_state.stop)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
   if (atomic_load(&g_v14_state.stop)) {
     atomic_store(&g_v14_state.route_done, 1);
@@ -2533,7 +2536,7 @@ static void *waiter_thread_fn_v14(void *arg) {
   atomic_store(&g_v14_state.gate, 0);
   atomic_store(&g_v14_state.success_count, 0);
   atomic_store(&g_v14_state.attempt_count, 0);
-  /* 0x3f44: the waiter clears the 50000-us initial value before
+  /* The target waiter clears the initial delay before
    * publishing state=-1. The default consumer pass therefore does not
    * sleep between rt_sigreturn and sched_setattr. */
   atomic_store(&g_v14_state.delay_us, 0);
@@ -2541,7 +2544,8 @@ static void *waiter_thread_fn_v14(void *arg) {
   atomic_store(&g_v14_state.state, -1);
 
   for (uint64_t spins = 0;
-       spins <= 0x05f5e0ffULL && !atomic_load(&g_v14_state.gate);
+       spins <= TARGET_FUTEX_SHORT_SPIN_MAX &&
+       !atomic_load(&g_v14_state.gate);
        spins++) {
     __asm__ volatile("yield" ::: "memory");
   }
@@ -2560,7 +2564,7 @@ static void *waiter_thread_fn_v14(void *arg) {
     atomic_store(&g_v14_state.state, 1);
 
     for (uint64_t spins = 0;
-         spins <= 0x3b9ac9ffULL &&
+         spins <= TARGET_FUTEX_LONG_SPIN_MAX &&
              !atomic_load(&g_v14_state.sched_done);
          spins++) {
       __asm__ volatile("yield" ::: "memory");
@@ -2584,7 +2588,7 @@ static void *waiter_thread_fn_v14(void *arg) {
 
   (void)futex_op(&g_v14_state.pi_chain, FUTEX_UNLOCK_PI, 0, NULL, NULL, 0);
   while (!atomic_load(&g_v14_state.owner_acquired)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
   return NULL;
 }
@@ -2596,7 +2600,7 @@ static void *owner_thread_fn_v14(void *arg) {
     return NULL;
   }
   while (!atomic_load(&g_v14_state.waiter_ready)) {
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
   atomic_store(&g_v14_state.owner_started, 1);
   (void)futex_op(&g_v14_state.pi_chain, FUTEX_LOCK_PI, 0, NULL, NULL, 0);
@@ -2633,7 +2637,7 @@ int run_futex_trigger_v14_cb(futex_post_trigger_cb post_trigger_cb,
   atomic_store(&g_v14_state.success_count, 0);
   atomic_store(&g_v14_state.stop, 0);
 
-  atomic_store(&g_v14_state.delay_us, 50000);
+  atomic_store(&g_v14_state.delay_us, TARGET_FUTEX_INITIAL_DELAY_US);
   atomic_store(&g_v14_state.state, 0);
   atomic_store(&g_v14_state.secondary_0, 0);
   atomic_store(&g_v14_state.secondary_1, 0);
@@ -2674,7 +2678,7 @@ int run_futex_trigger_v14_cb(futex_post_trigger_cb post_trigger_cb,
     return 0;
   }
 
-  uint64_t ready_deadline = futex_now_ms() + 5000;
+  uint64_t ready_deadline = futex_now_ms() + TARGET_FUTEX_READY_TIMEOUT_MS;
   while (!atomic_load(&g_v14_state.waiter_waiting) ||
          !atomic_load(&g_v14_state.owner_started)) {
     if (atomic_load(&g_v14_state.stop) ||
@@ -2683,11 +2687,11 @@ int run_futex_trigger_v14_cb(futex_post_trigger_cb post_trigger_cb,
       atomic_store(&g_v14_state.stop, 1);
       return 0;
     }
-    usleep(1000);
+    usleep(TARGET_FUTEX_POLL_USEC);
   }
   futex_v14_dbg("threads-ready");
 
-  usleep(100000);
+  usleep(TARGET_FUTEX_PAUSE_USEC);
   futex_v14_dbg("post-100ms-pause");
 
   errno = 0;
@@ -2699,7 +2703,7 @@ int run_futex_trigger_v14_cb(futex_post_trigger_cb post_trigger_cb,
 
   while (!atomic_load(&g_v14_state.route_done)) {
     oss_pipe_rw_service_pending();
-    usleep(10000);
+    usleep(TARGET_FUTEX_RETRY_USEC);
   }
   oss_pipe_rw_service_pending();
   futex_v14_dbg("route-done");

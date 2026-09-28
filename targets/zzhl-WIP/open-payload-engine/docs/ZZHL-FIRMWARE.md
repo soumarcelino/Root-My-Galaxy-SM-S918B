@@ -31,8 +31,10 @@ completa de hashes está em
 
 ## Verificação do target
 
-`src/target_zzhl.h` é a única fonte de identidade, símbolos e ABI ZZHL usada
-pelo payload. O comando:
+`src/target.h` é a única fonte de identidade, símbolos, ABI, geometria dos
+objetos falsos e calibrações ZZHL usada pelo payload. A fronteira completa está
+documentada em
+[19-TARGET-UNICO-E-SRC-GENERICO.md](19-TARGET-UNICO-E-SRC-GENERICO.md). O comando:
 
 ```sh
 python3 tools/verify-zzhl-target.py

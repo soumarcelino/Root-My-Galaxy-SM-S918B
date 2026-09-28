@@ -69,6 +69,9 @@ def main() -> int:
     ok &= run("critical-reclaim-invariant", [
         sys.executable, str(repo / "tools/check-critical-reclaim.py")
     ], repo)
+    ok &= run("target-boundary", [
+        sys.executable, str(repo / "tools/check-target-boundary.py")
+    ], repo)
     ok &= run("zzhl-elf-btf", [
         sys.executable, str(repo / "tools/verify-zzhl-target.py")
     ], repo)

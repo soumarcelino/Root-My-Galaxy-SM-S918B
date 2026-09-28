@@ -17,15 +17,18 @@ todas as execuções.
 
 Leia primeiro:
 
-1. [Incidente do encoder ConfigFS no ZZHL](18-INCIDENTE-STRSCPY-CONFIGFS.md):
+1. [Contrato único do target](19-TARGET-UNICO-E-SRC-GENERICO.md): fronteira
+   entre dados ZZHL e implementação genérica, categorias centralizadas e
+   auditoria automática.
+2. [Incidente do encoder ConfigFS no ZZHL](18-INCIDENTE-STRSCPY-CONFIGFS.md):
    causa raiz, correção implementada e validação no aparelho.
-2. [Port novo e campanha no aparelho](17-PORT-ZZHL-FRESH-E-CAMPANHA.md):
+3. [Port novo e campanha no aparelho](17-PORT-ZZHL-FRESH-E-CAMPANHA.md):
    proveniência, target, hashes, arquitetura, falhas, correção final, cinco
    execuções, prova de root e limites.
-3. [Dossiê do firmware ZZHL](ZZHL-FIRMWARE.md): identidade, fontes, verificações
+4. [Dossiê do firmware ZZHL](ZZHL-FIRMWARE.md): identidade, fontes, verificações
    ELF/BTF e política de revalidação.
-4. [Estado atual](../STATUS.md): resumo operacional curto.
-5. [Ferramentas](../tools/README.md): verificadores, preflight, runner e coleta.
+5. [Estado atual](../STATUS.md): resumo operacional curto.
+6. [Ferramentas](../tools/README.md): verificadores, preflight, runner e coleta.
 
 ## Referência arquitetural herdada
 
@@ -56,7 +59,7 @@ valores ou resultados ZZHL, use os documentos listados acima.
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `src/target_zzhl.h` | Identidade, símbolos e ABI do firmware ZZHL. |
+| `src/target.h` | Identidade, símbolos e ABI do firmware ZZHL. |
 | `src/00_orchestrator.c` | Supervisor, tentativas e restauração física de FOPS. |
 | `src/00_cpu_discovery.c` | Seleção e revalidação de CPU. |
 | `src/01_kernel_base_tracefs.c` | Descoberta da base KASLR por boot. |

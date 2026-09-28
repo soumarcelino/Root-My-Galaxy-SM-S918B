@@ -22,6 +22,7 @@
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/prctl.h>
+#include "../target.h"
 
 #ifdef ANDROID_APP_NO_LKM
 #include <android/log.h>
@@ -135,7 +136,7 @@
     } while (0)
 
 #ifndef PAGE_SIZE
-#define PAGE_SIZE 4096
+#define PAGE_SIZE ((size_t)TARGET_PAGE_SIZE)
 #endif
 
 static inline void pin_to_core(size_t core)

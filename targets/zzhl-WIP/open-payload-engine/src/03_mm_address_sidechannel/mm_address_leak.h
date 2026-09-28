@@ -8,6 +8,7 @@
 #include "counter_timing.h"
 #include "sidechannel_utils.h"
 #include "futex_hash.h"
+#include "../target.h"
 
 #include <linux/futex.h>
 #include <sys/syscall.h>
@@ -24,20 +25,21 @@
 #define FUTEX_SZ (64ULL<<30)
 #define FUTEX_MMAP_SZ (1ULL<<30)
 #ifndef PAGE_SIZE
-#define PAGE_SIZE 4096
+#define PAGE_SIZE ((size_t)TARGET_PAGE_SIZE)
 #endif
 #ifndef KS_PAGE_SIZE
 #define KS_PAGE_SIZE PAGE_SIZE
 #endif
 #ifndef APPENDED_FUTEXES
-#define APPENDED_FUTEXES 4096
+#define APPENDED_FUTEXES TARGET_KSNITCH_APPENDED_DEFAULT
 #endif
 #define MULITPLE 4
 #ifndef KERNELSNITCH_IDENTITY_START
-#define KERNELSNITCH_IDENTITY_START 0xffffff8000000000ULL
+#define KERNELSNITCH_IDENTITY_START TARGET_KSNITCH_IDENTITY_START
 #endif
 #ifndef KERNELSNITCH_IDENTITY_END
-#define KERNELSNITCH_IDENTITY_END (KERNELSNITCH_IDENTITY_START + (64ULL<<30))
+#define KERNELSNITCH_IDENTITY_END \
+    (KERNELSNITCH_IDENTITY_START + TARGET_KSNITCH_IDENTITY_SIZE)
 #endif
 #define IDENTITY_START KERNELSNITCH_IDENTITY_START
 #define IDENTITY_END   KERNELSNITCH_IDENTITY_END
@@ -168,13 +170,14 @@ static void __decrease(struct kernelsnitch_shared_state *ks)
  * Simple compare
  */
 #ifndef REPEAT_MEASUREMENT
-#define REPEAT_MEASUREMENT 128
+#define REPEAT_MEASUREMENT TARGET_KSNITCH_REPEAT_PIPE
 #endif
 #ifndef AVERAGE
-#define AVERAGE (1<<3)
+#define AVERAGE TARGET_KSNITCH_AVERAGE
 #endif
 #ifndef KERNELSNITCH_COLLISION_CONFIRMATIONS
-#define KERNELSNITCH_COLLISION_CONFIRMATIONS 3
+#define KERNELSNITCH_COLLISION_CONFIRMATIONS \
+    TARGET_KSNITCH_COLLISION_CONFIRMATIONS
 #endif
 static int __compare(const void *a, const void *b)
 {
@@ -404,7 +407,7 @@ void kernelsnitch_find_collisions(struct kernelsnitch_shared_state *ks)
 {
     #define ID 128
 #ifndef KERNELSNITCH_THRESHOLD_MULT
-#define KERNELSNITCH_THRESHOLD_MULT 10
+#define KERNELSNITCH_THRESHOLD_MULT TARGET_KSNITCH_THRESHOLD_MULT
 #endif
     size_t count = 0;
     size_t wanted;
@@ -483,13 +486,13 @@ void kernelsnitch_find_collisions(struct kernelsnitch_shared_state *ks)
 /*   - every worker early-exits through an atomic slot counter the instant `wanted` collisions are claimed.    */
 /****************************************************************************************************************/
 #ifndef KS_PAR_SCREEN_SAMPLES
-#define KS_PAR_SCREEN_SAMPLES 8
+#define KS_PAR_SCREEN_SAMPLES TARGET_KSNITCH_PAR_SCREEN_SAMPLES
 #endif
 #ifndef KS_PAR_CONFIRM_SAMPLES
-#define KS_PAR_CONFIRM_SAMPLES 24
+#define KS_PAR_CONFIRM_SAMPLES TARGET_KSNITCH_PAR_CONFIRM_SAMPLES
 #endif
 #ifndef KS_PAR_BASELINE_SAMPLES
-#define KS_PAR_BASELINE_SAMPLES 32
+#define KS_PAR_BASELINE_SAMPLES TARGET_KSNITCH_PAR_BASELINE_SAMPLES
 #endif
 
 /* min-of-`samples` FUTEX_WAKE(val=0) latency: pure hash-bucket traversal cost.
@@ -575,7 +578,7 @@ static void *__ks_par_worker(void *arg)
  * overhead, but pthread lifecycle still dominates measured runtime on bionic.
  * The caller selects the waiter count through the KernelSnitch profile. */
 #ifndef KS_WAITER_STACK
-#define KS_WAITER_STACK (128 * 1024)
+#define KS_WAITER_STACK TARGET_KSNITCH_WAITER_STACK
 #endif
 struct ks_pile {
     void *stacks;       /* single mmap backing every waiter stack */

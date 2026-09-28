@@ -11,7 +11,7 @@ static void check_supported_read(uint64_t target, size_t len) {
   assert(make_configfs_read_plan(target, len, &plan));
   assert(plan.page + plan.offset == target);
   assert(plan.kernel_check_len == len);
-  assert(OSS_CONFIGFS_COUNT - plan.offset == len);
+  assert(TARGET_CONFIGFS_COUNT - plan.offset == len);
 
   assert(oss_kernel_read_plan_supported(target, len));
 }
@@ -19,16 +19,16 @@ static void check_supported_read(uint64_t target, size_t len) {
 static void check_rejected_read(uint64_t target, size_t len,
                                 uint64_t expected_encoded_page) {
   struct configfs_read_plan plan;
-  unsigned char control[OSS_CONFIGFS_CONTROL_LEN];
-  unsigned char encoded[OSS_CONFIGFS_CONTROL_LEN];
+  unsigned char control[TARGET_CONFIGFS_CONTROL_LEN];
+  unsigned char encoded[TARGET_CONFIGFS_CONTROL_LEN];
   assert(make_configfs_read_plan(target, len, &plan));
   memset(control, 1, sizeof(control));
-  memcpy(control + OSS_CONFIGFS_PAGE_CONTROL_OFF, &plan.page,
+  memcpy(control + TARGET_CONFIGFS_PAGE_CONTROL_OFF, &plan.page,
          sizeof(plan.page));
-  memset(control + OSS_CONFIGFS_READ_STATE_CONTROL_OFF, 0, 0x34);
+  memset(control + TARGET_CONFIGFS_READ_STATE_OFF, 0, TARGET_CONFIGFS_READ_ZERO_LEN);
   simulate_ashmem_name_blob(control, sizeof(control), encoded);
   uint64_t encoded_page = 0;
-  memcpy(&encoded_page, encoded + OSS_CONFIGFS_PAGE_CONTROL_OFF,
+  memcpy(&encoded_page, encoded + TARGET_CONFIGFS_PAGE_CONTROL_OFF,
          sizeof(encoded_page));
   assert(encoded_page == expected_encoded_page);
   errno = 0;
@@ -50,7 +50,7 @@ static uint64_t legacy_next_nonzero_bytes(uint64_t value) {
 static void reproduce_crash_geometry(void) {
   const uint64_t target = 0xffffff8923636588ULL;
   const size_t len = 8;
-  uint64_t base = target - (OSS_CONFIGFS_COUNT - len);
+  uint64_t base = target - (TARGET_CONFIGFS_COUNT - len);
   uint64_t displacement = legacy_next_nonzero_bytes(base) - base;
   assert(displacement == 213);
   assert(len + displacement == 221);

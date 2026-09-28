@@ -7,7 +7,9 @@ Port novo para o Samsung SM-S918B (`dm3q`) no firmware
 O código parte do engine atual em `targets/afzh3/open-payload-engine`, como
 solicitado. Os símbolos e layouts foram derivados novamente de
 `../firmware/vmlinux_ZZHL.{elf,btf}` e ficam centralizados em
-`src/target_zzhl.h`. O payload antigo em `../payload` não integra este port.
+`src/target.h`. O payload antigo em `../payload` não integra este port.
+`tools/check-target-boundary.py` impede que novos endereços, layouts ou
+constantes de firmware sejam reintroduzidos nos módulos genéricos.
 
 Validação estática:
 

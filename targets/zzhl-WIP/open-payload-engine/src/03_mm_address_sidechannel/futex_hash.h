@@ -5,6 +5,7 @@
 #pragma once
 
 #include "sidechannel_utils.h"
+#include "../target.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -158,7 +159,7 @@ static inline u32 jhash_1word(u32 a, u32 initval)
 
 #define OFFSET_OF(TYPE, FIELD) ((size_t) &((TYPE *)0)->FIELD)
 #ifndef KS_PAGE_MASK
-#define KS_PAGE_MASK 0xfffULL
+#define KS_PAGE_MASK TARGET_PAGE_MASK
 #endif
 
 #define FUTEX_KEY_INIT (union futex_key) { .both = { .ptr = 0ULL } }

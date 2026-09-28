@@ -55,8 +55,10 @@ somente ao boot `8ed17a84-b88f-4d2e-86b3-64a1eff7b380`; o port não os usa.
 
 ## Derivação do target
 
-`src/target_zzhl.h` centraliza a identidade, a base estática, os símbolos e o
-ABI. `tools/verify-zzhl-target.py` compara o header com o ELF e o BTF reais.
+`src/target.h` centraliza a identidade, a base estática, os símbolos, o ABI,
+a geometria dos objetos falsos e as calibrações da rota. Os demais arquivos
+usam somente nomes `TARGET_*`. `tools/verify-zzhl-target.py` compara o header
+com o ELF e o BTF reais.
 O verificador cobre:
 
 - 22 símbolos ELF, incluindo ashmem, ConfigFS, pipe, workqueue, SELinux,

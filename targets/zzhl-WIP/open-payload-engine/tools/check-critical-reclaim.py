@@ -94,7 +94,7 @@ def main() -> int:
         checks["no_yield_in_reclaim"] = "sched_yield()" not in text
         checks["exact_slab_gate"] = (
             "released_refs" in text
-            and "object_drop == OSS_ORDER3_SIZE / OSS_MM_STRUCT_SZ" in text
+            and "object_drop == TARGET_ORDER3_SIZE / TARGET_MM_STRUCT_SIZE" in text
             and "active_slab_drop == 1 && slab_drop == 1" in text
             and "active_drop == released_refs" not in text
         )

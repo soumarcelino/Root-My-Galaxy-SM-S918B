@@ -33,7 +33,7 @@ $(OUTDIR):
 
 SRCS := src/00_orchestrator.c src/00_cpu_discovery.c src/01_kernel_base_tracefs.c src/02_slab_cache_probe.c src/04_fake_kernel_objects.c src/05_mm_slab_grooming.c src/06_signal_frame_payload.c src/07_futex_pi_trigger.c src/08_ashmem_configfs_rw.c src/09_pipe_buffer_rw.c src/10_workqueue_umh_root.c
 
-$(BIN) $(SOBIN): src/target_zzhl.h src/90_diagnostic_checkpoint.h src/03_mm_address_sidechannel/mm_address_leak.h $(COMPACT_LOG_HEADER) $(COMPACT_LOG_SRC)
+$(BIN) $(SOBIN): src/target.h src/90_diagnostic_checkpoint.h src/03_mm_address_sidechannel/mm_address_leak.h $(COMPACT_LOG_HEADER) $(COMPACT_LOG_SRC)
 
 $(BIN): $(SRCS) | $(OUTDIR)
 	$(TARGET_CC) -fPIE -pie -O2 -g0 -Wall -Wextra -Wno-unused-parameter -Isrc -include $(COMPACT_LOG_HEADER) $(SRCS) $(COMPACT_LOG_SRC) -pthread -o $@

