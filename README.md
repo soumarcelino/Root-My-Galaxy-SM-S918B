@@ -164,6 +164,21 @@ can be rebuilt with:
 targets/afzg1/kernelsu-next/build-afzg1.sh
 ```
 
+## Port BOPE from an OTA
+
+Have a Samsung incremental OTA and its source target? Let the porting pipeline
+do the mechanical work:
+
+```sh
+./tools/bope-from-ota "/home/matias/Downloads/S23 Ultra ZZHL-ZZI8.zip"
+```
+
+It reconstructs and verifies boot, recovers ELF/kallsyms/BTF, generates the
+firmware contract, builds BOPE and its helpers, audits KernelSU Next, and emits
+the new target as `targets/<firmware>-WIP/`. It refuses to overwrite an existing
+target, and device validation is still the final gate. The exact stages and
+advanced options live in the [BOPE OTA porting guide](tools/bope/README.md).
+
 ## Repository layout
 
 ```text
