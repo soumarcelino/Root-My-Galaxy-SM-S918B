@@ -4,10 +4,10 @@ import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** Applies best-effort shell optimizations when Shizuku has been explicitly enabled. */
+/** Applies best-effort shell optimizations through the required Shizuku runner. */
 object StartupOptimizer {
     suspend fun apply(context: Context): String = withContext(Dispatchers.IO) {
-        if (!AppPreferences.shizukuMode(context) || !ShizukuController.isGranted()) {
+        if (!ShizukuController.isGranted()) {
             return@withContext "Shizuku unavailable"
         }
 

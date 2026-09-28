@@ -166,7 +166,6 @@ class MainActivity : ComponentActivity() {
     private var accentColor by mutableStateOf(AccentColor.Dynamic)
     private var themeMode by mutableStateOf(AppThemeMode.System)
     private var advancedMode by mutableStateOf(false)
-    private var shizukuMode by mutableStateOf(false)
     private var optimizeOnExploit by mutableStateOf(true)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -177,7 +176,6 @@ class MainActivity : ComponentActivity() {
         accentColor = AppPreferences.accentColor(this)
         themeMode = AppPreferences.themeMode(this)
         advancedMode = AppPreferences.advancedMode(this)
-        shizukuMode = AppPreferences.shizukuMode(this)
         optimizeOnExploit = AppPreferences.optimizeOnExploit(this)
         setContent {
             RootMyGalaxyTheme(accentColor = accentColor, themeMode = themeMode) {
@@ -186,7 +184,6 @@ class MainActivity : ComponentActivity() {
                     accentColor = accentColor,
                     themeMode = themeMode,
                     advancedMode = advancedMode,
-                    shizukuMode = shizukuMode,
                     optimizeOnExploit = optimizeOnExploit,
                     onAccentColorChanged = { color ->
                         AppPreferences.setAccentColor(this, color)
@@ -199,10 +196,6 @@ class MainActivity : ComponentActivity() {
                     onAdvancedModeChanged = { enabled ->
                         AppPreferences.setAdvancedMode(this, enabled)
                         advancedMode = enabled
-                    },
-                    onShizukuModeChanged = { enabled ->
-                        AppPreferences.setShizukuMode(this, enabled)
-                        shizukuMode = enabled
                     },
                     onOptimizeOnExploitChanged = { enabled ->
                         AppPreferences.setOptimizeOnExploit(this, enabled)
@@ -264,8 +257,6 @@ private const val KERNEL_SU_MANAGER_URL =
     "https://github.com/KernelSU-Next/KernelSU-Next/releases/download/v3.4.0/KernelSU_Next_v3.4.0_33294-release.apk"
 private const val KERNEL_SU_MANAGER_PACKAGE = "com.rifsxd.ksunext"
 private const val KERNEL_SU_HOME_URL = "https://github.com/KernelSU-Next/KernelSU-Next"
-private const val SHIZUKU_MANAGER_PACKAGE = "moe.shizuku.manager"
-private const val SHIZUKU_MANAGER_URL = "https://github.com/thedjchi/Shizuku/releases/"
 
 private fun isKernelSuManagerInstalled(context: Context): Boolean =
     context.packageManager.getLaunchIntentForPackage(KERNEL_SU_MANAGER_PACKAGE) != null
@@ -279,27 +270,16 @@ private fun openKernelSuManager(context: Context) {
     }
 }
 
-private fun openShizukuManager(context: Context) {
-    val launch = context.packageManager.getLaunchIntentForPackage(SHIZUKU_MANAGER_PACKAGE)
-    if (launch != null) {
-        context.startActivity(launch)
-    } else {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SHIZUKU_MANAGER_URL)))
-    }
-}
-
 @Composable
 private fun RootApp(
     installViewModel: InstallViewModel,
     accentColor: AccentColor,
     themeMode: AppThemeMode,
     advancedMode: Boolean,
-    shizukuMode: Boolean,
     optimizeOnExploit: Boolean,
     onAccentColorChanged: (AccentColor) -> Unit,
     onThemeModeChanged: (AppThemeMode) -> Unit,
     onAdvancedModeChanged: (Boolean) -> Unit,
-    onShizukuModeChanged: (Boolean) -> Unit,
     onOptimizeOnExploitChanged: (Boolean) -> Unit,
     openUninstaller: () -> Unit,
     openInstaller: (String?) -> Unit,
@@ -316,6 +296,21 @@ private fun RootApp(
     val context = LocalContext.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
+    val overviewInstallState = if (
+        advancedMode && installState.phase == InstallPhase.Failed &&
+        installState.unsupportedFirmware != null
+    ) {
+        installState.copy(
+            phase = InstallPhase.Ready,
+            message = context.getString(R.string.status_not_installed),
+            failureDetail = null,
+            supportHelp = null,
+            supportHelpTitle = null,
+            unsupportedFirmware = null,
+        )
+    } else {
+        installState
+    }
     var updateStatus by remember { mutableStateOf<UpdateStatus>(UpdateStatus.Idle) }
     var updateCardDismissed by remember { mutableStateOf(false) }
     val checkForUpdate: () -> Unit = {
@@ -495,7 +490,7 @@ private fun RootApp(
                 AppPage.Overview -> OverviewPage(
                     padding = padding,
                     device = device,
-                    installState = installState,
+                    installState = overviewInstallState,
                     updateStatus = updateStatus,
                     updateCardDismissed = updateCardDismissed,
                     onDismissUpdateCard = { updateCardDismissed = true },
@@ -520,7 +515,6 @@ private fun RootApp(
                     accentColor = accentColor,
                     themeMode = themeMode,
                     advancedMode = advancedMode,
-                    shizukuMode = shizukuMode,
                     optimizeOnExploit = optimizeOnExploit,
                     updateStatus = updateStatus,
                     onCheckForUpdate = checkForUpdate,
@@ -528,7 +522,6 @@ private fun RootApp(
                     onAccentColorChanged = onAccentColorChanged,
                     onThemeModeChanged = onThemeModeChanged,
                     onAdvancedModeChanged = onAdvancedModeChanged,
-                    onShizukuModeChanged = onShizukuModeChanged,
                     onOptimizeOnExploitChanged = onOptimizeOnExploitChanged,
                     openUninstaller = openUninstaller,
                 )
@@ -1459,7 +1452,6 @@ private fun SettingsPage(
     accentColor: AccentColor,
     themeMode: AppThemeMode,
     advancedMode: Boolean,
-    shizukuMode: Boolean,
     optimizeOnExploit: Boolean,
     updateStatus: UpdateStatus,
     onCheckForUpdate: () -> Unit,
@@ -1467,51 +1459,19 @@ private fun SettingsPage(
     onAccentColorChanged: (AccentColor) -> Unit,
     onThemeModeChanged: (AppThemeMode) -> Unit,
     onAdvancedModeChanged: (Boolean) -> Unit,
-    onShizukuModeChanged: (Boolean) -> Unit,
     onOptimizeOnExploitChanged: (Boolean) -> Unit,
     openUninstaller: () -> Unit,
 ) {
     val context = LocalContext.current
     val view = LocalView.current
-    val scope = rememberCoroutineScope()
     var showLanguageDialog by remember { mutableStateOf(false) }
     var showColorDialog by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
-    var showShizukuMissingDialog by remember { mutableStateOf(false) }
     var showUninstallRootDialog by remember { mutableStateOf(false) }
     var languageMenuTop by remember { mutableStateOf(32.dp) }
     var colorMenuTop by remember { mutableStateOf(32.dp) }
     val density = LocalDensity.current
     val currentLanguageTag = AppPreferences.languageTag(context)
-
-    if (showShizukuMissingDialog) {
-        AlertDialog(
-            onDismissRequest = { showShizukuMissingDialog = false },
-            icon = { Icon(Icons.Rounded.Info, contentDescription = null) },
-            title = {
-                DialogDimAmount(0.34f)
-                Text(stringResource(R.string.shizuku_not_running_title))
-            },
-            text = { Text(stringResource(R.string.shizuku_not_running_body)) },
-            confirmButton = {
-                FilledTonalButton(onClick = {
-                    clickHaptic(view)
-                    showShizukuMissingDialog = false
-                    openShizukuManager(context)
-                }) {
-                    Text(stringResource(R.string.action_download_shizuku))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    showShizukuMissingDialog = false
-                }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
-        )
-    }
 
     if (showLanguageDialog) {
         SideChoiceMenu(
@@ -1618,35 +1578,10 @@ private fun SettingsPage(
                     title = stringResource(R.string.language),
                     description = stringResource(R.string.language_description),
                     value = languageLabel(currentLanguageTag),
-                    position = SettingsCardPosition.Middle,
+                    position = SettingsCardPosition.Bottom,
                     onClick = {
                         clickHaptic(view)
                         showLanguageDialog = true
-                    },
-                )
-                SettingsSwitchCard(
-                    icon = Icons.Rounded.VerifiedUser,
-                    title = stringResource(R.string.shizuku_mode),
-                    description = stringResource(R.string.shizuku_mode_description),
-                    checked = shizukuMode,
-                    position = SettingsCardPosition.Bottom,
-                    onCheckedChange = { enabled ->
-                        clickHaptic(view)
-                        if (!enabled) {
-                            onShizukuModeChanged(false)
-                        } else {
-                            scope.launch {
-                                ShizukuController.pingUntilRunning()
-                                if (ShizukuController.isRunning()) {
-                                    onShizukuModeChanged(true)
-                                    if (!ShizukuController.isGranted()) {
-                                        ShizukuController.requestPermission()
-                                    }
-                                } else {
-                                    showShizukuMissingDialog = true
-                                }
-                            }
-                        }
                     },
                 )
             }
@@ -1801,7 +1736,7 @@ private fun TargetSelectionSheet(
     onRetry: () -> Unit,
     onNext: (TargetProfile) -> Unit,
 ) {
-    var showOnlyMyDevice by remember { mutableStateOf(true) }
+    var showOnlyMyDevice by remember { mutableStateOf(false) }
     var selectedProfileId by remember { mutableStateOf<String?>(null) }
     val view = LocalView.current
     val visibleProfiles = remember(catalog.profiles, showOnlyMyDevice, device) {

@@ -48,7 +48,7 @@ class InstallHistoryStore(private val context: Context) {
         completedAtMillis = null,
         result = InstallRunResult.Running,
         log = "",
-        usedShizuku = AppPreferences.shizukuMode(context),
+        usedShizuku = true,
     ).also(::save)
 
     fun save(entry: InstallHistoryEntry) {

@@ -241,7 +241,7 @@
     <string name="action_next">Next</string>
     <string name="advanced">Advanced</string>
     <string name="advanced_mode">Advanced mode</string>
-    <string name="advanced_mode_description">Manually choose a device-compatible payload during installation</string>
+    <string name="advanced_mode_description">Show the target selector and allow any bundled target to be run manually</string>
     <string name="optimize_on_exploit">Run optimizations</string>
     <string name="optimize_on_exploit_description">Use Shizuku to stop other user apps before the launcher starts</string>
     <string name="shizuku_mode">Use Shizuku</string>

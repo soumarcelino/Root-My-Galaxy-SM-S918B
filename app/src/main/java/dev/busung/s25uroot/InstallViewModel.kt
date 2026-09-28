@@ -773,7 +773,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             source
         }
 
-    private fun shizukuEnabled(): Boolean = AppPreferences.shizukuMode(app)
+    private fun shizukuEnabled(): Boolean = true
 
     private fun shizukuStage(source: File, target: String, mode: String): File {
         val staged = File(target)

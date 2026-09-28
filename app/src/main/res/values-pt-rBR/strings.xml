@@ -208,7 +208,7 @@
     <string name="action_next">Próximo</string>
     <string name="advanced">Avançado</string>
     <string name="advanced_mode">Modo avançado</string>
-    <string name="advanced_mode_description">Escolha manualmente um payload compatível com o dispositivo durante a instalação</string>
+    <string name="advanced_mode_description">Exibe o seletor e permite executar manualmente qualquer target incluído no app</string>
     <string name="repo_profile_missing">O perfil de suporte %1$s não está mais disponível</string>
     <string name="select_device_title">Escolha um payload</string>
     <string name="select_device_description">Selecione um payload por modelo de dispositivo e versão de kernel.</string>

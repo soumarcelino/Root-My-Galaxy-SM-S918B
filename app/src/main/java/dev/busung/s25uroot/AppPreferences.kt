@@ -33,7 +33,6 @@ object AppPreferences {
     private const val ACCENT_COLOR = "accent_color"
     private const val THEME_MODE = "theme_mode"
     private const val ADVANCED_MODE = "advanced_mode"
-    private const val SHIZUKU_MODE = "shizuku_mode"
     private const val OPTIMIZE_ON_EXPLOIT = "optimize_on_exploit"
     private const val CONSUMED_INSTALL_REQUEST = "consumed_install_request"
     private const val LAST_ROOT_DURATION_MILLIS = "last_root_duration_millis"
@@ -64,15 +63,6 @@ object AppPreferences {
     fun setAdvancedMode(context: Context, enabled: Boolean) {
         prefs(context).edit()
             .putBoolean(ADVANCED_MODE, enabled)
-            .apply()
-    }
-
-    fun shizukuMode(context: Context): Boolean =
-        prefs(context).getBoolean(SHIZUKU_MODE, true)
-
-    fun setShizukuMode(context: Context, enabled: Boolean) {
-        prefs(context).edit()
-            .putBoolean(SHIZUKU_MODE, enabled)
             .apply()
     }
 
