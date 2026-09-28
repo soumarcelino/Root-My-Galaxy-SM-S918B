@@ -2,7 +2,8 @@
 #define OSS_PAYLOAD_TARGET_H
 
 /*
- * Firmware contract for SM-S918B / S918BXXUAZZI8.
+ * Firmware contract for SM-S918B / S918BXXUAZZI8, the latest One UI 9 Beta 2
+ * firmware.
  *
  * This is the only source file allowed to contain firmware identity, kernel
  * symbol offsets, kernel ABI layouts, virtual-address geometry, exploit

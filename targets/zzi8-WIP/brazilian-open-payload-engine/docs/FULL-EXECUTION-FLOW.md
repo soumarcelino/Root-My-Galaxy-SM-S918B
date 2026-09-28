@@ -1,10 +1,10 @@
-# BOPE ZZI8 complete execution flow
+# BOPE ZZI8 complete execution flow · latest One UI 9 Beta 2 firmware
 
-This document maps the current `S918BXXUAZZI8` path from the Android app's
-launch request to temporary root, KernelSU Next late-load, and final root
-verification. It follows the production code, including the pre-mutation retry
-boundary and the paths that deliberately require a reboot after kernel state
-has changed.
+This document maps the current `S918BXXUAZZI8` path for the latest One UI 9
+Beta 2 firmware, from the Android app's launch request to temporary root,
+KernelSU Next late-load, and final root verification. It follows the production
+code, including the pre-mutation retry boundary and the paths that deliberately
+require a reboot after kernel state has changed.
 
 The diagram is intentionally large. Read it from top to bottom; each colored
 block is one execution layer, and the dashed arrows show failure handling or
@@ -17,7 +17,7 @@ flowchart TD
 
     subgraph APP["1 · Android app and Stability Launcher"]
         A1["Match exact model, build, fingerprint,<br/>kernel release and kernel version"]
-        A2{"ZZI8 profile matches?"}
+        A2{"Latest One UI 9 Beta 2<br/>ZZI8 profile matches?"}
         A3["Extract and stage verified artifacts<br/>payload.so, root helper, mm factory,<br/>Stability Launcher and target ksud"]
         A4["Launcher rejects inherited LD_PRELOAD<br/>and validates every ELF"]
         A5["Optional app-side process quiesce<br/>before starting the launcher"]
@@ -151,7 +151,7 @@ flowchart TD
         Z3["Log BOPE :: Success<br/>Root achieved in integer seconds"]
         Z4["App stages target-specific ksud<br/>and calls root helper --late-load"]
         Z5["Root daemon creates private mount namespace<br/>bind-mounts ksud over logcat and execs<br/>late-load for android13-5.15"]
-        Z6["ksud selects and loads embedded<br/>KernelSU Next ZZI8 module"]
+        Z6["ksud selects and loads embedded<br/>KernelSU Next ZZI8 module for the<br/>latest One UI 9 Beta 2 firmware"]
         Z7["Helper obtains KernelSU control FD<br/>and verifies version, flags and ioctl"]
         Z8["Restore SELinux enforcing and verify it"]
         Z9["App stores install receipt<br/>and su -c id confirms uid=0"]
@@ -338,16 +338,19 @@ app mark root as active.
 ## Review findings from the current tree
 
 The flowchart above describes the path the code is trying to execute. A deep
-read of the current ZZI8 tree also exposed a few implementation details that
+read of the current ZZI8 tree for the latest One UI 9 Beta 2 firmware also
+exposed a few implementation details that
 are easy to miss:
 
-1. **The ZZI8 launcher build is not self-contained.** Its Makefile currently
+1. **The latest One UI 9 Beta 2 firmware's ZZI8 launcher build is not
+   self-contained.** Its Makefile currently
    reads `../../../../ksu-payload-functional/stability-launcher.c`, a sibling
    project outside this repository. That file is different from the local
    `stability-launcher/stability-launcher.c`: the external version uses three
    baseline samples, a 300-second timeout, terminal pipe-gate failure, no
    `am kill-all`, and no final two-second delay. The Mermaid follows the
-   external source actually selected by the ZZI8 Makefile.
+   external source actually selected by the latest One UI 9 Beta 2 firmware's
+   ZZI8 Makefile.
 2. **The in-process KASLR retry cache loses a tracefs-derived slide.**
    `kaslr_locate_via_tracefs()` returns the absolute kernel base, but
    `do_one_attempt()` does not recalculate its local `p0_offset` afterward.
@@ -362,7 +365,8 @@ are easy to miss:
    and relies on the allocation keeper to preserve the reclaimed page. The
    available `futex_v14_rewrite_pointer()` and
    `futex_v14_quarantine_pointer()` helpers have no production callers in the
-   ZZI8 orchestrator. This makes the no-retry/reboot boundary essential when
+   latest One UI 9 Beta 2 firmware's ZZI8 orchestrator. This makes the
+   no-retry/reboot boundary essential when
    the immediate AAR/AAW verification fails.
 4. **Only futex v14 is on the production path.** Older trigger generations are
    still present in `07_futex_pi_trigger.c`, but the orchestrator blocks v13
@@ -390,7 +394,7 @@ are easy to miss:
 
 | Stage | Production source |
 | --- | --- |
-| ZZI8 launcher selection | [`../Makefile`](../Makefile), which currently points to the external `ksu-payload-functional/stability-launcher.c` |
+| ZZI8 launcher selection for the latest One UI 9 Beta 2 firmware | [`../Makefile`](../Makefile), which currently points to the external `ksu-payload-functional/stability-launcher.c` |
 | Target contract | [`../src/target.h`](../src/target.h) |
 | Supervisor and complete chain | [`../src/00_orchestrator.c`](../src/00_orchestrator.c) |
 | CPU selection | [`../src/00_cpu_discovery.c`](../src/00_cpu_discovery.c) |

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify ZZI8 source constants against the bundled ELF, kallsyms and BTF."""
+"""Verify the latest One UI 9 Beta 2 firmware's ZZI8 constants."""
 
 from __future__ import annotations
 

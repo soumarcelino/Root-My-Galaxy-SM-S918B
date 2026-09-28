@@ -5,5 +5,5 @@
   "undefined_symbols": 203,
   "missing_symbols": [],
   "btf_mismatches": [],
-  "note": "ZZI8 BTF layouts match ZZHL for the seven KernelSU structures; all undefined module symbols exist in ZZI8 kallsyms."
+  "note": "ZZI8 is the latest One UI 9 Beta 2 firmware. Its BTF layouts match ZZHL for the seven KernelSU structures; all undefined module symbols exist in ZZI8 kallsyms."
 }

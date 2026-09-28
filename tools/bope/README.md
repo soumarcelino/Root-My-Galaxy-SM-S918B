@@ -7,9 +7,10 @@ The normal path needs only the ZIP:
 ./tools/bope-from-ota "/home/matias/Downloads/S23 Ultra ZZHL-ZZI8.zip"
 ```
 
-For that example, the command reads the ZZHL and ZZI8 identities from OTA
-metadata, finds `targets/zzhl/` as the donor, locates `boot_ZZHL.img` by its
-SHA-1, and writes `targets/zzi8-WIP/`. An existing target is never overwritten.
+For that example, the command reads the ZZHL source and ZZI8 target identities
+from OTA metadata. ZZI8 is the latest One UI 9 Beta 2 firmware. The pipeline
+finds `targets/zzhl/` as the donor, locates `boot_ZZHL.img` by its SHA-1, and
+writes `targets/zzi8-WIP/`. An existing target is never overwritten.
 
 The pipeline does the full mechanical port:
 
