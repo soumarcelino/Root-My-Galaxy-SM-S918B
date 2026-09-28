@@ -876,8 +876,7 @@ private fun InstallStatusCard(installState: InstallUiState, onInstall: () -> Uni
                         style = MaterialTheme.typography.titleMedium,
                     )
                 }
-                Text(
-                    text = installState.failureDetail ?: when (installState.phase) {
+                val statusDetail = installState.failureDetail ?: when (installState.phase) {
                         InstallPhase.Installed -> stringResource(
                             if (managerInstalled) {
                                 R.string.install_tap_open_manager
@@ -887,7 +886,9 @@ private fun InstallStatusCard(installState: InstallUiState, onInstall: () -> Uni
                         )
                         InstallPhase.Failed -> stringResource(R.string.install_tap_retry)
                         else -> stringResource(R.string.install_tap_start)
-                    },
+                    }
+                Text(
+                    text = emphasizeFirmware(statusDetail, installState.unsupportedFirmware),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.86f),
                     maxLines = if (installState.failureDetail == null) 1 else 10,

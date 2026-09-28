@@ -538,14 +538,15 @@ private fun StatusProgressCard(installState: InstallUiState, uninstallRoot: Bool
                             else installState.message,
                         style = MaterialTheme.typography.titleMedium,
                     )
-                    Text(
-                        text = if (installState.busy) {
+                    val statusDetail = if (installState.busy) {
                             groupedExecutionDetail(installState)
                         } else if (failed && installState.failureDetail != null) {
                             installState.failureDetail
                         } else {
                             installPhaseDetail(installState, uninstallRoot)
-                        },
+                        }
+                    Text(
+                        text = emphasizeFirmware(statusDetail, installState.unsupportedFirmware),
                         style = MaterialTheme.typography.bodySmall,
                         color = LocalContentColor.current.copy(alpha = 0.78f),
                     )

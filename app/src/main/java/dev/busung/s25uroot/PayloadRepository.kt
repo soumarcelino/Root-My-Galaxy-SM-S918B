@@ -32,6 +32,7 @@ class PayloadRepository(private val context: Context) {
         .maxByOrNull { it.specificity }
         ?: throw UnsupportedFirmwareException(
             message = context.getString(R.string.error_firmware_unsupported, snapshot.buildId),
+            firmware = snapshot.buildId,
             helpMessage = context.getString(R.string.error_firmware_one_ui_9_help)
                 .takeIf { snapshot.isOneUi9 },
         )
@@ -228,5 +229,6 @@ class PayloadRepository(private val context: Context) {
 
 class UnsupportedFirmwareException(
     message: String,
+    val firmware: String,
     val helpMessage: String?,
 ) : IllegalStateException(message)
