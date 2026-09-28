@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
 Version=1.0
-Name=Root My Galaxy AFZH3
-Comment=Executa o payload aberto AFZH3 com logs em tempo real
+Name=Root My Galaxy ZZI8 (Latest One UI 9 Beta 2 Firmware)
+Comment=Run BOPE for S918BXXUAZZI8, the latest One UI 9 Beta 2 firmware, with live logs
 Exec=/home/matias/Projects/Root-My-Galaxy-SM-S918B/RootMyGalaxyDesktop/start.sh
 Path=/home/matias/Projects/Root-My-Galaxy-SM-S918B/RootMyGalaxyDesktop
 Icon=android-package-archive

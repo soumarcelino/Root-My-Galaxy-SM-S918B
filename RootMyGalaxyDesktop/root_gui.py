@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Qt desktop frontend for the tested open-source AFZH3 root runner."""
+"""Qt desktop frontend for the exact ZZI8 BOPE root runner."""
 
 from __future__ import annotations
 
@@ -27,12 +27,12 @@ ANSI_ESCAPE = re.compile(r"(?:\x1b|␛)\[[0-?]*[ -/]*[@-~]")
 ROOT_RE = re.compile(r"uid=0(?:\(root\))?")
 METRIC_RE = re.compile(r"^metric (.+)$", re.MULTILINE)
 
-# Mesmas fontes do gate do launcher (read_device_metrics em
-# tools/validate-two-boots.sh), lidas com built-ins do shell para evitar um
-# processo por arquivo/campo: MemAvailable, temperatura de thermal_zone,
-# loadavg, tarefas executáveis e PSI some/avg10 de cpu/memory/io. Emite uma
-# linha "metric k=v ..." consumida por update_metrics; roda dentro do mesmo
-# adb shell do probe de root, sem abrir conexão concorrente.
+# Same launcher-gate sources used by read_device_metrics in
+# tools/validate-two-boots.sh, read with shell built-ins to avoid one
+# process per file/field: MemAvailable, thermal-zone temperature,
+# load average, runnable tasks, and cpu/memory/I/O PSI some/avg10. It emits a
+# "metric k=v ..." line consumed by update_metrics and runs inside the same
+# root-probe adb shell without opening a competing connection.
 METRICS_SH = (
     "mem=0; while read key amount unit; do "
     "[ \"$key\" = 'MemAvailable:' ] && { mem=$amount; break; }; "
@@ -50,39 +50,47 @@ METRICS_SH = (
     "printf 'metric mem=%s temp=%s load=%s run=%s cpu=%s mp=%s io=%s up=%s\\n' "
     "$mem $temp $load $run $cpu $mp $io $up"
 )
-# Limiares idênticos ao gate host (validate-two-boots.sh:146-152).
+# Thresholds match the host gate in validate-two-boots.sh:146-152.
 METRIC_MIN_MEM_KB = 1048576
 METRIC_MAX_TEMP_MC = 45000
 METRIC_MAX_RUNNABLE = 8
 METRIC_PSI_MAX = {"cpu": 30.0, "mp": 5.0, "io": 10.0}
-# neutral vazio: usa cor de texto da palette (adapta ao tema claro/escuro).
+# An empty neutral color inherits the palette text color for either theme.
 METRIC_COLORS = {"ok": "#16a34a", "warn": "#ef4444", "neutral": ""}
+TARGET_MODEL = "SM-S918B"
+TARGET_DEVICE = "dm3q"
+TARGET_BUILD = "S918BXXUAZZI8"
+TARGET_BUILD_DISPLAY = "CP2A.260605.016.S918BXXUAZZI8"
+TARGET_FINGERPRINT = (
+    "samsung/dm3qxxx/dm3q:17/CP2A.260605.016/"
+    "S918BXXUAZZI8:user/release-keys"
+)
+TARGET_KERNEL_RELEASE = "5.15.197-android13-8-34343818-abS918BXXUAZZI8"
+TARGET_KERNEL_VERSION = "#1 SMP PREEMPT Mon Sep 14 06:56:00 UTC 2026"
+TARGET_DESCRIPTION = "latest One UI 9 Beta 2 firmware"
 STAGES = (
-    ("Preparando a mochila", "Enviando helper e payload testados para o celular.", "📦",
-     ("preparando payload",)),
-    ("Esperando o momento certo", "Launcher local mede temperatura, memória e pressão.", "🌡️",
+    ("Packing the gear", "Sending the verified helper and payload to the phone.", "📦",
+     ("copying the selected assets", "staging the payload")),
+    ("Waiting for the right moment", "The launcher watches temperature, memory, and pressure.", "🌡️",
      ("[launcher] start profile=",)),
-    ("Iniciando a jornada", "O payload começou; agora cada mudança é acompanhada pelos logs.", "🚀",
-     ("starting exploit",)),
-    ("Encontrando o kernel", "Descobrindo onde o kernel está carregado neste boot.", "🧭",
+    ("Starting the journey", "BOPE is running and every change is tracked in the log.", "🚀",
+     ("running the payload", "[bope] brazilian open payload engine initialized")),
+    ("Finding the kernel", "Locating the kernel for this boot.", "🧭",
      ("stage=locating-kernel",)),
-    ("Testando a passagem", "Confirmando acesso de leitura e escrita antes de continuar.", "🔎",
+    ("Testing the passage", "Confirming read/write access before continuing.", "🔎",
      ("stage=verifying-kernel-access",)),
-    ("Abrindo a porta temporária", "A mutação crítica começou; não interrompa esta etapa.", "🔐",
+    ("Opening the temporary door", "The critical mutation has started. Do not interrupt this stage.", "🔐",
      ("stage=starting-temporary-root",)),
-    ("Construindo a ponte", "Montando o canal seguro usado para acessar a memória física.", "🌉",
+    ("Building the bridge", "Creating the channel used to access physical memory.", "🌉",
      ("[pipe_rw]",)),
-    ("Ativando o KernelSU", "Carregando o controle de root para este boot.", "⚙️",
-     ("carregando kernelsu",)),
-    ("Conferindo a conquista", "Executando su -c id: só uid=0 confirma root de verdade.", "✅",
-     ("aguardando su", "root confirmado")),
+    ("Activating KernelSU", "Loading root control for this boot.", "⚙️",
+     ("loading kernelsu",)),
+    ("Checking the result", "Running su -c id. Only uid=0 proves root.", "✅",
+     ("waiting for su", "root confirmed")),
 )
 
 
 def locate_runner() -> Path:
-    override = os.environ.get("ROOT_MY_GALAXY_RUNNER")
-    if override:
-        return Path(override).expanduser().resolve()
     app_dir = Path(__file__).resolve().parent
     return app_dir.parent / "simple-root" / "simple-root.sh"
 
@@ -97,6 +105,7 @@ class RootWindow(QMainWindow):
         self.reboot_process: QProcess | None = None
         self.reconnect_process: QProcess | None = None
         self.selected_serial = ""
+        self.target_compatible = False
         self.runner_exit_code: int | None = None
         self.mutation_possible = False
         self.reboot_required = False
@@ -107,7 +116,9 @@ class RootWindow(QMainWindow):
         self._stdout_buffer = ""
         self._stderr_buffer = ""
         self._last_log_time: float | None = None
-        self.setWindowTitle("Root My Galaxy · AFZH3 Open Source")
+        self.setWindowTitle(
+            "Root My Galaxy · S918BXXUAZZI8 · Latest One UI 9 Beta 2 Firmware"
+        )
         self.resize(980, 680)
         self.setMinimumSize(780, 520)
         self._build_ui()
@@ -135,13 +146,15 @@ class RootWindow(QMainWindow):
         titles = QVBoxLayout()
         title = QLabel("Root My Galaxy")
         title.setObjectName("title")
-        subtitle = QLabel("Payload aberto AFZH3 · execução e logs em tempo real")
+        subtitle = QLabel(
+            "BOPE for S918BXXUAZZI8 · latest One UI 9 Beta 2 firmware"
+        )
         subtitle.setObjectName("subtitle")
         titles.addWidget(title)
         titles.addWidget(subtitle)
         header_layout.addLayout(titles)
         header_layout.addStretch()
-        self.result_badge = QLabel("PRONTO")
+        self.result_badge = QLabel("READY")
         self.result_badge.setObjectName("badge")
         header_layout.addWidget(self.result_badge)
         root.addWidget(header)
@@ -155,11 +168,11 @@ class RootWindow(QMainWindow):
         self.devices = QComboBox()
         self.devices.setMinimumWidth(430)
         self.devices.currentIndexChanged.connect(self.device_changed)
-        self.refresh_button = QPushButton("🔄 Atualizar")
+        self.refresh_button = QPushButton("🔄 Refresh")
         self.refresh_button.clicked.connect(self.refresh_devices)
-        self.reboot_button = QPushButton("♻️ Reiniciar")
+        self.reboot_button = QPushButton("♻️ Reboot")
         self.reboot_button.clicked.connect(self.reboot_device)
-        device_row.addWidget(QLabel("📱 Dispositivo ADB:"))
+        device_row.addWidget(QLabel("📱 ADB device:"))
         device_row.addWidget(self.devices, 1)
         device_row.addWidget(self.refresh_button)
         device_row.addWidget(self.reboot_button)
@@ -169,12 +182,15 @@ class RootWindow(QMainWindow):
         live_state.setObjectName("liveState")
         live_layout = QHBoxLayout(live_state)
         live_layout.setContentsMargins(12, 8, 12, 8)
-        self.connection_label = QLabel("🔌 ADB · verificando")
-        self.boot_label = QLabel("🤖 Sistema · verificando")
-        self.root_live_label = QLabel("🔓 Root · verificando")
+        self.connection_label = QLabel("🔌 ADB · checking")
+        self.boot_label = QLabel("🤖 System · checking")
+        self.target_label = QLabel("🎯 Target · checking")
+        self.root_live_label = QLabel("🔓 Root · checking")
         live_layout.addWidget(self.connection_label)
         live_layout.addStretch()
         live_layout.addWidget(self.boot_label)
+        live_layout.addStretch()
+        live_layout.addWidget(self.target_label)
         live_layout.addStretch()
         live_layout.addWidget(self.root_live_label)
         body.addWidget(live_state)
@@ -190,10 +206,10 @@ class RootWindow(QMainWindow):
         self.stage_icon.setFixedWidth(42)
         stage_text = QVBoxLayout()
         stage_text.setSpacing(2)
-        self.stage_label = QLabel("Pronto para começar")
+        self.stage_label = QLabel("Ready to begin")
         self.stage_label.setObjectName("stage")
         self.stage_description = QLabel(
-            "Escolha o dispositivo e acompanhe cada passo até a prova de root."
+            "Choose the device and follow every step through final root verification."
         )
         self.stage_description.setObjectName("stageDescription")
         self.stage_description.setWordWrap(True)
@@ -205,7 +221,7 @@ class RootWindow(QMainWindow):
         self.progress = QProgressBar()
         self.progress.setRange(0, len(STAGES))
         self.progress.setValue(0)
-        self.progress.setFormat("%v/%m etapas")
+        self.progress.setFormat("%v/%m stages")
         body.addWidget(self.progress)
 
         self.output = QTextEdit()
@@ -219,12 +235,12 @@ class RootWindow(QMainWindow):
         body.addWidget(self.output, 1)
 
         controls = QHBoxLayout()
-        self.status_label = QLabel("Selecione dispositivo e execute.")
+        self.status_label = QLabel("Select a device and run the payload.")
         controls.addWidget(self.status_label, 1)
-        self.stop_button = QPushButton("Parar")
+        self.stop_button = QPushButton("Stop")
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.stop_run)
-        self.start_button = QPushButton("Executar payload")
+        self.start_button = QPushButton("Run payload")
         self.start_button.setDefault(True)
         self.start_button.clicked.connect(self.start_run)
         controls.addWidget(self.stop_button)
@@ -258,18 +274,18 @@ class RootWindow(QMainWindow):
             QComboBox { padding: 6px 10px; }
         """)
 
-    # Ordem, emoji e rótulos do painel realtime; chave casa com METRICS_SH.
+    # Realtime panel order, emoji, and labels; keys match METRICS_SH.
     METRIC_FIELDS = (
-        ("mem", "🧠 Memória livre"),
-        ("temp", "🌡️ Temperatura"),
-        ("run", "🏃 Tarefas exec."),
-        ("load", "📈 Carga 1m"),
+        ("mem", "🧠 Free memory"),
+        ("temp", "🌡️ Temperature"),
+        ("run", "🏃 Runnable tasks"),
+        ("load", "📈 1m load"),
         ("cpu", "⚡ PSI CPU"),
-        ("mp", "💾 PSI memória"),
+        ("mp", "💾 Memory PSI"),
         ("io", "💽 PSI I/O"),
         ("up", "⏱️ Uptime"),
     )
-    # Emoji de estado anexado ao valor.
+    # Status emoji appended to the metric value.
     STATE_EMOJI = {"ok": "✅", "warn": "⚠️", "neutral": "➖"}
 
     def _build_metrics_panel(self) -> QFrame:
@@ -279,7 +295,7 @@ class RootWindow(QMainWindow):
         grid.setContentsMargins(12, 9, 12, 9)
         grid.setHorizontalSpacing(18)
         grid.setVerticalSpacing(6)
-        title = QLabel("📊 Telemetria do dispositivo · tempo real (gate)")
+        title = QLabel("📊 Live device metrics · stability gate")
         title.setObjectName("metricTitle")
         grid.addWidget(title, 0, 0, 1, 4)
         self.metric_labels: dict[str, QLabel] = {}
@@ -306,7 +322,7 @@ class RootWindow(QMainWindow):
         suffix = f"  {emoji}" if text != "—" else ""
         label.setText(f"{text}{suffix}")
         color = METRIC_COLORS[state]
-        # neutral sem cor fixa: herda texto da palette (legível claro/escuro).
+        # Neutral has no fixed color and inherits the active palette.
         label.setStyleSheet(f"color: {color};" if color else "")
 
     def clear_metrics(self) -> None:
@@ -349,7 +365,7 @@ class RootWindow(QMainWindow):
         if temp_mc is None:
             self._set_metric("temp", "—", "neutral")
         elif temp_mc == 0:
-            self._set_metric("temp", "n/d", "neutral")
+            self._set_metric("temp", "n/a", "neutral")
         else:
             self._set_metric(
                 "temp", f"{temp_mc / 1000:.1f}°C",
@@ -389,11 +405,11 @@ class RootWindow(QMainWindow):
         self.devices.blockSignals(True)
         self.devices.clear()
         if not shutil.which("adb"):
-            self.devices.addItem("adb não encontrado")
+            self.devices.addItem("adb not found")
             self.devices.blockSignals(False)
             self.start_button.setEnabled(False)
             self.reboot_button.setEnabled(False)
-            self.set_result("ERRO", "#dc2626", "Instale Android platform-tools.")
+            self.set_result("ERROR", "#dc2626", "Install Android platform-tools.")
             return
         try:
             result = subprocess.run(
@@ -401,7 +417,7 @@ class RootWindow(QMainWindow):
                 timeout=5, check=False,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            self.devices.addItem(f"Falha ao consultar adb: {exc}")
+            self.devices.addItem(f"Failed to query adb: {exc}")
             self.devices.blockSignals(False)
             self.start_button.setEnabled(False)
             return
@@ -419,7 +435,7 @@ class RootWindow(QMainWindow):
             online.append((serial, model))
             self.devices.addItem(f"{model} · {serial}", serial)
         if not online:
-            self.devices.addItem("Nenhum dispositivo autorizado")
+            self.devices.addItem("No authorized devices")
         elif selected:
             index = self.devices.findData(selected)
             if index >= 0:
@@ -430,20 +446,23 @@ class RootWindow(QMainWindow):
     def device_changed(self) -> None:
         serial = self.devices.currentData()
         self.selected_serial = str(serial or "")
+        self.target_compatible = False
         idle = self.process is None and self.verify_process is None
         self.start_button.setEnabled(False)
         self.reboot_button.setEnabled(bool(serial) and idle)
         if serial:
-            self.connection_label.setText("🔌 ADB · conectado")
-            self.boot_label.setText("🤖 Sistema · verificando")
-            self.root_live_label.setText("🔓 Root · verificando")
+            self.connection_label.setText("🔌 ADB · connected")
+            self.boot_label.setText("🤖 System · checking")
+            self.target_label.setText("🎯 Target · checking ZZI8")
+            self.root_live_label.setText("🔓 Root · checking")
             self.status_label.setStyleSheet("")
-            self.status_label.setText(f"Verificando estado de {serial}…")
+            self.status_label.setText(f"Checking status of {serial}…")
             QTimer.singleShot(0, self.check_root_status)
         else:
-            self.connection_label.setText("🔌 ADB · desconectado")
-            self.boot_label.setText("🤖 Sistema · indisponível")
-            self.root_live_label.setText("🔓 Root · desconhecido")
+            self.connection_label.setText("🔌 ADB · disconnected")
+            self.boot_label.setText("🤖 System · unavailable")
+            self.target_label.setText("🎯 Target · unavailable")
+            self.root_live_label.setText("🔓 Root · unknown")
             self.reboot_button.setEnabled(False)
             self.clear_metrics()
 
@@ -467,6 +486,12 @@ class RootWindow(QMainWindow):
             "printf 'boot=%s\\n' \"$(getprop sys.boot_completed)\"; "
             "read boot_id < /proc/sys/kernel/random/boot_id; "
             "printf 'boot_id=%s\\n' \"$boot_id\"; "
+            "printf 'target_model=%s\\n' \"$(getprop ro.product.model)\"; "
+            "printf 'target_device=%s\\n' \"$(getprop ro.product.device)\"; "
+            "printf 'target_display=%s\\n' \"$(getprop ro.build.display.id)\"; "
+            "printf 'target_fingerprint=%s\\n' \"$(getprop ro.build.fingerprint)\"; "
+            "printf 'target_kernel_release=%s\\n' \"$(uname -r)\"; "
+            "printf 'target_kernel_version=%s\\n' \"$(uname -v)\"; "
             + METRICS_SH + "; "
             "/system/bin/su -c id 2>/dev/null || true"
         )
@@ -487,6 +512,25 @@ class RootWindow(QMainWindow):
             self.clear_metrics()
         booted = "boot=1" in stdout
         rooted = bool(ROOT_RE.search(stdout))
+
+        def probe_value(name: str) -> str:
+            match = re.search(rf"^{re.escape(name)}=(.*)$", stdout, re.MULTILINE)
+            return match.group(1).strip() if match else ""
+
+        target_values = {
+            "target_model": TARGET_MODEL,
+            "target_device": TARGET_DEVICE,
+            "target_display": TARGET_BUILD_DISPLAY,
+            "target_fingerprint": TARGET_FINGERPRINT,
+            "target_kernel_release": TARGET_KERNEL_RELEASE,
+            "target_kernel_version": TARGET_KERNEL_VERSION,
+        }
+        detected_target = {name: probe_value(name) for name in target_values}
+        self.target_compatible = connected and all(
+            detected_target[name] == expected
+            for name, expected in target_values.items()
+        )
+        detected_display = detected_target["target_display"] or "unknown firmware"
         boot_id_match = re.search(r"^boot_id=([0-9a-f-]+)$", stdout, re.MULTILINE)
         boot_id = boot_id_match.group(1) if boot_id_match else ""
         try:
@@ -504,25 +548,38 @@ class RootWindow(QMainWindow):
             self.mutation_possible = False
         if boot_id:
             self.current_boot_id = boot_id
-        self.connection_label.setText("🔌 ADB · conectado" if connected else "🔌 ADB · desconectado")
-        self.boot_label.setText("🤖 Sistema · pronto" if booted else "🤖 Sistema · iniciando")
-        self.root_live_label.setText("🔓 Root · ativo" if rooted else "🔓 Root · inativo")
-        if rooted:
+        self.connection_label.setText("🔌 ADB · connected" if connected else "🔌 ADB · disconnected")
+        self.boot_label.setText("🤖 System · ready" if booted else "🤖 System · booting")
+        if not connected:
+            self.target_label.setText("🎯 Target · unavailable")
+        elif self.target_compatible:
+            self.target_label.setText("🎯 Target · ZZI8 confirmed")
+        else:
+            self.target_label.setText(f"🎯 Target · unsupported ({detected_display})")
+        self.root_live_label.setText("🔓 Root · active" if rooted else "🔓 Root · inactive")
+        if connected and not self.target_compatible:
+            self.set_result(
+                "UNSUPPORTED FIRMWARE", "#dc2626",
+                f"Detected {detected_display}. This desktop app supports only "
+                f"{TARGET_BUILD}, the {TARGET_DESCRIPTION}."
+            )
+            self.start_button.setEnabled(False)
+        elif rooted:
             self.reboot_required = False
             self.clear_unsafe_boot()
-            self.set_result("ROOT ATIVO", "#16a34a", "Monitor: uid=0 confirmado.")
+            self.set_result("ROOT ACTIVE", "#16a34a", "Monitor: uid=0 confirmed.")
             self.start_button.setEnabled(False)
         elif self.reboot_required:
             self.set_result(
-                "REBOOT NECESSÁRIO", "#dc2626",
-                "Kernel alterado; reinicie antes de outra tentativa."
+                "REBOOT REQUIRED", "#dc2626",
+                "Kernel state changed. Reboot before another attempt."
             )
             self.start_button.setEnabled(False)
         elif booted:
-            self.set_result("SEM ROOT", "#dc2626", "Sistema pronto para executar o payload.")
+            self.set_result("NO ROOT", "#dc2626", "System is ready to run the payload.")
             self.start_button.setEnabled(True)
         else:
-            self.set_result("INICIANDO", "#d97706", "Aguardando Android concluir o boot…")
+            self.set_result("BOOTING", "#d97706", "Waiting for Android to finish booting…")
             self.start_button.setEnabled(False)
         self.reboot_button.setEnabled(connected)
 
@@ -530,8 +587,10 @@ class RootWindow(QMainWindow):
         if self.root_probe_process:
             self.root_probe_process.deleteLater()
             self.root_probe_process = None
-        self.connection_label.setText("🔌 ADB · erro")
-        self.root_live_label.setText("🔓 Root · desconhecido")
+        self.connection_label.setText("🔌 ADB · error")
+        self.target_label.setText("🎯 Target · unavailable")
+        self.root_live_label.setText("🔓 Root · unknown")
+        self.target_compatible = False
         self.clear_metrics()
 
     def mark_unsafe_boot(self) -> None:
@@ -541,7 +600,7 @@ class RootWindow(QMainWindow):
             self.unsafe_boot_path.parent.mkdir(parents=True, exist_ok=True)
             self.unsafe_boot_path.write_text(self.current_boot_id + "\n")
         except OSError as exc:
-            self.append_log(f"[GUI] Não foi possível persistir estado crítico: {exc}", True)
+            self.append_log(f"[GUI] Could not persist critical state: {exc}", True)
 
     def clear_unsafe_boot(self) -> None:
         try:
@@ -551,16 +610,23 @@ class RootWindow(QMainWindow):
 
     def start_run(self) -> None:
         if not self.selected_serial:
-            QMessageBox.warning(self, "ADB", "Selecione um dispositivo autorizado.")
+            QMessageBox.warning(self, "ADB", "Select an authorized device.")
+            return
+        if not self.target_compatible:
+            QMessageBox.warning(
+                self, "Unsupported firmware",
+                f"This desktop app runs only on {TARGET_BUILD}, the "
+                f"{TARGET_DESCRIPTION}.",
+            )
             return
         if not self.runner.is_file() or not os.access(self.runner, os.X_OK):
-            self.set_result("ERRO", "#dc2626", f"Runner ausente: {self.runner}")
+            self.set_result("ERROR", "#dc2626", f"Runner is missing: {self.runner}")
             return
         if self.reboot_required:
             QMessageBox.warning(
-                self, "Reboot necessário",
-                "Uma tentativa alterou o kernel neste boot. Reinicie o celular "
-                "antes de executar novamente.",
+                self, "Reboot required",
+                "An attempt changed kernel state in this boot. Reboot the phone "
+                "before running again.",
             )
             return
 
@@ -573,11 +639,11 @@ class RootWindow(QMainWindow):
         self._stdout_buffer = ""
         self._stderr_buffer = ""
         self.stage_icon.setText("🎬")
-        self.stage_label.setText("Preparando a execução")
+        self.stage_label.setText("Preparing the run")
         self.stage_description.setText(
-            "Validando runner, payload e conexão ADB antes do primeiro passo."
+            "Validating the runner, payload, target firmware, and ADB connection."
         )
-        self.set_result("EXECUTANDO", "#d97706", "Validando runner e dispositivo…")
+        self.set_result("RUNNING", "#d97706", "Validating the runner and device…")
         self.append_log(f"[GUI] Runner: {self.runner}")
         payload = self.runner.parent / "assets" / "payload.so"
         if payload.is_file():
@@ -591,7 +657,7 @@ class RootWindow(QMainWindow):
         if mm_factory.is_file():
             digest = hashlib.sha256(mm_factory.read_bytes()).hexdigest()
             self.append_log(f"[GUI] MM factory SHA-256: {digest}")
-        self.append_log("[GUI] Tela não será apagada. Aplicativos não serão encerrados.")
+        self.append_log("[GUI] The screen will stay on. Apps will not be terminated.")
 
         # The device-side C launcher owns the stability gate. Stop the live
         # root poll first so no competing adb shell perturbs its samples.
@@ -610,7 +676,7 @@ class RootWindow(QMainWindow):
         self.start_runner()
 
     def start_runner(self) -> None:
-        self.set_result("AGUARDANDO", "#d97706", "Launcher aguardará estabilidade máxima…")
+        self.set_result("WAITING", "#d97706", "The launcher is waiting for a stable execution window…")
 
         self.process = QProcess(self)
         self.process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
@@ -625,23 +691,25 @@ class RootWindow(QMainWindow):
         if not self.selected_serial or self.process is not None:
             return
         answer = QMessageBox.question(
-            self, "Reiniciar dispositivo",
-            "Reiniciar o dispositivo agora? O root ativo será perdido até nova execução.",
+            self, "Reboot device",
+            "Reboot the device now? Active root will be lost until the next successful run.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self.append_log(f"[GUI] Reiniciando {self.selected_serial}…")
-        self.set_result("REINICIANDO", "#d97706", "Comando adb reboot em andamento…")
+        self.append_log(f"[GUI] Rebooting {self.selected_serial}…")
+        self.target_compatible = False
+        self.target_label.setText("🎯 Target · waiting for reboot")
+        self.set_result("REBOOTING", "#d97706", "adb reboot is running…")
         self.stage_icon.setText("🔄")
-        self.stage_label.setText("Reiniciando o celular")
+        self.stage_label.setText("Rebooting the phone")
         self.stage_description.setText(
-            "Aguardando o Android voltar e o monitor confirmar o novo estado."
+            "Waiting for Android to return and the monitor to confirm the new state."
         )
-        self.connection_label.setText("🔌 ADB · reiniciando")
-        self.boot_label.setText("🤖 Sistema · reiniciando")
-        self.root_live_label.setText("🔓 Root · será removido")
+        self.connection_label.setText("🔌 ADB · rebooting")
+        self.boot_label.setText("🤖 System · rebooting")
+        self.root_live_label.setText("🔓 Root · will be removed")
         self.start_button.setEnabled(False)
         self.refresh_button.setEnabled(False)
         self.reboot_button.setEnabled(False)
@@ -655,14 +723,14 @@ class RootWindow(QMainWindow):
             self.reboot_process.deleteLater()
             self.reboot_process = None
         if exit_code != 0:
-            self.set_result("ERRO", "#dc2626", f"adb reboot falhou: código {exit_code}.")
+            self.set_result("ERROR", "#dc2626", f"adb reboot failed with code {exit_code}.")
             self.refresh_button.setEnabled(True)
             self.reboot_button.setEnabled(True)
             return
-        self.append_log("[GUI] Reboot aceito; aguardando ADB reconectar…")
-        self.connection_label.setText("🔌 ADB · aguardando")
-        self.boot_label.setText("🤖 Sistema · iniciando")
-        self.root_live_label.setText("🔓 Root · inativo")
+        self.append_log("[GUI] Reboot accepted. Waiting for ADB to reconnect…")
+        self.connection_label.setText("🔌 ADB · waiting")
+        self.boot_label.setText("🤖 System · booting")
+        self.root_live_label.setText("🔓 Root · inactive")
         self.reconnect_process = QProcess(self)
         self.reconnect_process.finished.connect(self.reconnect_finished)
         self.reconnect_process.errorOccurred.connect(self.reconnect_error)
@@ -671,11 +739,11 @@ class RootWindow(QMainWindow):
         )
 
     def reboot_error(self, _error: QProcess.ProcessError) -> None:
-        message = self.reboot_process.errorString() if self.reboot_process else "erro desconhecido"
+        message = self.reboot_process.errorString() if self.reboot_process else "unknown error"
         if self.reboot_process:
             self.reboot_process.deleteLater()
             self.reboot_process = None
-        self.set_result("ERRO", "#dc2626", f"Falha ao iniciar adb reboot: {message}")
+        self.set_result("ERROR", "#dc2626", f"Failed to start adb reboot: {message}")
         self.refresh_button.setEnabled(True)
         self.reboot_button.setEnabled(bool(self.selected_serial))
 
@@ -683,17 +751,19 @@ class RootWindow(QMainWindow):
         if self.reconnect_process:
             self.reconnect_process.deleteLater()
             self.reconnect_process = None
-        self.append_log("[GUI] ADB reconectado; aguardando Android finalizar boot.")
-        self.connection_label.setText("🔌 ADB · conectado")
+        self.append_log("[GUI] ADB reconnected. Waiting for Android to finish booting.")
+        self.connection_label.setText("🔌 ADB · connected")
         self.refresh_button.setEnabled(True)
         QTimer.singleShot(1500, self.check_root_status)
 
     def reconnect_error(self, _error: QProcess.ProcessError) -> None:
-        message = self.reconnect_process.errorString() if self.reconnect_process else "erro desconhecido"
+        message = self.reconnect_process.errorString() if self.reconnect_process else "unknown error"
         if self.reconnect_process:
             self.reconnect_process.deleteLater()
             self.reconnect_process = None
-        self.set_result("DESCONECTADO", "#dc2626", f"ADB não reconectou: {message}")
+        self.set_result("DISCONNECTED", "#dc2626", f"ADB did not reconnect: {message}")
+        self.target_compatible = False
+        self.target_label.setText("🎯 Target · unavailable")
         self.refresh_button.setEnabled(True)
 
     def read_stdout(self) -> None:
@@ -735,8 +805,8 @@ class RootWindow(QMainWindow):
         adb_progress = "file pushed" in lowered or "file pulled" in lowered
         semantic_error = (
             (error and not adb_progress)
-            or "falhou" in lowered or "erro" in lowered
-            or "ausente" in lowered or "inválido" in lowered
+            or "failed" in lowered or "error" in lowered
+            or "missing" in lowered or "invalid" in lowered
         )
         color = "#ef4444" if semantic_error else (
             "#22c55e" if "[+]" in clean or ROOT_RE.search(clean) else "#fffaf3"
@@ -775,16 +845,16 @@ class RootWindow(QMainWindow):
             )
             if match:
                 self.stage_description.setText(
-                    f"Estável {match.group(1)} · {match.group(2)} · "
-                    f"{match.group(3)} livres · {match.group(4)}"
+                    f"Stable {match.group(1)} · {match.group(2)} · "
+                    f"{match.group(3)} free · {match.group(4)}"
                 )
         elif "[launcher] gate=ready" in lowered:
             self.stage_description.setText(
-                "Métricas, slab e capacidade de pipes foram aprovados."
+                "Metrics, slab state, and pipe capacity passed."
             )
         elif "[launcher] pipe-gate=pass" in lowered:
             self.stage_description.setText(
-                "Capacidade de 480 pipes aprovada; confirmando estabilidade final."
+                "Capacity for 480 pipes passed. Confirming final stability."
             )
         if "stage=kernel-mutation-pending" in lowered:
             self.mutation_possible = True
@@ -792,7 +862,7 @@ class RootWindow(QMainWindow):
             self.mark_unsafe_boot()
             self.stop_button.setEnabled(False)
             self.status_label.setText(
-                "Mutação kernel possível; aguarde conclusão ou reboot automático."
+                "Kernel mutation may have started. Wait for completion or automatic reboot."
             )
         for index, (label, description, icon, markers) in enumerate(STAGES, start=1):
             if index > self.stage_index and any(marker in lowered for marker in markers):
@@ -807,7 +877,7 @@ class RootWindow(QMainWindow):
         self.read_stderr()
         self.flush_buffers()
         self.runner_exit_code = exit_code
-        self.append_log(f"[GUI] Runner finalizou com código {exit_code}.", exit_code != 0)
+        self.append_log(f"[GUI] Runner finished with code {exit_code}.", exit_code != 0)
         if self.process:
             self.process.deleteLater()
             self.process = None
@@ -816,28 +886,30 @@ class RootWindow(QMainWindow):
 
     def runner_error(self, _error: QProcess.ProcessError) -> None:
         if self.process:
-            self.append_log(f"[GUI] Falha ao iniciar runner: {self.process.errorString()}", True)
+            self.append_log(f"[GUI] Failed to start runner: {self.process.errorString()}", True)
             if self.process.error() == QProcess.ProcessError.FailedToStart:
                 self.process.deleteLater()
                 self.process = None
-                self.set_result("NÃO EXECUTADO", "#dc2626", "Runner não iniciou.")
+                self.set_result("NOT RUN", "#dc2626", "The runner did not start.")
                 self.stop_button.setEnabled(False)
                 self.refresh_button.setEnabled(True)
                 self.reboot_button.setEnabled(bool(self.selected_serial))
                 self.start_button.setEnabled(
-                    bool(self.selected_serial) and not self.reboot_required
+                    bool(self.selected_serial)
+                    and self.target_compatible
+                    and not self.reboot_required
                 )
                 self.root_timer.start()
 
     def start_verification(self) -> None:
         self.stage_index = len(STAGES)
         self.progress.setValue(len(STAGES))
-        self.stage_label.setText("Conferindo a conquista")
+        self.stage_label.setText("Checking the result")
         self.stage_description.setText(
-            "Executando uma prova independente: adb shell su -c id."
+            "Running an independent check: adb shell su -c id."
         )
         self.stage_icon.setText("✅")
-        self.append_log("[GUI] Prova final: adb shell su -c id")
+        self.append_log("[GUI] Final check: adb shell su -c id")
         self.verify_process = QProcess(self)
         self.verify_process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
         self.verify_process.finished.connect(self.verification_finished)
@@ -865,10 +937,10 @@ class RootWindow(QMainWindow):
         if rooted:
             self.reboot_required = False
             self.clear_unsafe_boot()
-            self.set_result("ROOT ATIVO", "#16a34a", "Sucesso: uid=0 confirmado.")
-            self.stage_label.setText("Root conquistado")
+            self.set_result("ROOT ACTIVE", "#16a34a", "Success: uid=0 confirmed.")
+            self.stage_label.setText("Root achieved")
             self.stage_description.setText(
-                "Tudo certo: o celular respondeu como uid=0 neste boot."
+                "All set: the phone returned uid=0 in this boot."
             )
             self.stage_icon.setText("🎉")
             self.start_button.setEnabled(False)
@@ -876,35 +948,41 @@ class RootWindow(QMainWindow):
             runner_note = f" Runner={self.runner_exit_code}." if self.runner_exit_code is not None else ""
             if self.reboot_required:
                 self.set_result(
-                    "REBOOT NECESSÁRIO", "#dc2626",
-                    f"Kernel alterado; não tente novamente neste boot.{runner_note}"
+                    "REBOOT REQUIRED", "#dc2626",
+                    f"Kernel state changed. Do not retry in this boot.{runner_note}"
                 )
-                self.stage_label.setText("Hora de recomeçar com segurança")
+                self.stage_label.setText("Time for a clean restart")
                 self.stage_description.setText(
-                    "Reinicie o celular antes de uma nova tentativa; o botão executar está bloqueado."
+                    "Reboot the phone before another attempt. The run button is locked."
                 )
                 self.stage_icon.setText("🔄")
                 self.start_button.setEnabled(False)
             else:
-                self.set_result("SEM ROOT", "#dc2626", f"Falha: uid=0 não confirmado.{runner_note}")
-                self.stage_label.setText("A jornada não terminou")
+                self.set_result("NO ROOT", "#dc2626", f"Failure: uid=0 was not confirmed.{runner_note}")
+                self.stage_label.setText("Root was not achieved")
                 self.stage_description.setText(
-                    "O celular não confirmou uid=0. Consulte os logs para localizar a etapa que falhou."
+                    "The phone did not confirm uid=0. Check the logs to find the failed stage."
                 )
                 self.stage_icon.setText("🧩")
-                self.start_button.setEnabled(bool(self.selected_serial))
+                self.start_button.setEnabled(
+                    bool(self.selected_serial) and self.target_compatible
+                )
         QTimer.singleShot(500, self.check_root_status)
 
     def verification_error(self, _error: QProcess.ProcessError) -> None:
-        message = self.verify_process.errorString() if self.verify_process else "erro desconhecido"
-        self.append_log(f"[GUI] Falha na verificação final: {message}", True)
+        message = self.verify_process.errorString() if self.verify_process else "unknown error"
+        self.append_log(f"[GUI] Final verification failed: {message}", True)
         if self.verify_process:
             self.verify_process.deleteLater()
             self.verify_process = None
-        self.set_result("SEM PROVA", "#dc2626", "Não foi possível executar su -c id.")
+        self.set_result("UNVERIFIED", "#dc2626", "Could not run su -c id.")
         self.refresh_button.setEnabled(True)
         self.reboot_button.setEnabled(bool(self.selected_serial))
-        self.start_button.setEnabled(bool(self.selected_serial) and not self.reboot_required)
+        self.start_button.setEnabled(
+            bool(self.selected_serial)
+            and self.target_compatible
+            and not self.reboot_required
+        )
         self.root_timer.start()
         QTimer.singleShot(500, self.check_root_status)
 
@@ -922,12 +1000,12 @@ class RootWindow(QMainWindow):
             return
         if self.mutation_possible:
             QMessageBox.warning(
-                self, "Execução crítica",
-                "O kernel pode já ter sido alterado. Interrupção bloqueada; "
-                "aguarde o runner terminar.",
+                self, "Critical execution",
+                "Kernel state may already have changed. Stopping is blocked; "
+                "wait for the runner to finish.",
             )
             return
-        self.append_log("[GUI] Interrompendo grupo do runner…", True)
+        self.append_log("[GUI] Stopping the runner process group…", True)
         pid = int(self.process.processId())
         try:
             os.killpg(pid, signal.SIGTERM)
@@ -947,9 +1025,9 @@ class RootWindow(QMainWindow):
         if self.process and self.process.state() != QProcess.ProcessState.NotRunning:
             if self.mutation_possible:
                 QMessageBox.warning(
-                    self, "Execução crítica",
-                    "Janela não pode ser fechada após possível mutação kernel. "
-                    "Aguarde o runner terminar.",
+                    self, "Critical execution",
+                    "The window cannot close after a possible kernel mutation. "
+                    "Wait for the runner to finish.",
                 )
                 event.ignore()
                 return
@@ -969,7 +1047,9 @@ class RootWindow(QMainWindow):
 
 def main() -> int:
     app = QApplication(sys.argv)
-    app.setApplicationName("Root My Galaxy AFZH3")
+    app.setApplicationName(
+        "Root My Galaxy ZZI8 · Latest One UI 9 Beta 2 Firmware"
+    )
     if "Breeze" in QStyleFactory.keys():
         app.setStyle(QStyleFactory.create("Breeze"))
     window = RootWindow()
