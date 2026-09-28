@@ -5,7 +5,7 @@
     <string name="nav_history">Historique</string>
     <string name="nav_settings">Paramètres</string>
     <string name="install_confirm_title">Installer KernelSU ?</string>
-    <string name="install_confirm_body">L\'application vérifiera votre appareil et son firmware, préparera le payload compatible intégré à l\'application, puis exécutera l\'exploit avec KernelSU Next.</string>
+    <string name="install_confirm_body">Soyez prudent après avoir obtenu l’accès root.\n\nNe remplacez jamais, sous aucun prétexte, les partitions en lecture seule et n’appliquez aucun module tentant de modifier les partitions protégées. L’appareil pourrait ne plus démarrer.</string>
     <string name="action_confirm">Confirmer</string>
     <string name="action_cancel">Annuler</string>
     <string name="action_close">Fermer</string>

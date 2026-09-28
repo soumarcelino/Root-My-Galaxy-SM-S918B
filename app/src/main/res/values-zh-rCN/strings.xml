@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Root My Galaxy</string><string name="nav_overview">主页</string><string name="nav_history">运行记录</string><string name="nav_settings">设置</string>
-    <string name="install_confirm_title">安装 KernelSU Next？</string><string name="install_confirm_body">应用将验证设备和固件，准备应用内置的兼容 payload，然后使用 KernelSU Next 运行 exploit。</string>
+    <string name="install_confirm_title">安装 KernelSU Next？</string><string name="install_confirm_body">获取 root 权限后请务必小心。\n\n在任何情况下都不要覆盖只读分区，也不要应用任何试图修改受保护分区的模块。这可能导致设备无法启动。</string>
     <string name="action_confirm">确认</string><string name="action_cancel">取消</string><string name="action_close">关闭</string><string name="action_retry">重试</string><string name="action_done">完成</string><string name="action_back">返回</string>
     <string name="install_tap_manager">点击安装 KernelSU Manager</string><string name="install_tap_retry">点击重试</string><string name="install_tap_start">点击安装 KernelSU</string>
     <string name="device">设备</string><string name="firmware">固件</string><string name="system">系统</string><string name="kernel">内核</string><string name="system_abi">系统 ABI</string>

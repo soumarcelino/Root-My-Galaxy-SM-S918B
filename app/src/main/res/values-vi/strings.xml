@@ -5,7 +5,7 @@
     <string name="nav_history">Lịch sử</string>
     <string name="nav_settings">Cài đặt</string>
     <string name="install_confirm_title">Cài đặt KernelSU?</string>
-    <string name="install_confirm_body">Ứng dụng sẽ xác minh thiết bị và firmware, chuẩn bị payload tương thích được tích hợp sẵn trong ứng dụng, rồi chạy exploit với KernelSU Next.</string>
+    <string name="install_confirm_body">Hãy cẩn thận sau khi có quyền root.\n\nTrong mọi trường hợp, không được ghi đè các phân vùng chỉ đọc hoặc áp dụng bất kỳ mô-đun nào cố sửa đổi các phân vùng được bảo vệ. Việc này có thể khiến thiết bị không khởi động được.</string>
     <string name="action_confirm">Xác nhận</string>
     <string name="action_cancel">Hủy</string>
     <string name="action_close">Đóng</string>

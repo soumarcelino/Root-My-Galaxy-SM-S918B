@@ -5,7 +5,7 @@
     <string name="nav_history">History</string>
     <string name="nav_settings">Settings</string>
     <string name="install_confirm_title">Install KernelSU Next?</string>
-    <string name="install_confirm_body">The app will verify your device and firmware, then prepare the compatible payload bundled in the app and run the exploit with KernelSU Next.</string>
+    <string name="install_confirm_body">Be careful after gaining root.\n\nNever, under any circumstances, overwrite read-only partitions or apply any module that attempts to modify protected partitions. Doing so may leave the device unable to boot.</string>
     <string name="action_confirm">Confirm</string>
     <string name="action_cancel">Cancel</string>
     <string name="action_close">Close</string>

@@ -5,7 +5,7 @@
     <string name="nav_history">Geçmiş</string>
     <string name="nav_settings">Ayarlar</string>
     <string name="install_confirm_title">KernelSU yüklensin mi?</string>
-    <string name="install_confirm_body">Uygulama cihazınızı ve donanım yazılımınızı doğrulayacak, ardından uygulamaya gömülü uyumlu payload\'ı hazırlayıp KernelSU Next ile exploit\'i çalıştıracaktır.</string>
+    <string name="install_confirm_body">Root erişimi kazandıktan sonra dikkatli olun.\n\nHiçbir koşulda salt okunur bölümlerin üzerine yazmayın veya korumalı bölümleri değiştirmeye çalışan herhangi bir modülü uygulamayın. Aksi halde cihaz açılmayabilir.</string>
     <string name="action_confirm">Onayla</string>
     <string name="action_cancel">İptal</string>
     <string name="action_close">Kapat</string>

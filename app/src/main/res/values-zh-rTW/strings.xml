@@ -6,7 +6,7 @@
     <string name="nav_settings">設定</string>
 
     <string name="install_confirm_title">安裝 KernelSU Next？</string>
-    <string name="install_confirm_body">應用程式將驗證裝置與韌體，準備應用程式內建的相容 payload，然後使用 KernelSU Next 執行 exploit。</string>
+    <string name="install_confirm_body">取得 root 後請務必小心。\n\n任何情況下都不要覆寫唯讀分割區，也不要套用任何嘗試修改受保護分割區的模組。這可能會導致裝置無法開機。</string>
 
     <string name="action_confirm">確認</string>
     <string name="action_cancel">取消</string>

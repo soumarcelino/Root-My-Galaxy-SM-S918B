@@ -5,7 +5,7 @@
     <string name="nav_history">Tarix</string>
     <string name="nav_settings">Sozlamalar</string>
     <string name="install_confirm_title">KernelSU o\'rnatilsinmi?</string>
-    <string name="install_confirm_body">Ilova qurilma va proshivkani tekshiradi, so\'ngra ilovaga o\'rnatilgan mos payloadni tayyorlab, KernelSU Next bilan eksploytni ishga tushiradi.</string>
+    <string name="install_confirm_body">Root huquqini olgandan keyin ehtiyot bo‘ling.\n\nHech qanday holatda faqat o‘qish uchun mo‘ljallangan bo‘limlarni qayta yozmang va himoyalangan bo‘limlarni o‘zgartirishga urinadigan modullarni qo‘llamang. Aks holda qurilma ishga tushmay qolishi mumkin.</string>
     <string name="action_confirm">Tasdiqlash</string>
     <string name="action_cancel">Bekor qilish</string>
     <string name="action_close">Yopish</string>

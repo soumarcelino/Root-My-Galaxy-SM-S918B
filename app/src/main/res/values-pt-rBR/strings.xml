@@ -5,7 +5,7 @@
     <string name="nav_history">Histórico</string>
     <string name="nav_settings">Configurações</string>
     <string name="install_confirm_title">Instalar o KernelSU Next?</string>
-    <string name="install_confirm_body">O app vai verificar o modelo e o firmware do aparelho, preparar o payload compatível embutido no app e executar o exploit com o KernelSU Next.</string>
+    <string name="install_confirm_body">Tenha cuidado depois de obter root.\n\nNunca, em hipótese alguma, sobrescreva partições somente leitura nem aplique módulos que tentem modificar partições protegidas. Isso pode impedir o aparelho de iniciar.</string>
     <string name="action_confirm">Confirmar</string>
     <string name="action_cancel">Cancelar</string>
     <string name="action_close">Fechar</string>
