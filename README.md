@@ -12,12 +12,13 @@ almost boring: open the app, tap once, and let it cook. The modern flow runs on
 scratch to be quick, readable, and seriously stable. Most successful runs get
 root in **under 5 seconds**.
 
-And the newest port, made for `S918BXXUAZZI8`, is something special. It came
-from deep analysis, stubborn debugging, hundreds of reboots and executions,
-and optimization after optimization. Every failed run left a clue, and every
-reboot pushed BOPE forward, until a difficult port became a state-of-the-art
-engine. The result: after stabilization, BOPE reaches root in an honestly
-**impressive 2 seconds**, a tiny number carrying a huge amount of work.
+And the newest port, made for `S918BXXUAZZI8`, the **latest One UI 9 Beta 2
+firmware**, is something special. It came from deep analysis, stubborn
+debugging, hundreds of reboots and executions, and optimization after
+optimization. Every failed run left a clue, and every reboot pushed BOPE
+forward, until a difficult port became a state-of-the-art engine. The result:
+after stabilization, BOPE reaches root in an honestly **impressive 2 seconds**,
+a tiny number carrying a huge amount of work.
 
 Modern targets use BOPE exclusively. The old FZF5 profile remains available as
 a clearly marked legacy compatibility target.
@@ -31,7 +32,9 @@ not enough.
 
 ## App screenshots
 
-One UI 9 ZZI8 validation: Root My Galaxy completing the payload in **2 seconds** and KernelSU Next v3.4.0 running on the exact `S918BXXUAZZI8` kernel.
+Latest One UI 9 Beta 2 firmware validation: Root My Galaxy completing the
+payload in **2 seconds** and KernelSU Next v3.4.0 running on the exact
+`S918BXXUAZZI8` kernel.
 
 <table>
   <tr>
@@ -39,8 +42,8 @@ One UI 9 ZZI8 validation: Root My Galaxy completing the payload in **2 seconds**
     <th>KernelSU Next v3.4.0</th>
   </tr>
   <tr>
-    <td><img src="docs/assets/screenshots/root-my-galaxy-zzi8-beta3.jpg" alt="Root My Galaxy v0.6.0-beta-3 showing root active on S918BXXUAZZI8" width="320"></td>
-    <td><img src="docs/assets/screenshots/kernelsu-next-zzi8.jpg" alt="KernelSU Next v3.4.0 working with the S918BXXUAZZI8 kernel" width="320"></td>
+    <td><img src="docs/assets/screenshots/root-my-galaxy-zzi8-beta3.jpg" alt="Root My Galaxy v0.6.0-beta-3 showing root active on S918BXXUAZZI8, the latest One UI 9 Beta 2 firmware" width="320"></td>
+    <td><img src="docs/assets/screenshots/kernelsu-next-zzi8.jpg" alt="KernelSU Next v3.4.0 working with the S918BXXUAZZI8 kernel from the latest One UI 9 Beta 2 firmware" width="320"></td>
   </tr>
 </table>
 
@@ -50,7 +53,7 @@ These are all payload profiles currently shipped in the app:
 
 | Device | Firmware | System | Payload | Root integration | Target files |
 | --- | --- | --- | --- | --- | --- |
-| `SM-S918B` | `S918BXXUAZZI8` | One UI 9 / Android 17 | **BOPE :: Brazilian Open Payload Engine (State of Art Engine)** | KernelSU Next v3.4.0 | [`targets/zzi8-WIP/`](targets/zzi8-WIP/) |
+| `SM-S918B` | `S918BXXUAZZI8` · **latest One UI 9 Beta 2 firmware** | One UI 9 / Android 17 | **BOPE :: Brazilian Open Payload Engine (State of Art Engine)** | KernelSU Next v3.4.0 | [`targets/zzi8-WIP/`](targets/zzi8-WIP/) |
 | `SM-S918B` | `S918BXXUAZZHL` | One UI 9 / Android 17 | **BOPE :: Brazilian Open Payload Engine (State of Art Engine)** | KernelSU Next v3.4.0 | [`targets/zzhl/`](targets/zzhl/) |
 | `SM-S918B` | `S918BXXSAFZH3` | One UI 8.5 / Android 16 | **BOPE-Beta :: Brazilian Open Payload Engine** | KernelSU Next v3.4.0 | [`targets/afzh3/`](targets/afzh3/) |
 | `SM-S918B` | `S918BXXSAFZG1` | One UI 8.5 / Android 16 | **BOPE-Beta :: Brazilian Open Payload Engine** | KernelSU Next v3.3.0 | [`targets/afzg1/`](targets/afzg1/) |
@@ -75,7 +78,7 @@ launcher and the result is a payload that knows when to go, when to wait, and
 when to stop before touching the wrong firmware.
 
 Want to see what happens under the hood? Open the
-[complete BOPE ZZI8 execution flowchart](targets/zzi8-WIP/brazilian-open-payload-engine/docs/FULL-EXECUTION-FLOW.md)
+[complete BOPE ZZI8 execution flowchart for the latest One UI 9 Beta 2 firmware](targets/zzi8-WIP/brazilian-open-payload-engine/docs/FULL-EXECUTION-FLOW.md)
 to follow the engine visually, from its first preflight check to KernelSU Next
 and final root verification.
 
@@ -93,18 +96,22 @@ after consecutive clean samples; if the phone gets noisy, the count starts
 again. A cool and clearly idle device gets the fast lane.
 
 Once the runway is clear, the launcher steps aside and BOPE takes off. That wait
-is measured separately, which is why ZZI8's impressive **2 seconds** represent
-the payload itself, after the launcher handled the chaos.
+is measured separately, which is why the latest One UI 9 Beta 2 firmware,
+ZZI8, reaches its impressive **2 seconds** in the payload itself, after the
+launcher handled the chaos.
 
-[Explore the complete visual BOPE ZZI8 execution flow](targets/zzi8-WIP/brazilian-open-payload-engine/docs/FULL-EXECUTION-FLOW.md),
+[Explore the complete visual BOPE ZZI8 execution flow for the latest One UI 9 Beta 2 firmware](targets/zzi8-WIP/brazilian-open-payload-engine/docs/FULL-EXECUTION-FLOW.md),
 from the Stability Launcher and KASLR discovery to the futex trigger, pipe R/W,
 temporary root, KernelSU Next, and every retry boundary.
 
 ## Run Simple Root
 
-`simple-root` is the hands-on command-line route. Right now it builds and runs
-the **AFZH3** stack: BOPE, the stability launcher, the helper, and KernelSU Next.
-Connect one authorized device through ADB, start from a clean boot, and run:
+`simple-root` is the hands-on command-line route for the exact
+**S918BXXUAZZI8** target, the latest One UI 9 Beta 2 firmware. It builds BOPE,
+the ZZI8 Stability Launcher, the open helper, and KernelSU Next v3.4.0. It
+rejects every other firmware before it builds or stages anything. Connect one
+authorized device through ADB, start from a clean boot of the latest One UI 9
+Beta 2 firmware (`ZZI8`), and run:
 
 ```sh
 cd simple-root
@@ -117,52 +124,17 @@ If more than one device is connected, pass the serial explicitly:
 ./simple-root.sh RXCX602E20X
 ```
 
-The runner checks the firmware, builds everything it needs, stages the files in
-`/data/local/tmp`, waits for the stability gate, launches BOPE, loads KernelSU,
-and finishes by checking `su -c id`. The full walkthrough lives in the
+The runner checks the complete latest One UI 9 Beta 2 firmware (`ZZI8`) device
+identity and ELF/BTF contract, builds everything it needs, stages the files in
+`/data/local/tmp`, waits for the
+stability gate, launches BOPE, loads KernelSU, restores SELinux enforcing, and
+finishes by checking `su -c id`. The full walkthrough lives in the
 [Simple Root guide](simple-root/README.md).
 
 ## Build the payloads
 
-Use Android NDK `28.2.13676358` or set `ANDROID_NDK_HOME` to another compatible
-NDK. Every BOPE target has its own build directory, so rebuilding one firmware
-does not silently mix it with another.
-
-### ZZI8 :: BOPE
-
-```sh
-cd targets/zzi8-WIP/brazilian-open-payload-engine
-python3 tools/verify-zzi8-target.py
-make clean all so
-```
-
-### ZZHL :: BOPE
-
-```sh
-cd targets/zzhl/brazilian-open-payload-engine
-python3 tools/verify-zzhl-target.py
-make clean all so
-```
-
-### AFZH3 :: BOPE-Beta
-
-```sh
-make -C targets/afzh3/brazilian-open-payload-engine clean all so
-```
-
-For the old FZF5 source tree, build its legacy payload from the repository root:
-
-```sh
-make TARGET=dm3q-S918BXXSAFZF5
-```
-
-The AFZG1 and `SM-S918N` FZG1 profiles currently use their verified prebuilt
-payload artifacts. Their buildable KernelSU Next component is separate; AFZG1
-can be rebuilt with:
-
-```sh
-targets/afzg1/kernelsu-next/build-afzg1.sh
-```
+Build commands for BOPE, BOPE-Beta, the legacy payload, and KernelSU Next live
+in the [payload build guide](docs/BUILD-PAYLOADS.md).
 
 ## Port BOPE from an OTA
 
@@ -183,8 +155,8 @@ advanced options live in the [BOPE OTA porting guide](tools/bope/README.md).
 
 ```text
 app/                    Android app and bundled target profiles
-RootMyGalaxyDesktop/    Desktop GUI and helper source
-simple-root/            AFZH3 command-line runner
+RootMyGalaxyDesktop/    Latest One UI 9 Beta 2 firmware (ZZI8) desktop GUI
+simple-root/            Latest One UI 9 Beta 2 firmware (ZZI8) runner
 stability-launcher/     AFZH3 launcher and stability gates
 targets/                Firmware targets, payloads, helpers, and KernelSU files
 tools/                  Porting and development utilities
@@ -192,7 +164,7 @@ docs/                   Project guides and screenshots
 ```
 
 For implementation details, visit the
-[ZZI8 BOPE source](targets/zzi8-WIP/brazilian-open-payload-engine/README.md), the
+[ZZI8 BOPE source for the latest One UI 9 Beta 2 firmware](targets/zzi8-WIP/brazilian-open-payload-engine/README.md), the
 [ZZHL BOPE source](targets/zzhl/brazilian-open-payload-engine/README.md), the
 [AFZH3 BOPE source](targets/afzh3/brazilian-open-payload-engine/README.md), or
 the [documentation index](docs/README.md).
