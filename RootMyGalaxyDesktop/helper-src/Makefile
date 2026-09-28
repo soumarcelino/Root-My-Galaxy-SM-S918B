@@ -1,20 +1,18 @@
 NDK ?= $(HOME)/Android/Sdk/ndk/28.2.13676358
 CC := $(NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang
-CFLAGS := -std=c11 -O2 -Wall -Wextra -Werror
+CFLAGS := -fPIE -pie -O2 -g0 -Wall -Wextra
 
-HELPER_DIR := $(CURDIR)/port/helper-next
+PROJECT_ROOT := $(abspath $(CURDIR)/../..)
+HELPER_DIR := $(PROJECT_ROOT)/targets/zzi8-WIP/helper
 OUTPUT := helper-readable
 
 .PHONY: all clean
 
 all: $(OUTPUT)
 
-# Esta e a mesma unidade C ligada ao monolito por build_monolithic.py.
-$(OUTPUT): $(HELPER_DIR)/su_daemon.c $(HELPER_DIR)/target_guard.c \
-	$(HELPER_DIR)/target_guard.h $(HELPER_DIR)/target-afzg1.h
-	$(CC) $(CFLAGS) -I$(HELPER_DIR) \
-		$(HELPER_DIR)/su_daemon.c $(HELPER_DIR)/target_guard.c \
-		-ldl -o $@
+# Build the same ZZI8 helper staged by simple-root.
+$(OUTPUT): $(HELPER_DIR)/su_daemon.c
+	$(CC) $(CFLAGS) $(HELPER_DIR)/su_daemon.c -ldl -o $@
 
 clean:
 	rm -f $(OUTPUT)
