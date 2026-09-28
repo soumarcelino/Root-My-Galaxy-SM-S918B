@@ -1,0 +1,5 @@
+firmware/boot_ZZI8.img
+firmware/unpacked/
+firmware/vmlinux_ZZI8.elf
+open-payload-engine/build/
+helper/build/

@@ -1,0 +1,9 @@
+{
+  "passed": true,
+  "target": "S918BXXUAZZI8",
+  "vermagic": "5.15.197-android13-8-34343818-abS918BXXUAZZI8 SMP preempt mod_unload modversions aarch64",
+  "undefined_symbols": 203,
+  "missing_symbols": [],
+  "btf_mismatches": [],
+  "note": "ZZI8 BTF layouts match ZZHL for the seven KernelSU structures; all undefined module symbols exist in ZZI8 kallsyms."
+}
