@@ -839,7 +839,7 @@ private fun InstallStatusCard(installState: InstallUiState, onInstall: () -> Uni
                     )
                 }
                 Text(
-                    text = when (installState.phase) {
+                    text = installState.failureDetail ?: when (installState.phase) {
                         InstallPhase.Installed -> stringResource(
                             if (managerInstalled) {
                                 R.string.install_tap_open_manager
@@ -852,7 +852,7 @@ private fun InstallStatusCard(installState: InstallUiState, onInstall: () -> Uni
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.86f),
-                    maxLines = 1,
+                    maxLines = if (installState.failureDetail == null) 1 else 10,
                 )
             }
         }

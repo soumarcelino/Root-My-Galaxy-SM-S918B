@@ -501,6 +501,8 @@ private fun StatusProgressCard(installState: InstallUiState, uninstallRoot: Bool
                     Text(
                         text = if (installState.busy) {
                             groupedExecutionDetail(installState)
+                        } else if (failed && installState.failureDetail != null) {
+                            installState.failureDetail
                         } else {
                             installPhaseDetail(installState, uninstallRoot)
                         },

@@ -189,6 +189,9 @@
     <string name="status_waiting_boot_allocator">Waiting for boot allocator quiet window (%1$d s remaining)</string>
     <string name="status_ksu_loading">Late-loading KernelSU Next</string>
     <string name="status_install_failed">Installation failed</string>
+    <string name="status_firmware_unsupported">Firmware not supported yet</string>
+    <string name="error_firmware_unsupported">There is no target for your current firmware (%1$s) yet. For your safety, the payload was not started.</string>
+    <string name="error_firmware_one_ui_9_help">You are using One UI 9. If you have the firmware files for this exact version, feel free to open an issue at https://github.com/soumarcelino/Root-My-Galaxy-SM-S918B. When I have some free time, I may be able to port it :)</string>
     <string name="status_reboot_required">Reboot required</string>
     <string name="status_rebooting">Rebooting device…</string>
     <string name="fatal_reboot_title">Restart required</string>

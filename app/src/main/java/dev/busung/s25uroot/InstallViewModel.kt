@@ -48,6 +48,7 @@ data class InstallUiState(
     val rebootRequired: Boolean = false,
     val rebootInProgress: Boolean = false,
     val rebootError: String? = null,
+    val failureDetail: String? = null,
 ) {
     val busy: Boolean
         get() = phase in setOf(
@@ -129,11 +130,17 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                     log = "$probe\n[app] profile=${profile.profileId}",
                 )
             } catch (error: Throwable) {
+                val detail = error.message?.takeIf(String::isNotBlank)
                 mutableState.value = InstallUiState(
                     phase = InstallPhase.Failed,
-                    message = app.getString(R.string.status_support_failed),
+                    message = app.getString(
+                        if (error is UnsupportedFirmwareException) R.string.status_firmware_unsupported
+                        else R.string.status_support_failed,
+                    ),
                     probeOutput = probe,
-                    log = "$probe\n[app] support=failed type=${error.javaClass.simpleName}",
+                    log = "$probe\n[app] support=failed type=${error.javaClass.simpleName}" +
+                        detail?.let { " message=${it.replace('\n', ' ')}" }.orEmpty(),
+                    failureDetail = detail,
                 )
             }
         }
@@ -513,7 +520,11 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun handleRunFailure(error: Throwable) {
-        appendLog("[app] run=failed type=${error.javaClass.simpleName}")
+        val detail = error.message?.takeIf(String::isNotBlank)
+        appendLog(
+            "[app] run=failed type=${error.javaClass.simpleName}" +
+                detail?.let { " message=${it.replace('\n', ' ')}" }.orEmpty(),
+        )
         val rebootRequired = rebootRequiredForCurrentRun
         if (rebootRequired) {
             markCurrentBootRequiresReboot()
@@ -522,11 +533,17 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         setPhase(
             InstallPhase.Failed,
             app.getString(
-                if (rebootRequired) R.string.status_reboot_required
-                else R.string.status_install_failed,
+                when {
+                    rebootRequired -> R.string.status_reboot_required
+                    error is UnsupportedFirmwareException -> R.string.status_firmware_unsupported
+                    else -> R.string.status_install_failed
+                },
             ),
         )
-        mutableState.value = mutableState.value.copy(rebootRequired = rebootRequired)
+        mutableState.value = mutableState.value.copy(
+            rebootRequired = rebootRequired,
+            failureDetail = detail,
+        )
         finishHistory(InstallRunResult.Failed)
     }
 

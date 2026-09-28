@@ -30,7 +30,15 @@ class PayloadRepository(private val context: Context) {
     fun resolveTarget(snapshot: DeviceSnapshot): TargetProfile = loadTargets()
         .filter { it.matches(snapshot) }
         .maxByOrNull { it.specificity }
-        ?: error(context.getString(R.string.repo_no_profile))
+        ?: throw UnsupportedFirmwareException(
+            buildString {
+                append(context.getString(R.string.error_firmware_unsupported, snapshot.buildId))
+                if (snapshot.isOneUi9) {
+                    append("\n\n")
+                    append(context.getString(R.string.error_firmware_one_ui_9_help))
+                }
+            },
+        )
 
     fun resolveTarget(profileId: String): TargetProfile = loadTargets()
         .firstOrNull { it.profileId == profileId }
@@ -221,3 +229,5 @@ class PayloadRepository(private val context: Context) {
         private const val LAUNCHER_SIZE = 17_296L
     }
 }
+
+class UnsupportedFirmwareException(message: String) : IllegalStateException(message)

@@ -28,6 +28,14 @@ class TargetProfileTest {
     }
 
     @Test
+    fun detectsOnlyOneUi9PropertyRange() {
+        assertTrue(snapshot("SM-S918B", "5.15.197-test").copy(oneUiVersion = 90_000).isOneUi9)
+        assertTrue(snapshot("SM-S918B", "5.15.197-test").copy(oneUiVersion = 99_999).isOneUi9)
+        assertFalse(snapshot("SM-S918B", "5.15.197-test").copy(oneUiVersion = 80_000).isOneUi9)
+        assertFalse(snapshot("SM-S918B", "5.15.197-test").copy(oneUiVersion = 100_000).isOneUi9)
+    }
+
+    @Test
     fun fzf5RequiresExactFirmwareDespiteSharedKernelVersion() {
         val device = snapshot("SM-S918B", "5.15.189-android13-8-33413713-abS918BXXSAFZF5").copy(
             buildId = "BP4A.251205.006.S918BXXSAFZF5",

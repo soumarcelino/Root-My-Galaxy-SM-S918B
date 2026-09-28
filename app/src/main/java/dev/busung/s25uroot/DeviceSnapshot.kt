@@ -17,6 +17,7 @@ data class DeviceSnapshot(
     val sdk: Int,
     val abi: String,
     val pageSize: Long,
+    val oneUiVersion: Int = 0,
 ) {
     val kernelVersion: String
         get() = kernelRelease.takeWhile { it.isDigit() || it == '.' }
@@ -25,6 +26,9 @@ data class DeviceSnapshot(
         get() = listOf(kernelRelease, kernelVersionInfo, machine)
             .filter(String::isNotBlank)
             .joinToString(" ")
+
+    val isOneUi9: Boolean
+        get() = oneUiVersion in 90_000..99_999
 
     companion object {
         fun current(): DeviceSnapshot {
@@ -42,7 +46,14 @@ data class DeviceSnapshot(
                 sdk = Build.VERSION.SDK_INT,
                 abi = Build.SUPPORTED_ABIS.firstOrNull().orEmpty(),
                 pageSize = Os.sysconf(OsConstants._SC_PAGESIZE),
+                oneUiVersion = systemProperty("ro.build.version.oneui").toIntOrNull() ?: 0,
             )
         }
+
+        private fun systemProperty(name: String): String = runCatching {
+            Class.forName("android.os.SystemProperties")
+                .getMethod("get", String::class.java)
+                .invoke(null, name) as String
+        }.getOrDefault("")
     }
 }
