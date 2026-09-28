@@ -30,8 +30,8 @@
 - `targets/zzhl-WIP/helper/`: ZZHL helper source, build, and output.
 - `targets/zzhl-WIP/firmware/`: ZZHL kernel dump, extracted data, and porting
   reference.
-- `targets/afzh3/open-payload-engine/`,
-  `targets/zzhl-WIP/open-payload-engine/`: separate engines, each with source,
+- `targets/afzh3/brazilian-open-payload-engine/`,
+  `targets/zzhl-WIP/brazilian-open-payload-engine/`: separate engines, each with source,
   tests, tools, documentation, and build outputs.
 
 Firmware paths use `targets/<firmware>/` directly. Active native target headers

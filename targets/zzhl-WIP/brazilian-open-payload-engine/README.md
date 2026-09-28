@@ -4,7 +4,7 @@ Port novo para o Samsung SM-S918B (`dm3q`) no firmware
 `S918BXXUAZZHL`, kernel
 `5.15.197-android13-8-34343818-abS918BXXUAZZHL`.
 
-O código parte do engine atual em `targets/afzh3/open-payload-engine`, como
+O código parte do engine atual em `targets/afzh3/brazilian-open-payload-engine`, como
 solicitado. Os símbolos e layouts foram derivados novamente de
 `../firmware/vmlinux_ZZHL.{elf,btf}` e ficam centralizados em
 `src/target.h`. O payload antigo em `../payload` não integra este port.

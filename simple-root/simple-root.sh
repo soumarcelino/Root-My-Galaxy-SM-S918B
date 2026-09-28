@@ -55,7 +55,7 @@ install -m 755 "$KSUD_SOURCE" "$ASSET_DIR/$KSUD_ASSET"
 install -m 644 "$KSUD_MODULE" "$ASSET_DIR/$KSUD_MODULE_ASSET"
 
 LAUNCHER_DIR="$PROJECT_DIR/stability-launcher"
-ENGINE_DIR="$TARGET_DIR/open-payload-engine"
+ENGINE_DIR="$TARGET_DIR/brazilian-open-payload-engine"
 HELPER_DIR="$TARGET_DIR/helper"
 HELPER_BINARY="$HELPER_DIR/build/cve-2026-43499-root"
 NDK_DIR="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-$HOME/Android/Sdk/ndk/28.2.13676358}}"

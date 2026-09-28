@@ -17,7 +17,7 @@ At each run, the script:
    The helper starts `ksud-selected`, which contains the module for late-load.
 2. Compiles `../stability-launcher/stability-launcher.c` for Android ARM64/API
    35 and copies the binary to `assets/stability-launcher`.
-3. Builds only the shared-library target in `../targets/afzh3/open-payload-engine/`
+3. Builds only the shared-library target in `../targets/afzh3/brazilian-open-payload-engine/`
    and copies `build/payload.so` plus `build/mm-exec-factory` to `assets/`.
 4. Builds the AFZH3 helper in `targets/afzh3/helper/` for Android ARM64/API 35 and
    copies it to `assets/ksu-helper`.
@@ -32,8 +32,8 @@ The resulting asset set is:
 
 | Asset | Source |
 | --- | --- |
-| `assets/payload.so` | `targets/afzh3/open-payload-engine/build/payload.so` |
-| `assets/mm-exec-factory` | `targets/afzh3/open-payload-engine/build/mm-exec-factory` |
+| `assets/payload.so` | `targets/afzh3/brazilian-open-payload-engine/build/payload.so` |
+| `assets/mm-exec-factory` | `targets/afzh3/brazilian-open-payload-engine/build/mm-exec-factory` |
 | `assets/stability-launcher` | `stability-launcher/build/stability-launcher` |
 | `assets/ksu-helper` | `targets/afzh3/helper/su_daemon.c` via `targets/afzh3/helper/build/cve-2026-43499-root` |
 | `assets/ksud-selected` | `targets/afzh3/kernelsu-next/out/kernelsu-next-afzh3-v3.4.0/ksud-next-v3.4.0` |

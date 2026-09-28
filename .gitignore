@@ -1,8 +1,8 @@
 # Android/Gradle outputs
 **/.gradle/
 **/build/
-!/targets/afzh3/open-payload-engine/build/
-!/targets/zzhl-WIP/open-payload-engine/build/
+!/targets/afzh3/brazilian-open-payload-engine/build/
+!/targets/zzhl-WIP/brazilian-open-payload-engine/build/
 **/.cxx/
 local.properties
 

@@ -13,7 +13,7 @@ sem `su` e executa o clone pelo contexto shell normal.
 ## Artefato validado
 
 ```text
-Projeto:  /home/matias/Projects/Root-My-Galaxy-SM-S918B/targets/afzh3/open-payload-engine
+Projeto:  /home/matias/Projects/Root-My-Galaxy-SM-S918B/targets/afzh3/brazilian-open-payload-engine
 Saída:    build/payload.so
 Tamanho:  101120 bytes
 SHA-256:  a22ff696a2c096a45c62fbc0bd9c4bf8918d9783886d7227637a5ca980f8a53c

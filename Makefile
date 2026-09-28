@@ -3,7 +3,7 @@ TARGET ?= dm3q-S918BXXSAFZF5
 OUTDIR ?= build/$(TARGET)
 
 ifeq ($(TARGET),dm3q-S918BXXSAFZH3)
-$(error AFZH3 payload is built from targets/afzh3/open-payload-engine)
+$(error AFZH3 payload is built from targets/afzh3/brazilian-open-payload-engine)
 else ifeq ($(TARGET),dm3q-S918BXXUAZZHL)
 TARGET_DIR := targets/zzhl-WIP
 else ifeq ($(TARGET),ZZHL)

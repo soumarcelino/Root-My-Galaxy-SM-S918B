@@ -70,11 +70,11 @@ uid=0(root) gid=0(root) groups=0(root) context=u:r:ksu:s0
 ```
 
 A evidência local está em
-`open-payload-engine/evidence/zzhl-fresh/20260927T114521Z-execute/`.
+`brazilian-open-payload-engine/evidence/zzhl-fresh/20260927T114521Z-execute/`.
 
 O runner usa esse loader automaticamente em `--execute`. Para validar apenas o
 root temporário, use `--no-kernelsu`.
 
 O mesmo loader está no perfil Android `dm3q-S918BXXUAZZHL-ksunext`. O script
-`../open-payload-engine/tools/zzhl-app-bundle.py` sincroniza e verifica payload,
+`../brazilian-open-payload-engine/tools/zzhl-app-bundle.py` sincroniza e verifica payload,
 helper, launcher, factory e `ksud` dentro do APK.

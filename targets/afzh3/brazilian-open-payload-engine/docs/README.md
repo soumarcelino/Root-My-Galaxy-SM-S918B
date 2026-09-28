@@ -1,4 +1,4 @@
-# Documentação técnica do `targets/afzh3/open-payload-engine`
+# Documentação técnica do `targets/afzh3/brazilian-open-payload-engine`
 
 Este diretório documenta a reconstrução clean-room do payload fechado usado no
 Galaxy S23 Ultra `SM-S918B`, codinome `dm3q`, firmware

@@ -38,7 +38,7 @@ limpa.
 ## 4. Build
 
 ```sh
-cd /home/matias/Projects/Root-My-Galaxy-SM-S918B/targets/afzh3/open-payload-engine
+cd /home/matias/Projects/Root-My-Galaxy-SM-S918B/targets/afzh3/brazilian-open-payload-engine
 rtk make -B -j2 all so
 rtk sha256sum build/payload.so
 ```

@@ -114,7 +114,7 @@ tools/                  Porting and development utilities
 docs/                   Project guides and screenshots
 ```
 
-For implementation details, see the [AFZH3 open payload engine](targets/afzh3/open-payload-engine/README.md),
+For implementation details, see the [AFZH3 open payload engine](targets/afzh3/brazilian-open-payload-engine/README.md),
 the [KernelSU Next v3.4.0 guide](targets/afzh3/kernelsu-next/README.md), and
 the [documentation index](docs/README.md). The older porting guides under
 `docs/` describe the AFZF5/AFZG1 workflows and should not be used to prepare
