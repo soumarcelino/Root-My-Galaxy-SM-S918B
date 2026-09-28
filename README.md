@@ -1,8 +1,8 @@
 # Root My Galaxy · SM-S918B
 
-**Version 0.6.0-beta-3** · Samsung Galaxy S23 Ultra (`SM-S918B` / `SM-S918N`, `dm3q`)
+**Version 0.6.0** · Samsung Galaxy S23 Ultra (`SM-S918B` / `SM-S918N`, `dm3q`)
 
-[Latest pre-release: v0.6.0-beta-3](https://github.com/soumarcelino/Root-My-Galaxy-SM-S918B/releases/tag/v0.6.0-beta-3)
+[Latest release: v0.6.0](https://github.com/soumarcelino/Root-My-Galaxy-SM-S918B/releases/tag/v0.6.0)
 
 **One click Root.**
 
