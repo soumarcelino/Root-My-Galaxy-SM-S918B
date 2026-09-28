@@ -265,7 +265,7 @@ private fun InstallScreen(
                     StatusProgressCard(installState, uninstallRoot)
                 }
                 installState.supportHelp?.let { help ->
-                    FirmwarePortHelpCard(help)
+                    FirmwarePortHelpCard(installState.supportHelpTitle.orEmpty(), help)
                 }
                 if (installState.rebootRequired) {
                     FatalRebootCard(installState)
@@ -325,7 +325,7 @@ private fun InstallScreen(
 }
 
 @Composable
-private fun FirmwarePortHelpCard(message: String) {
+private fun FirmwarePortHelpCard(title: String, message: String) {
     val context = LocalContext.current
     val success = ColorScheme_success
     Card(
@@ -347,11 +347,13 @@ private fun FirmwarePortHelpCard(message: String) {
                 contentDescription = null,
                 modifier = Modifier.size(44.dp),
             )
-            Text(
-                text = message,
+            Column(
                 modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyMedium,
-            )
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(text = title, style = MaterialTheme.typography.titleMedium)
+                Text(text = message, style = MaterialTheme.typography.bodyMedium)
+            }
         }
     }
 }

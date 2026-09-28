@@ -623,7 +623,7 @@ private fun OverviewPage(
         }
         item { InstallStatusCard(installState, onInstall) }
         installState.supportHelp?.let { help ->
-            item { FirmwarePortHelpCard(help) }
+            item { FirmwarePortHelpCard(installState.supportHelpTitle.orEmpty(), help) }
         }
         item { DeviceCard(device) }
         item { HowItWorksCard() }
@@ -631,7 +631,7 @@ private fun OverviewPage(
 }
 
 @Composable
-private fun FirmwarePortHelpCard(message: String) {
+private fun FirmwarePortHelpCard(title: String, message: String) {
     val context = LocalContext.current
     val success = ColorScheme_success
     Card(
@@ -653,11 +653,13 @@ private fun FirmwarePortHelpCard(message: String) {
                 contentDescription = null,
                 modifier = Modifier.size(44.dp),
             )
-            Text(
-                text = message,
+            Column(
                 modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyMedium,
-            )
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(text = title, style = MaterialTheme.typography.titleMedium)
+                Text(text = message, style = MaterialTheme.typography.bodyMedium)
+            }
         }
     }
 }

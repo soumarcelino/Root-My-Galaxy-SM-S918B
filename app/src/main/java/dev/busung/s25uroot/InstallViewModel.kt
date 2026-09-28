@@ -50,6 +50,7 @@ data class InstallUiState(
     val rebootError: String? = null,
     val failureDetail: String? = null,
     val supportHelp: String? = null,
+    val supportHelpTitle: String? = null,
     val unsupportedFirmware: String? = null,
 ) {
     val busy: Boolean
@@ -144,6 +145,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                         detail?.let { " message=${it.replace('\n', ' ')}" }.orEmpty(),
                     failureDetail = detail,
                     supportHelp = (error as? UnsupportedFirmwareException)?.helpMessage,
+                    supportHelpTitle = (error as? UnsupportedFirmwareException)?.helpTitle,
                     unsupportedFirmware = (error as? UnsupportedFirmwareException)?.firmware,
                 )
             }
@@ -548,6 +550,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             rebootRequired = rebootRequired,
             failureDetail = detail,
             supportHelp = (error as? UnsupportedFirmwareException)?.helpMessage,
+            supportHelpTitle = (error as? UnsupportedFirmwareException)?.helpTitle,
             unsupportedFirmware = (error as? UnsupportedFirmwareException)?.firmware,
         )
         finishHistory(InstallRunResult.Failed)
