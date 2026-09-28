@@ -1,4 +1,4 @@
-# Porting ZZHL — registro WIP
+# Porting ZZHL — registro técnico
 
 ## Verificação atual — 2026-09-21
 
@@ -9,7 +9,7 @@ fingerprint, kernel release e kernel version exatamente iguais aos valores do
 perfil. O `kernel.raw` em `build-do-firmware/dump/` tem SHA-256
 `4e4c47864ed87eed80df0a7b9bf39281936b77b6974bde8c8d9e94711db878e8`.
 Uma nova derivação com `tools/derive_zzhl_target.py` reproduziu integralmente
-`targets/zzhl-WIP/firmware/derived-target.json`: 29 endereços e 10 layouts BTF. A tabela P0 gerada
+`targets/zzhl/firmware/derived-target.json`: 29 endereços e 10 layouts BTF. A tabela P0 gerada
 contém os mesmos valores do header existente; somente a formatação difere.
 
 O APK inclui payload ZZHL SHA-256
@@ -35,7 +35,7 @@ O `kernel.raw`, `kernel.elf`, `kernel.kallsyms` e o BTF foram extraídos do dump
 
 O script `tools/derive_zzhl_target.py` reprocessa o dump, extrai o BTF, valida layouts com `pahole`, resolve símbolos e regenera o fingerprint P0. Resultado: 29 endereços derivados e 10 layouts BTF verificados.
 
-Relatório completo: `targets/zzhl-WIP/firmware/derived-target.json`.
+Relatório completo: `targets/zzhl/firmware/derived-target.json`.
 
 ## Endereços principais derivados
 
@@ -75,7 +75,7 @@ O alvo nativo `dm3q-S918BXXUAZZHL` foi recompilado com Android NDK `28.2.1367635
 Artefatos:
 
 - `build/dm3q-S918BXXUAZZHL/cve-2026-43499-app.so`
-- `targets/zzhl-WIP/helper/build/cve-2026-43499-root`
+- `targets/zzhl/helper/build/cve-2026-43499-root`
 - `build/dm3q-S918BXXUAZZHL/cve-2026-43499`
 
 O resolvedor `tracefs-slide.so` encontrou slides diferentes por boot (`0x40000`, `0x138000`, `0x1c8000`, `0x1d0000`). Por isso o slide não pode ser fixado no binário.

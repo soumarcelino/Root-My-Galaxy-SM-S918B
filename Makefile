@@ -5,9 +5,9 @@ OUTDIR ?= build/$(TARGET)
 ifeq ($(TARGET),dm3q-S918BXXSAFZH3)
 $(error AFZH3 payload is built from targets/afzh3/brazilian-open-payload-engine)
 else ifeq ($(TARGET),dm3q-S918BXXUAZZHL)
-TARGET_DIR := targets/zzhl-WIP
+TARGET_DIR := targets/zzhl
 else ifeq ($(TARGET),ZZHL)
-TARGET_DIR := targets/zzhl-WIP
+TARGET_DIR := targets/zzhl
 else
 TARGET_DIR := targets/afzf5
 endif

@@ -17,9 +17,9 @@ Target único: Samsung SM-S918B (`dm3q`), firmware `S918BXXUAZZHL`.
 
 | Item | Local |
 |---|---|
-| Port novo | `targets/zzhl-WIP/brazilian-open-payload-engine` |
+| Port novo | `targets/zzhl/brazilian-open-payload-engine` |
 | Engine-base | `targets/afzh3/brazilian-open-payload-engine` |
-| Firmware principal | `targets/zzhl-WIP/firmware` |
+| Firmware principal | `targets/zzhl/firmware` |
 | Cópia auxiliar conferida | `/home/matias/Downloads/ZZHL` |
 | Kernel ELF | `firmware/vmlinux_ZZHL.elf` |
 | BTF | `firmware/vmlinux_ZZHL.btf` |

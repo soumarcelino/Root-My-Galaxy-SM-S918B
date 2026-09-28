@@ -25,13 +25,13 @@
 - `targets/afzh3/reference/kernel/legacy-target/`: archived native target
   headers retained as reference data.
 - `targets/afzh3/helper/`: AFZH3 helper source, build, and output.
-- `targets/zzhl-WIP/specs/`, `targets/zzhl-WIP/docs/`: ZZHL specifications and notes.
-- `targets/zzhl-WIP/payload/src/`: ZZHL native P0 source and target headers.
-- `targets/zzhl-WIP/helper/`: ZZHL helper source, build, and output.
-- `targets/zzhl-WIP/firmware/`: ZZHL kernel dump, extracted data, and porting
+- `targets/zzhl/specs/`, `targets/zzhl/docs/`: ZZHL specifications and notes.
+- `targets/zzhl/payload/src/`: ZZHL native P0 source and target headers.
+- `targets/zzhl/helper/`: ZZHL helper source, build, and output.
+- `targets/zzhl/firmware/`: ZZHL kernel dump, extracted data, and porting
   reference.
 - `targets/afzh3/brazilian-open-payload-engine/`,
-  `targets/zzhl-WIP/brazilian-open-payload-engine/`: separate engines, each with source,
+  `targets/zzhl/brazilian-open-payload-engine/`: separate engines, each with source,
   tests, tools, documentation, and build outputs.
 
 Firmware paths use `targets/<firmware>/` directly. Active native target headers

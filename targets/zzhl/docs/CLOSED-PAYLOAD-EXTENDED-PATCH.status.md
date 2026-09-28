@@ -4,7 +4,7 @@
 - `target-zzhl.h` criado em `RootMyGalaxyDesktop/helper-src/port/helper-next/`
 - `target_guard.h` parametrizado via `TARGET_GUARD_HEADER` (compatível com afzg1/afzh3 existentes)
 - Helper compilado: `RootMyGalaxyDesktop/dfx/s918b-zzhl-closed/helper` (fingerprint ZZHL correto, valida contra o device real)
-- Payload: `targets/zzhl-WIP/firmware/payload.ZZHL.so` com 11 símbolos patcheados (3 originais do port_zzhl.py + 8 novos confirmados por ground-truth contra `target-afzg1.h` do SAFZH3, que é a MESMA linhagem de engine) + `ASHMEM_IOCTL` + `SELINUX_ENFORCING` (variante GhostLock, símbolo `selinux_state+0x40`)
+- Payload: `targets/zzhl/firmware/payload.ZZHL.so` com 11 símbolos patcheados (3 originais do port_zzhl.py + 8 novos confirmados por ground-truth contra `target-afzg1.h` do SAFZH3, que é a MESMA linhagem de engine) + `ASHMEM_IOCTL` + `SELINUX_ENFORCING` (variante GhostLock, símbolo `selinux_state+0x40`)
 
 ## Validação no device
 - Sem crash em nenhuma tentativa (helper errado, ou helper certo) — o abort é sempre limpo
@@ -15,7 +15,7 @@
 
 ## Fix #2 (decompilação Ghidra) — worker_thread call-site no engine fechado
 
-Decompilei o `targets/zzhl-WIP/firmware/payload.ZZHL.so` inteiro (150 funções) com Ghidra headless e achei a causa exata
+Decompilei o `targets/zzhl/firmware/payload.ZZHL.so` inteiro (150 funções) com Ghidra headless e achei a causa exata
 da falha em `stage=locating-kernel`: a mesma classe de bug do nosso engine próprio.
 
 - Em `FUN_0010597c` (leak de KASLR via tracefs), o código faz `uVar1 = caller - 0x10db44`

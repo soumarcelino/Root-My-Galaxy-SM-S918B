@@ -11,7 +11,7 @@ import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[3]
-TARGET = ROOT / "targets/zzhl-WIP"
+TARGET = ROOT / "targets/zzhl"
 
 
 def run(*args: str) -> str:

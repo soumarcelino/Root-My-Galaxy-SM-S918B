@@ -892,7 +892,7 @@ the same as restructuring which thread/context calls it).
   recognize the pattern (`FUN_xxxxx(buf_ptr, offset, value)` → write `value`
   at `buf_ptr+offset`), most of the "build a fake struct" functions become
   fast to read even without full decompiler support.
-- The already-existing `targets/zzhl-WIP/docs/CLOSED-PAYLOAD-EXTENDED-PATCH.status.md`
+- The already-existing `targets/zzhl/docs/CLOSED-PAYLOAD-EXTENDED-PATCH.status.md`
   (from an earlier session, different firmware target ZZHL) independently
   documented the same `ashmem_ioctl`-relative delta pattern
   (`compat_ioctl`/`mmap`/`open`/`release`/`show_fdinfo` = `ashmem_ioctl` +

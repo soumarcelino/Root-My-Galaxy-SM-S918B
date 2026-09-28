@@ -8,12 +8,12 @@ Samsung Galaxy S23 Ultra `SM-S918B`, codinome `dm3q`, firmware
 
 O port foi recriado a partir do engine aberto atual em
 `targets/afzh3/brazilian-open-payload-engine`, no commit-base `cb1d37d`. O diretório
-legado `targets/zzhl-WIP/payload` foi removido e nenhum source, offset ou
+legado `targets/zzhl/payload` foi removido e nenhum source, offset ou
 binário dele integra esta implementação.
 
 O firmware e os dados auxiliares vieram de:
 
-- `targets/zzhl-WIP/firmware/`;
+- `targets/zzhl/firmware/`;
 - `/home/matias/Downloads/ZZHL/`.
 
 Os arquivos equivalentes nas duas origens foram comparados por SHA-256 e são
