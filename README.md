@@ -169,7 +169,30 @@ For implementation details, visit the
 [AFZH3 BOPE source](targets/afzh3/brazilian-open-payload-engine/README.md), or
 the [documentation index](docs/README.md).
 
+## Keep protected partitions protected
+
+Root access is powerful, but protected and read-only partitions are not a
+playground. **Do not overwrite them, force them into read-write mode, or apply
+any module that attempts to modify them. Treat this as strictly forbidden.**
+Writing to a protected partition will brick the device.
+
+Treat any module or script that promises to replace files inside protected
+partitions as strictly forbidden.
+
+If you still decide to test something dangerous, remove every screen lock,
+PIN, password, pattern, and biometric credential first. Make sure you know what
+you are doing before starting, so you retain the best possible recovery path if
+the experiment goes wrong. This preparation does not make a protected-partition
+write safe and does not guarantee that a bricked device will be recoverable.
+
 ## Credits
+
+**Any project, app, fork, port, redistribution, or derivative work that uses
+BOPE or any payload from this repository must clearly credit and link back to
+[Root My Galaxy · SM-S918B](https://github.com/soumarcelino/Root-My-Galaxy-SM-S918B).**
+Please respect the heavy research, debugging, testing, and months of work that
+made these payloads possible. Do not present this work as your own or remove
+its origin when sharing it.
 
 The app started from [BuSung-dev/Root-My-Galaxy](https://github.com/BuSung-dev/Root-My-Galaxy),
 which provided the base Android application.
