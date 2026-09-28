@@ -24,6 +24,13 @@ class LogPresentationTest {
     }
 
     @Test
+    fun preservesTerminalBopeSuccessLayout() {
+        val raw = "BOPE :: Success\n        Root achieved in 47 seconds"
+
+        assertEquals(raw, formatLogForDisplay(raw))
+    }
+
+    @Test
     fun wrapsUnknownMessagesWithoutAutomaticLineBreaks() {
         val raw = "[launcher] " + "message ".repeat(20) + "/data/local/tmp/file-with-a-very-long-name.bin"
         val lines = formatLogForDisplay(raw).lines()

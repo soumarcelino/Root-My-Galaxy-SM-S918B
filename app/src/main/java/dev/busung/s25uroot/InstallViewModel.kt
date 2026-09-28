@@ -85,7 +85,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     private var installJob: Job? = null
     private var activeHistoryEntry: InstallHistoryEntry? = null
     private var fullRunLog = ""
-    private var runStartedElapsedRealtime: Long? = null
     private var rebootRequiredForCurrentRun = false
     private var payloadMarkerTail = ""
     val state: StateFlow<InstallUiState> = mutableState.asStateFlow()
@@ -189,7 +188,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         installJob = viewModelScope.launch(Dispatchers.IO) {
             rebootRequiredForCurrentRun = false
             payloadMarkerTail = ""
-            runStartedElapsedRealtime = SystemClock.elapsedRealtime()
             mutableState.value = InstallUiState(
                 phase = InstallPhase.Checking,
                 probeOutput = mutableState.value.probeOutput,
@@ -233,7 +231,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         installJob = viewModelScope.launch(Dispatchers.IO) {
             rebootRequiredForCurrentRun = false
             payloadMarkerTail = ""
-            runStartedElapsedRealtime = SystemClock.elapsedRealtime()
             mutableState.value = InstallUiState(
                 phase = InstallPhase.Checking,
                 probeOutput = mutableState.value.probeOutput,
@@ -462,14 +459,18 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
             // v0.2.26+: 新架构成功标记是 stage=temporary-root-ready（老架构是 exploit completed done=1 root=1）
+            val bopeDurationMillis = bopeRootDurationMillis(rawLog)
             val newArchOk = rawLog.contains("temporary-root-ready")
             val oldArchOk = rawLog.contains("exploit completed") && rawLog.contains("done=1 root=1")
-            require(newArchOk || oldArchOk) {
+            require(bopeDurationMillis != null || newArchOk || oldArchOk) {
                 app.getString(R.string.error_success_marker)
             }
-            val rootDurationMillis = SystemClock.elapsedRealtime() - startedAt
+            val rootDurationMillis = bopeDurationMillis
+                ?: (SystemClock.elapsedRealtime() - startedAt)
             AppPreferences.setLastRootDurationMillis(app, rootDurationMillis)
-            appendLog("[App] root acquired in ${rootDurationMillis / 1_000.0} seconds")
+            mutableState.value = mutableState.value.copy(
+                completionDurationMillis = rootDurationMillis,
+            )
         } finally {
             // Closing the UI must not abort a device-side launcher in a critical section.
             if (process.isAlive && currentCoroutineContext().isActive) {
@@ -833,9 +834,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             executionStage = stage,
             executionDetail = mutableState.value.executionDetail.takeIf { stage == mutableState.value.executionStage },
             rootActive = phase == InstallPhase.Installed || mutableState.value.rootActive,
-            completionDurationMillis = if (phase == InstallPhase.Installed) {
-                runStartedElapsedRealtime?.let { SystemClock.elapsedRealtime() - it }
-            } else null,
+            completionDurationMillis = mutableState.value.completionDurationMillis,
             uptimeGateRemainingMillis = null,
             uptimeGateTotalMillis = null,
             bootAllocatorRemainingMillis = null,

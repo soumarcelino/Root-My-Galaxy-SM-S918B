@@ -87,7 +87,8 @@
     <string name="install_success_title">Root Active</string>
     <string name="install_keep_open">Keep this screen open while installation runs</string>
     <string name="device_uptime">Device uptime %1$s</string>
-    <string name="install_duration">Completed in %1$s</string>
+    <string name="install_duration_prefix">Root achieved in</string>
+    <string name="install_duration_seconds">%1$d seconds</string>
     <string name="stabilization_explanation">Waiting for the device to reach stable conditions.</string>
     <string name="stabilization_waiting">Waiting for the first reading…</string>
     <string name="stabilization_readings">Stable readings</string>

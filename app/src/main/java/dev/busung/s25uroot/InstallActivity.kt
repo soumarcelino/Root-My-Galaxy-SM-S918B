@@ -74,9 +74,12 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -448,8 +451,20 @@ private fun SuccessCard(installState: InstallUiState, uninstallRoot: Boolean) {
                 color = success.onContainer.copy(alpha = 0.85f),
             )
             installState.completionDurationMillis?.let { duration ->
+                val durationSeconds = (duration / 1_000L).coerceAtLeast(1L)
+                val durationPrefix = stringResource(R.string.install_duration_prefix)
+                val durationValue = stringResource(
+                    R.string.install_duration_seconds,
+                    durationSeconds,
+                )
                 Text(
-                    text = stringResource(R.string.install_duration, formatElapsedTime(duration)),
+                    text = buildAnnotatedString {
+                        append(durationPrefix)
+                        append(" ")
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                            append(durationValue)
+                        }
+                    },
                     style = MaterialTheme.typography.titleMedium,
                 )
             }
@@ -614,15 +629,6 @@ private fun UptimeGatePanel(remainingMillis: Long, totalMillis: Long) {
             trackColor = LocalContentColor.current.copy(alpha = 0.2f),
         )
     }
-}
-
-private fun formatElapsedTime(millis: Long): String {
-    val seconds = millis.coerceAtLeast(0L) / 1_000L
-    val hours = seconds / 3_600L
-    val minutes = (seconds % 3_600L) / 60L
-    val remainingSeconds = seconds % 60L
-    return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, remainingSeconds)
-        else "%d:%02d".format(minutes, remainingSeconds)
 }
 
 private fun formatCountdown(millis: Long): String {

@@ -59,7 +59,8 @@
     <string name="install_success_title">Root Ativo</string>
     <string name="install_keep_open">Mantenha esta tela aberta durante a execução</string>
     <string name="device_uptime">Aparelho ligado há %1$s</string>
-    <string name="install_duration">Concluído em %1$s</string>
+    <string name="install_duration_prefix">Root obtido em</string>
+    <string name="install_duration_seconds">%1$d segundos</string>
     <string name="stabilization_explanation">Aguardando o aparelho atingir condições estáveis.</string>
     <string name="stabilization_waiting">Aguardando a primeira leitura…</string>
     <string name="stabilization_readings">Leituras estáveis</string>

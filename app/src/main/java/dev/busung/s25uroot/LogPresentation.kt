@@ -34,7 +34,11 @@ internal fun formatLogForDisplay(
 }
 
 private fun formatLogLine(rawLine: String, maxColumns: Int): List<String> {
-    var value = ANSI_ESCAPE.replace(rawLine, "").replace("\r", "").trim()
+    val rawValue = ANSI_ESCAPE.replace(rawLine, "").replace("\r", "")
+    if (rawValue.startsWith("        Root achieved in ")) {
+        return listOf(rawValue.take(maxColumns))
+    }
+    var value = rawValue.trim()
     if (value.isEmpty()) return emptyList()
 
     value = TIME_PREFIX.replace(value, "")
