@@ -1,0 +1,27 @@
+{
+  "btf_mismatches": [],
+  "btf_structures": [
+    "cred",
+    "task_struct",
+    "work_struct",
+    "completion",
+    "ucounts",
+    "user_struct",
+    "user_namespace"
+  ],
+  "crc_mismatches": {},
+  "ksud": {
+    "path": "kernelsu-next/out/kernelsu-next-fzf5-v3.4.0/ksud-next-v3.4.0",
+    "sha256": "07dbb098f9a99dc7ecceeffccddcd19b9022a4892b2c412de5032fc136f2d17e"
+  },
+  "matched_symbol_crcs": 139,
+  "missing_crc_targets": [],
+  "missing_symbols": [],
+  "module": "kernelsu-next/out/kernelsu-next-fzf5-v3.4.0/android13-5.15_kernelsu.ko",
+  "module_version_entries": 139,
+  "passed": true,
+  "sha256": "a90dc667a42daf1235259241097332225f59b7728e3cef8d46eb2c30cc4ee64e",
+  "undefined_symbols": 203,
+  "vermagic": "5.15.189-android13-8-33413713-abS916BXXSAFZF5 SMP preempt mod_unload modversions aarch64",
+  "version": "3.4.0"
+}

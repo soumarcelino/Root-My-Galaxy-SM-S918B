@@ -1,0 +1,42 @@
+{
+  "buildDisplays": [
+    "BP4A.251205.006.S916BXXSAFZF5"
+  ],
+  "displayName": "Galaxy S23+ SM-S916B | S916BXXSAFZF5 | KernelSU Next",
+  "exploit": {
+    "size": 167608,
+    "url": "asset://cve-2026-43499-app-fzf5.so"
+  },
+  "fingerprints": [
+    "samsung/dm2qxeea/dm2q:16/BP4A.251205.006/S916BXXSAFZF5:user/release-keys"
+  ],
+  "helper": {
+    "size": 26560,
+    "url": "asset://cve-2026-43499-root-fzf5"
+  },
+  "kernelReleases": [
+    "5.15.189-android13-8-33413713-abS916BXXSAFZF5"
+  ],
+  "kernelVersionInfos": [
+    "#1 SMP PREEMPT Tue Jun 9 09:38:52 UTC 2026"
+  ],
+  "kernelVersions": [
+    "5.15.189"
+  ],
+  "kernelsu": {
+    "size": 4290936,
+    "url": "asset://ksud-next-v3.4.0-fzf5"
+  },
+  "launcher": {
+    "size": 17952,
+    "url": "asset://stability-launcher-fzf5"
+  },
+  "mmFactory": {
+    "size": 1816,
+    "url": "asset://mm-exec-factory-fzf5"
+  },
+  "models": [
+    "SM-S916B"
+  ],
+  "payloadId": "dm2q-S916BXXSAFZF5-ksunext"
+}

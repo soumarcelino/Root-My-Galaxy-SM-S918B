@@ -15,6 +15,9 @@
 
 #define RMG_LOG_LINE_CAPACITY 2048U
 #define RMG_LOG_FORMAT_CAPACITY 4096U
+#ifndef RMG_LOG_VERBOSE_DEFAULT
+#define RMG_LOG_VERBOSE_DEFAULT 0
+#endif
 
 struct rmg_log_state {
   char line[RMG_LOG_LINE_CAPACITY];
@@ -59,7 +62,7 @@ static int rmg_is_error(const char *line, size_t length) {
 static int rmg_should_emit(const char *line, size_t length) {
   if (rmg_verbose < 0) {
     const char *value = getenv("RMG_LOG_VERBOSE");
-    rmg_verbose = value && strcmp(value, "1") == 0;
+    rmg_verbose = value ? strcmp(value, "1") == 0 : RMG_LOG_VERBOSE_DEFAULT;
   }
   if (length == 0U) return 0;
   if (rmg_verbose || rmg_is_error(line, length)) return 1;

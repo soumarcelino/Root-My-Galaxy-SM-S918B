@@ -1,0 +1,6 @@
+firmware/boot_FZF5.img
+firmware/unpacked/
+firmware/vmlinux_FZF5.elf
+brazilian-open-payload-engine/build/
+helper/build/
+firmware/boot_FZF5.img.lz4

@@ -138,6 +138,29 @@ class FactoryInspectionTests(unittest.TestCase):
         self.assertIn("TARGET_KERNEL_VERSION", hardened)
         self.assertIn('"ro.build.fingerprint", TARGET_FINGERPRINT', hardened)
 
+    def test_factory_target_adds_identity_check_when_engine_has_none(self) -> None:
+        source = '''#include <sys/wait.h>
+
+static int setenv_str(const char *name, const char *value) {
+  return setenv(name, value, 1);
+}
+
+static int app_main(void) {
+  return 0;
+}
+'''
+        with tempfile.TemporaryDirectory() as temporary:
+            engine = Path(temporary)
+            (engine / "src").mkdir()
+            orchestrator = engine / "src/00_orchestrator.c"
+            orchestrator.write_text(source)
+            _enforce_exact_runtime_identity(engine)
+            hardened = orchestrator.read_text()
+        self.assertIn('#include "target.h"', hardened)
+        self.assertIn("static int exact_runtime_identity(void)", hardened)
+        self.assertIn("if (!exact_runtime_identity())", hardened)
+        self.assertIn('"ro.build.fingerprint", TARGET_FINGERPRINT', hardened)
+
 
 class BsdiffTests(unittest.TestCase):
     def test_applies_standard_bsdiff40_patch(self) -> None:

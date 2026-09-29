@@ -146,11 +146,53 @@ def _enforce_exact_runtime_identity(engine: Path) -> None:
 """
     if new in text:
         return
-    if old not in text:
+    if old in text:
+        source.write_text(text.replace(old, new, 1))
+        return
+
+    include_anchor = "#include <sys/wait.h>\n"
+    helper_anchor = "static int setenv_str(const char *name, const char *value) {\n"
+    main_anchor = "static int app_main(void) {\n"
+    if not all(anchor in text for anchor in (include_anchor, helper_anchor, main_anchor)):
         raise BopeError(
             "shared BOPE engine has an unknown runtime identity-check shape"
         )
-    source.write_text(text.replace(old, new, 1))
+
+    text = text.replace(
+        include_anchor,
+        include_anchor
+        + "#include <sys/system_properties.h>\n#include <sys/utsname.h>\n\n"
+        + '#include "target.h"\n',
+        1,
+    )
+    helper = """static int property_equals(const char *name, const char *expected) {
+  char value[PROP_VALUE_MAX] = {0};
+  return __system_property_get(name, value) > 0 && strcmp(value, expected) == 0;
+}
+
+static int exact_runtime_identity(void) {
+  struct utsname info;
+  return uname(&info) == 0 &&
+         strcmp(info.release, TARGET_KERNEL_RELEASE) == 0 &&
+         strcmp(info.version, TARGET_KERNEL_VERSION) == 0 &&
+         property_equals("ro.product.model", TARGET_MODEL) &&
+         property_equals("ro.product.device", TARGET_DEVICE) &&
+         property_equals("ro.build.version.incremental", TARGET_BUILD) &&
+         property_equals("ro.build.fingerprint", TARGET_FINGERPRINT);
+}
+
+"""
+    text = text.replace(helper_anchor, helper + helper_anchor, 1)
+    text = text.replace(
+        main_anchor,
+        main_anchor
+        + "  if (!exact_runtime_identity()) {\n"
+        + '    fputs("[preflight] exact runtime identity mismatch\\n", stderr);\n'
+        + "    return -1;\n"
+        + "  }\n\n",
+        1,
+    )
+    source.write_text(text)
 
 
 def _write_manifest(
