@@ -16,14 +16,14 @@ flowchart TD
     TARGET["target.h firmware contract<br/>identity, symbols, BTF layouts,<br/>object geometry and calibrated limits"]
 
     subgraph APP["1 · Android app and Stability Launcher"]
-        A1["Match exact model, build, fingerprint,<br/>kernel release and kernel version"]
+        A1["App requires the supported model,<br/>One UI 9 and a build ending in ZZI8"]
         A2{"Latest One UI 9 Beta 2<br/>ZZI8 profile matches?"}
         A3["Extract and stage verified artifacts<br/>payload.so, root helper, mm factory,<br/>Stability Launcher and target ksud"]
-        A4["Launcher rejects inherited LD_PRELOAD<br/>and validates every ELF"]
+        A4["Launcher validates mm_struct geometry,<br/>inherited LD_PRELOAD and every ELF"]
         A5["Optional app-side process quiesce<br/>before starting the launcher"]
         A6["Gate requires boot complete,<br/>SELinux enforcing and at least 60 seconds uptime"]
-        A7["Sample available memory, temperature,<br/>runnable tasks, CPU/memory/I/O PSI<br/>and mm_struct slab churn"]
-        A8["Probe capacity for 480 pipes<br/>grown from 2 to 32 pages"]
+        A7["Count one stability sequence after pipe release:<br/>memory, temperature, runnable tasks,<br/>CPU/memory/I/O PSI and mm_struct churn;<br/>no absolute object or slab ceiling"]
+        A8["Probe capacity for 480 pipes<br/>grown from 2 to 32 pages, then release them"]
         A9{"Three baseline samples or<br/>two comfortable samples?"}
         A10["Fast lane: 2 clean samples<br/>at 1 second cadence"]
         A11["Normal lane: 3 clean samples<br/>at 2 second cadence; noise resets streak"]
@@ -35,7 +35,6 @@ flowchart TD
     subgraph ENTRY["2 · BOPE entry and attempt supervisor"]
         B1["payload.so constructor enters app_main<br/>start BOPE-only monotonic timer"]
         B2["Print BOPE initialization banner<br/>and disable stdio buffering"]
-        B3{"Exact runtime target still matches?"}
         B4["Optional allocator quiet window<br/>normally skipped because launcher set 0"]
         B5["Create shared attempt state<br/>status, dirty flag and cached KASLR data"]
         B6["Supervisor forks isolated attempt child<br/>with attempt-specific timing offset"]
@@ -52,7 +51,6 @@ flowchart TD
         C7{"Two votes for one aligned slide?"}
         C8{"Valid cached SLIDE_P0_OFFSET?"}
         C9["Publish kernel base and cached slide<br/>set shared dirty flag"]
-        C10["Read /proc/slabinfo mm_struct geometry<br/>and reject wrong size, order or high load"]
     end
 
     subgraph GROOM["4 · mm_struct address leak and exact slab reclaim"]
@@ -172,27 +170,23 @@ flowchart TD
 
     USER --> A1 --> A2
     A2 -- No --> INCOMPAT
-    A2 -- Yes --> A3 --> A4 --> A5 --> A6 --> A7 --> A8 --> A9
+    A2 -- Yes --> A3 --> A4 --> A5 --> A8 --> A6 --> A7 --> A9
     A9 -- Comfortably stable --> A10 --> A13
     A9 -- Stable --> A11 --> A13
     A9 -- No, keep sampling --> A7
     A9 -- 300 second timeout or pipe failure --> A12 --> FAIL
-    A13 --> A14 --> B1 --> B2 --> B3
-
-    B3 -- No --> INCOMPAT
-    B3 -- Yes --> B4 --> B5 --> B6
+    A13 --> A14 --> B1 --> B2 --> B4 --> B5 --> B6
     B6 --> C1 --> C2 --> C3 --> C4 --> C5 --> C6 --> C7
     C7 -- Yes --> C9
     C7 -- No --> C8
     C8 -- Yes --> C9
     C8 -- No --> SAFE
-    C9 --> C10
+    C9 --> G1
     C2 -. invalid .-> SAFE
     C3 -. unavailable .-> SAFE
     C4 -. no stable CPU .-> SAFE
-    C10 -. wrong geometry or load .-> SAFE
 
-    C10 --> G1 --> G2 --> G3 --> G4 --> G5 --> G6
+    G1 --> G2 --> G3 --> G4 --> G5 --> G6
     G6 -- No --> SAFE
     G6 -- Yes --> G7 --> G8
     G8 -- No --> SAFE
@@ -242,7 +236,6 @@ flowchart TD
     Z1A -- No --> HOLD --> FAIL2
 
     TARGET -. identity .-> A1
-    TARGET -. identity .-> B3
     TARGET -. symbols and KASLR geometry .-> C6
     TARGET -. slab and object geometry .-> G10
     TARGET -. futex ABI and timing .-> F1
@@ -259,7 +252,7 @@ flowchart TD
     classDef contract fill:#f3e8ff,stroke:#7e22ce,color:#111827;
 
     class A1,A2,A3,A4,A5,A6,A7,A8,A9,A10,A11,A12,A13,A14 app;
-    class B1,B2,B3,B4,B5,B6,B7,C1,C2,C3,C4,C5,C6,C7,C8,C9,C10 pre;
+    class B1,B2,B4,B5,B6,B7,C1,C2,C3,C4,C5,C6,C7,C8,C9 pre;
     class G1,G2,G3,G4,G5,G6,G7,G8,G9,G10,G11,G12,G13,G14,G15,G16,G17,P1,P2,P3,P4 exploit;
     class F1,F2,F3,F4,F5,F6,F7,F8,F9,F10,F11,F12,F13,F14,R1,R2,R3,R4,R5,R6,R7,W1,W2,W3,W4,W5,W6,W7,W8,W9,W10,W11,W12,W13,U1,U2,U3,U4,U5,U6,U7,U8,U9,U10,U11,U12,U13,U14,U15,U16 mutation;
     class Z1,Z1A,Z2,Z3,Z4,Z5,Z6,Z7,Z8,Z9,DONE success;

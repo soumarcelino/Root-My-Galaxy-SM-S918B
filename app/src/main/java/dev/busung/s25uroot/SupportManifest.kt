@@ -3,6 +3,10 @@ package dev.busung.s25uroot
 import org.json.JSONArray
 import org.json.JSONObject
 
+internal const val ZZI8_PROFILE_ID = "dm3q-S918BXXUAZZI8-ksunext"
+internal const val ZZHL_PROFILE_ID = "dm3q-S918BXXUAZZHL-ksunext"
+internal val ONE_UI_9_BOPE_PROFILE_IDS = setOf(ZZI8_PROFILE_ID, ZZHL_PROFILE_ID)
+
 data class RemoteArtifact(
     val url: String,
     val size: Long,
@@ -39,8 +43,19 @@ data class TargetProfile(
             (kernelReleases.isEmpty() || snapshot.kernelRelease in kernelReleases) &&
             (kernelVersionInfos.isEmpty() || snapshot.kernelVersionInfo in kernelVersionInfos)
 
-    fun matches(snapshot: DeviceSnapshot): Boolean =
-        matchesDevice(snapshot) && matchesKernelVersion(snapshot) && matchesExactBuild(snapshot)
+    fun matches(snapshot: DeviceSnapshot): Boolean {
+        val buildSuffix = when (profileId) {
+            ZZI8_PROFILE_ID -> "ZZI8"
+            ZZHL_PROFILE_ID -> "ZZHL"
+            else -> null
+        }
+        return if (buildSuffix != null) {
+            matchesDevice(snapshot) && snapshot.isOneUi9 &&
+                snapshot.buildId.endsWith(buildSuffix, ignoreCase = true)
+        } else {
+            matchesDevice(snapshot) && matchesKernelVersion(snapshot) && matchesExactBuild(snapshot)
+        }
+    }
 
     val specificity: Int
         get() = listOf(buildDisplays, kernelReleases, kernelVersionInfos)

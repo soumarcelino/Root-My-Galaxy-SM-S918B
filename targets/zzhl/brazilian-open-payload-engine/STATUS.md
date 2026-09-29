@@ -4,11 +4,13 @@ Port recriado em 2026-09-27 a partir do engine AFZH3 atual, sem reutilizar o
 payload ZZHL antigo do Git.
 
 - alvo: `SM-S918B / dm3q / S918BXXUAZZHL`;
-- identidade, release e fingerprint são verificados antes do payload;
+- o app seleciona ZZHL por modelo, One UI 9 e sufixo do build; o runner ADB
+  mantém seu preflight próprio de identidade e kernel;
 - 22 símbolos são conferidos contra o ELF ZZHL;
 - 33 campos e 5 tamanhos de estruturas são conferidos contra o BTF ZZHL;
 - o BTF relevante coincide com a geometria usada pelo engine-base;
-- launcher próprio: `build/stability-launcher-zzhl`;
+- launcher ZZHL compilado da fonte BOPE compartilhada:
+  `build/stability-launcher-zzhl`;
 - runner próprio: `tools/run-zzhl-device.sh`;
 - o diretório legado `../payload` permanece removido.
 
@@ -74,3 +76,14 @@ Após essa correção, a campanha final completou **10/10 reboots limpos com
 sucesso**. Cada boot executou o fluxo completo sem reboot inesperado, confirmou
 KernelSU Next, retornou root no domínio `u:r:ksu:s0` e terminou com SELinux em
 `Enforcing`.
+
+## Port da estabilização ZZI8 para ZZHL
+
+Em 2026-09-29, o ZZHL passou a delegar a identidade ao app e a geometria
+`mm_struct` ao Stability Launcher compartilhado. Os limites absolutos de
+objetos e slabs saíram do preflight; continuam as métricas de estabilidade,
+variação da slab e as provas de reclaim exato. O launcher verifica a capacidade
+de 480 pipes antes de contar uma única sequência de amostras. O app exige o
+launcher para ZZHL e ZZI8, inclusive quando a preferência avançada pede para
+pular essa etapa. Os binários desta revisão ainda precisam de campanha em
+boots limpos no firmware ZZHL; os 10/10 acima são da revisão anterior.

@@ -202,6 +202,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 } else {
                     repository.resolveTarget(profileId)
                 }
+                requireMatchingOneUi9BopeProfile(profile)
                 appendLog("[app] profile=${profile.profileId}")
                 updateHistoryProfile(profile.profileId)
 
@@ -245,6 +246,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 } else {
                     repository.resolveTarget(profileId)
                 }
+                requireMatchingOneUi9BopeProfile(profile)
                 appendLog("[app] profile=${profile.profileId}")
                 updateHistoryProfile(profile.profileId)
                 setPhase(InstallPhase.Downloading, app.getString(R.string.status_downloading_payload))
@@ -349,12 +351,21 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private fun requireMatchingOneUi9BopeProfile(profile: TargetProfile) {
+        if (profile.profileId !in ONE_UI_9_BOPE_PROFILE_IDS) return
+        val device = DeviceSnapshot.current()
+        if (!profile.matches(device)) {
+            error(app.getString(R.string.error_firmware_unsupported, device.buildId))
+        }
+    }
+
     private suspend fun executeExploit(payloads: VerifiedPayloads) {
         val payload = payloads.exploit
         val launcher = payloads.launcher
         val mmFactory = payloads.mmFactory
         val shizuku = shizukuEnabled()
-        val skipLauncher = AppPreferences.skipStabilityLauncher(app)
+        val skipLauncher = AppPreferences.skipStabilityLauncher(app) &&
+            payloads.profile.profileId !in ONE_UI_9_BOPE_PROFILE_IDS
         appendLog("[app] runner=${if (shizuku) "shizuku" else "direct"}")
         appendLog("[app] stability-launcher=${if (skipLauncher) "skipped" else "enabled"}")
         // v0.2.34: pstore dump —— 重启后读上次内核崩溃日志（KDP/DEFEX/RKP 拦截铁证）

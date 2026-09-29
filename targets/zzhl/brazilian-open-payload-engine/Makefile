@@ -19,7 +19,7 @@ SOBIN := $(OUTDIR)/payload.so
 FACTORY_BIN := $(OUTDIR)/mm-exec-factory
 FACTORY_SRC := factory/mm_exec_factory.c
 LAUNCHER_BIN := $(OUTDIR)/stability-launcher-zzhl
-LAUNCHER_SRC := ../../../../ksu-payload-functional/stability-launcher.c
+LAUNCHER_SRC := ../../../stability-launcher/bope-stability-launcher.c
 COMPACT_LOG_HEADER := ../../../native/compact_log.h
 COMPACT_LOG_SRC := ../../../native/compact_log.c
 
@@ -47,9 +47,9 @@ $(SOBIN): $(SRCS) | $(OUTDIR)
 $(FACTORY_BIN): $(FACTORY_SRC) | $(OUTDIR)
 	$(TARGET_CC) -nostdlib -static -ffreestanding -fno-builtin -fno-stack-protector -O2 -Wall -Wextra -Werror -Wl,-e,_start -Wl,--build-id=none $< -o $@
 
-$(LAUNCHER_BIN): $(LAUNCHER_SRC) | $(OUTDIR)
-	$(TARGET_CC) -O2 -Wall -Wextra -Werror -fPIE -fstack-protector-strong \
-		-D_FORTIFY_SOURCE=2 -DREL_MAX_MM_SLABS=48L \
+$(LAUNCHER_BIN): $(LAUNCHER_SRC) src/target.h | $(OUTDIR)
+	$(TARGET_CC) -O2 -Wall -Wextra -Werror -fPIE -fstack-protector-strong -Isrc \
+		-DRMG_BOPE_VALIDATION=1 -D_FORTIFY_SOURCE=2 \
 		-DREL_GATE_NAME='"zzhl-fresh"' $< -pie -Wl,-z,relro,-z,now -o $@
 
 # Focused diagnostics live outside src/ and never enter the payload build.

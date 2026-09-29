@@ -47,9 +47,6 @@
       "buildDisplays": [
         "CP2A.260605.016.S918BXXUAZZHL"
       ],
-      "fingerprints": [
-        "samsung/dm3qxxx/dm3q:17/CP2A.260605.016/S918BXXUAZZHL:user/release-keys"
-      ],
       "kernelReleases": [
         "5.15.197-android13-8-34343818-abS918BXXUAZZHL"
       ],
@@ -58,7 +55,7 @@
       ],
       "exploit": {
         "url": "asset://cve-2026-43499-app-zzhl.so",
-        "size": 166928
+        "size": 166080
       },
       "kernelsu": {
         "url": "asset://ksud-next-v3.4.0-zzhl",
@@ -70,7 +67,7 @@
       },
       "launcher": {
         "url": "asset://stability-launcher-zzhl",
-        "size": 17952
+        "size": 18672
       },
       "mmFactory": {
         "url": "asset://mm-exec-factory-zzhl",
@@ -187,9 +184,6 @@
       "buildDisplays": [
         "CP2A.260605.016.S918BXXUAZZI8"
       ],
-      "fingerprints": [
-        "samsung/dm3qxxx/dm3q:17/CP2A.260605.016/S918BXXUAZZI8:user/release-keys"
-      ],
       "kernelReleases": [
         "5.15.197-android13-8-34343818-abS918BXXUAZZI8"
       ],
@@ -198,7 +192,7 @@
       ],
       "exploit": {
         "url": "asset://cve-2026-43499-app-zzi8.so",
-        "size": 171424
+        "size": 170280
       },
       "kernelsu": {
         "url": "asset://ksud-next-v3.4.0-zzi8",
@@ -210,7 +204,7 @@
       },
       "launcher": {
         "url": "asset://stability-launcher-zzi8",
-        "size": 17952
+        "size": 18672
       },
       "mmFactory": {
         "url": "asset://mm-exec-factory-zzi8",

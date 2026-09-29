@@ -6,7 +6,8 @@
   "build": "S918BXXUAZZHL",
   "kernel": "5.15.197-android13-8-34343818-abS918BXXUAZZHL",
   "checks": [
-    {"name": "target_guard", "file": "src/00_orchestrator.c", "literal": "target_matches()", "minimum": 1},
+    {"name": "app_build_guard", "file": "../../../app/src/main/java/dev/busung/s25uroot/SupportManifest.kt", "literal": "ZZHL_PROFILE_ID -> \"ZZHL\"", "minimum": 1},
+    {"name": "launcher_mm_geometry", "file": "../../../stability-launcher/bope-stability-launcher.c", "literal": "mm_geometry_matches()", "minimum": 2},
     {"name": "worker_caller", "file": "src/target.h", "literal": "0x0010ddfc", "minimum": 1},
     {"name": "init_task", "file": "src/target.h", "literal": "0x02c05380", "minimum": 1},
     {"name": "ashmem_misc_fops", "file": "src/target.h", "literal": "0x02bfd1f8", "minimum": 1},
