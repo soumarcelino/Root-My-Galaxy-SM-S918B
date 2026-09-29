@@ -167,6 +167,7 @@ class MainActivity : ComponentActivity() {
     private var themeMode by mutableStateOf(AppThemeMode.System)
     private var advancedMode by mutableStateOf(false)
     private var optimizeOnExploit by mutableStateOf(true)
+    private var skipStabilityLauncher by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -177,6 +178,7 @@ class MainActivity : ComponentActivity() {
         themeMode = AppPreferences.themeMode(this)
         advancedMode = AppPreferences.advancedMode(this)
         optimizeOnExploit = AppPreferences.optimizeOnExploit(this)
+        skipStabilityLauncher = AppPreferences.skipStabilityLauncher(this)
         setContent {
             RootMyGalaxyTheme(accentColor = accentColor, themeMode = themeMode) {
                 RootApp(
@@ -185,6 +187,7 @@ class MainActivity : ComponentActivity() {
                     themeMode = themeMode,
                     advancedMode = advancedMode,
                     optimizeOnExploit = optimizeOnExploit,
+                    skipStabilityLauncher = skipStabilityLauncher,
                     onAccentColorChanged = { color ->
                         AppPreferences.setAccentColor(this, color)
                         accentColor = color
@@ -200,6 +203,10 @@ class MainActivity : ComponentActivity() {
                     onOptimizeOnExploitChanged = { enabled ->
                         AppPreferences.setOptimizeOnExploit(this, enabled)
                         optimizeOnExploit = enabled
+                    },
+                    onSkipStabilityLauncherChanged = { enabled ->
+                        AppPreferences.setSkipStabilityLauncher(this, enabled)
+                        skipStabilityLauncher = enabled
                     },
                     openUninstaller = {
                         val uninstaller = Intent(this, InstallActivity::class.java)
@@ -277,10 +284,12 @@ private fun RootApp(
     themeMode: AppThemeMode,
     advancedMode: Boolean,
     optimizeOnExploit: Boolean,
+    skipStabilityLauncher: Boolean,
     onAccentColorChanged: (AccentColor) -> Unit,
     onThemeModeChanged: (AppThemeMode) -> Unit,
     onAdvancedModeChanged: (Boolean) -> Unit,
     onOptimizeOnExploitChanged: (Boolean) -> Unit,
+    onSkipStabilityLauncherChanged: (Boolean) -> Unit,
     openUninstaller: () -> Unit,
     openInstaller: (String?) -> Unit,
 ) {
@@ -516,6 +525,7 @@ private fun RootApp(
                     themeMode = themeMode,
                     advancedMode = advancedMode,
                     optimizeOnExploit = optimizeOnExploit,
+                    skipStabilityLauncher = skipStabilityLauncher,
                     updateStatus = updateStatus,
                     onCheckForUpdate = checkForUpdate,
                     onStartDownload = startDownload,
@@ -523,6 +533,7 @@ private fun RootApp(
                     onThemeModeChanged = onThemeModeChanged,
                     onAdvancedModeChanged = onAdvancedModeChanged,
                     onOptimizeOnExploitChanged = onOptimizeOnExploitChanged,
+                    onSkipStabilityLauncherChanged = onSkipStabilityLauncherChanged,
                     openUninstaller = openUninstaller,
                 )
             }
@@ -1453,6 +1464,7 @@ private fun SettingsPage(
     themeMode: AppThemeMode,
     advancedMode: Boolean,
     optimizeOnExploit: Boolean,
+    skipStabilityLauncher: Boolean,
     updateStatus: UpdateStatus,
     onCheckForUpdate: () -> Unit,
     onStartDownload: (UpdateInfo) -> Unit,
@@ -1460,6 +1472,7 @@ private fun SettingsPage(
     onThemeModeChanged: (AppThemeMode) -> Unit,
     onAdvancedModeChanged: (Boolean) -> Unit,
     onOptimizeOnExploitChanged: (Boolean) -> Unit,
+    onSkipStabilityLauncherChanged: (Boolean) -> Unit,
     openUninstaller: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -1468,6 +1481,7 @@ private fun SettingsPage(
     var showColorDialog by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
     var showUninstallRootDialog by remember { mutableStateOf(false) }
+    var showSkipLauncherDialog by remember { mutableStateOf(false) }
     var languageMenuTop by remember { mutableStateOf(32.dp) }
     var colorMenuTop by remember { mutableStateOf(32.dp) }
     val density = LocalDensity.current
@@ -1536,6 +1550,35 @@ private fun SettingsPage(
         )
     }
 
+    if (showSkipLauncherDialog) {
+        AlertDialog(
+            onDismissRequest = { showSkipLauncherDialog = false },
+            icon = { Icon(Icons.Rounded.Warning, contentDescription = null) },
+            title = {
+                DialogDimAmount(0.34f)
+                Text(stringResource(R.string.skip_stability_launcher_warning_title))
+            },
+            text = { Text(stringResource(R.string.skip_stability_launcher_warning_body)) },
+            confirmButton = {
+                FilledTonalButton(onClick = {
+                    clickHaptic(view)
+                    showSkipLauncherDialog = false
+                    onSkipStabilityLauncherChanged(true)
+                }) {
+                    Text(stringResource(R.string.action_continue))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    clickHaptic(view)
+                    showSkipLauncherDialog = false
+                }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(padding),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
@@ -1596,6 +1639,19 @@ private fun SettingsPage(
                 onCheckedChange = {
                     clickHaptic(view)
                     onAdvancedModeChanged(it)
+                },
+            )
+        }
+        item {
+            SettingsSwitchCard(
+                icon = Icons.Rounded.Warning,
+                title = stringResource(R.string.skip_stability_launcher),
+                description = stringResource(R.string.skip_stability_launcher_description),
+                checked = skipStabilityLauncher,
+                onCheckedChange = { enabled ->
+                    clickHaptic(view)
+                    if (enabled) showSkipLauncherDialog = true
+                    else onSkipStabilityLauncherChanged(false)
                 },
             )
         }

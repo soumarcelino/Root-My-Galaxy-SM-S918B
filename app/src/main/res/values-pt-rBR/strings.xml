@@ -223,6 +223,10 @@
     <string name="shizuku_mode_description">Usar o Shizuku para executar o payload. Isso pode melhorar a confiabilidade.</string>
     <string name="optimize_on_exploit">Executar otimizações</string>
     <string name="optimize_on_exploit_description">Usar o Shizuku para interromper os outros apps antes de iniciar o launcher</string>
+    <string name="skip_stability_launcher">Pular o Stability Launcher</string>
+    <string name="skip_stability_launcher_description">Executar o payload imediatamente, sem aguardar as verificações de estabilidade do sistema</string>
+    <string name="skip_stability_launcher_warning_title">Pular as verificações de estabilidade?</string>
+    <string name="skip_stability_launcher_warning_body">O Stability Launcher aumenta as chances de sucesso ao aguardar condições adequadas do sistema. Se essa etapa estiver demorando muito, verifique se há aplicativos ou serviços rodando em segundo plano que possam afetar o desempenho.\n\nIgnorar essa etapa pode reduzir a confiabilidade. Deseja continuar mesmo assim?</string>
     <string name="shizuku_not_running_title">Shizuku não está em execução</string>
     <string name="shizuku_not_running_body">Inicie o Shizuku com adb ou root primeiro.</string>
     <string name="action_download_shizuku">Baixar o Shizuku</string>

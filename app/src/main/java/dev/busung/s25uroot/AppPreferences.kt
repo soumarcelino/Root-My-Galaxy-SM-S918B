@@ -34,6 +34,7 @@ object AppPreferences {
     private const val THEME_MODE = "theme_mode"
     private const val ADVANCED_MODE = "advanced_mode"
     private const val OPTIMIZE_ON_EXPLOIT = "optimize_on_exploit"
+    private const val SKIP_STABILITY_LAUNCHER = "skip_stability_launcher"
     private const val CONSUMED_INSTALL_REQUEST = "consumed_install_request"
     private const val LAST_ROOT_DURATION_MILLIS = "last_root_duration_millis"
 
@@ -71,6 +72,13 @@ object AppPreferences {
 
     fun setOptimizeOnExploit(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(OPTIMIZE_ON_EXPLOIT, enabled).apply()
+    }
+
+    fun skipStabilityLauncher(context: Context): Boolean =
+        prefs(context).getBoolean(SKIP_STABILITY_LAUNCHER, false)
+
+    fun setSkipStabilityLauncher(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(SKIP_STABILITY_LAUNCHER, enabled).apply()
     }
 
     fun lastRootDurationMillis(context: Context): Long =

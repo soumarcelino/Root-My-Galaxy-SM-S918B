@@ -245,6 +245,10 @@
     <string name="advanced_mode_description">Show the target selector and allow any bundled target to be run manually</string>
     <string name="optimize_on_exploit">Run optimizations</string>
     <string name="optimize_on_exploit_description">Use Shizuku to stop other user apps before the launcher starts</string>
+    <string name="skip_stability_launcher">Skip Stability Launcher</string>
+    <string name="skip_stability_launcher_description">Run the payload immediately without waiting for system stability checks</string>
+    <string name="skip_stability_launcher_warning_title">Skip stability checks?</string>
+    <string name="skip_stability_launcher_warning_body">The Stability Launcher improves the chances of a successful run by waiting for suitable system conditions. If this stage is taking too long, check whether apps or services running in the background may be affecting performance.\n\nSkipping it can reduce reliability. Continue anyway?</string>
     <string name="shizuku_mode">Use Shizuku</string>
     <string name="shizuku_mode_description">Use Shizuku to run the payload. This can improve reliability.</string>
     <string name="shizuku_not_running_title">Shizuku is not running</string>
