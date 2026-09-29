@@ -228,6 +228,7 @@ def derive_contract(
     build: str,
     fingerprint: str,
     kernel_release: str,
+    kernel_version: str | None = None,
     elf: Path,
     btf: Path,
     llvm_nm: Path,
@@ -250,6 +251,8 @@ def derive_contract(
         "TARGET_FINGERPRINT": fingerprint,
         "TARGET_KERNEL_RELEASE": kernel_release,
     }
+    if kernel_version is not None:
+        identity["TARGET_KERNEL_VERSION"] = kernel_version
     donor_identity: dict[str, str] = {}
     for name, value in identity.items():
         text, old = _replace_string(text, name, value)

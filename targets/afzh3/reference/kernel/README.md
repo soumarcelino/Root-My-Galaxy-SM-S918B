@@ -124,6 +124,11 @@ without needing a full kernel rebuild. This is how every `FAKE_*_OFF` /
 `FAKE_WAITER_*` constant in `targets/afzh3/reference/kernel/legacy-target/target.h`
 was verified this session.
 
+`modern-target/target.h` is the mechanically verified modern BOPE contract for
+FZH3. It preserves the FZH3 calibration profile while exposing the complete
+ELF/BTF-derived `TARGET_*` namespace required by `bope-from-factory` when FZH3
+is used as the donor for a later Android 16 factory build.
+
 ## `ashmem_misc_fops` is `&ashmem_misc.fops`, not a fops table (2026-09-17)
 
 Real `/proc/kallsyms` (rooted, `kptr_restrict=0`) this session:

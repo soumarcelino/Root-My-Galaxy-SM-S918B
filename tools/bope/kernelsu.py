@@ -186,6 +186,18 @@ def _find_donor_module(donor: Path) -> Path:
     return candidates[-1]
 
 
+def _find_donor_btf(donor: Path) -> Path:
+    candidates = sorted((donor / "firmware").glob("vmlinux_*.btf"))
+    candidates.extend(
+        sorted((donor / "reference/kernel/btf").glob("vmlinux*.btf"))
+    )
+    if len(candidates) != 1:
+        raise BopeError(
+            f"expected one donor BTF blob, found {len(candidates)} under {donor}"
+        )
+    return candidates[0]
+
+
 def _find_ksu_source(explicit: Path | None) -> Path:
     candidates: list[Path] = []
     if explicit:
@@ -281,14 +293,15 @@ def prepare_kernelsu(
     ksu_source: Path | None,
     ndk: Path | None,
     logs_dir: Path,
+    donor_module: Path | None = None,
+    donor_btf: Path | None = None,
 ) -> dict[str, object]:
-    donor_module = _find_donor_module(donor)
-    donor_btf_candidates = sorted((donor / "firmware").glob("vmlinux_*.btf"))
-    if len(donor_btf_candidates) != 1:
-        raise BopeError(
-            f"expected one donor BTF blob, found {len(donor_btf_candidates)} under "
-            f"{donor / 'firmware'}"
-        )
+    donor_module = donor_module or _find_donor_module(donor)
+    donor_btf = donor_btf or _find_donor_btf(donor)
+    if not donor_module.is_file():
+        raise BopeError(f"donor KernelSU module does not exist: {donor_module}")
+    if not donor_btf.is_file():
+        raise BopeError(f"donor BTF blob does not exist: {donor_btf}")
     version_match = re.search(r"v(\d+\.\d+\.\d+)", str(donor_module))
     version = version_match.group(1) if version_match else "3.4.0"
     output = target / f"kernelsu-next/out/kernelsu-next-{slug}-v{version}"
@@ -301,7 +314,7 @@ def prepare_kernelsu(
         target_release=target_release,
         kallsyms=target_kallsyms,
         vmlinux=target_vmlinux,
-        donor_btf=donor_btf_candidates[0],
+        donor_btf=donor_btf,
         target_btf=target_btf,
         llvm_nm=llvm_nm,
         pahole=pahole,

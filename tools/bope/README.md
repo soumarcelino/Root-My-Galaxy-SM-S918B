@@ -57,3 +57,21 @@ Verify any generated contract again with:
   --elf targets/example-WIP/firmware/vmlinux_EXAMPLE.elf \
   --btf targets/example-WIP/firmware/vmlinux_EXAMPLE.btf
 ```
+
+## Full Odin factory packages
+
+Use `bope-from-factory` when the input is a Samsung factory ZIP containing a
+nested `AP_...tar.md5`, not an incremental OTA:
+
+```sh
+./tools/bope-from-factory firmware.zip \
+  --donor targets/afzh3 \
+  --engine-donor targets/zzi8-WIP \
+  --fingerprint samsung/dm3qxxx/dm3q:16/BUILD_ID/INCREMENTAL:user/release-keys
+```
+
+The command streams only `boot.img.lz4` from the nested AP archive, verifies
+the exact supplied fingerprint against the AP build and Android generation,
+then runs the same ELF/BTF contract, build, KernelSU, manifest, transaction,
+and optional app-integration gates as the OTA path. A legacy donor may expose
+its canonical contract under `reference/kernel/modern-target/target.h`.

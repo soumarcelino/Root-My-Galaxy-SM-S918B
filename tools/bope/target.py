@@ -195,6 +195,13 @@ def _build_display(fingerprint: str, incremental: str) -> str:
     return f"{build_id}.{incremental}"
 
 
+def _kernel_version(release: str) -> str:
+    match = re.match(r"^(\d+\.\d+\.\d+)(?:-|$)", release)
+    if not match:
+        raise BopeError(f"cannot derive kernel version from release: {release!r}")
+    return match.group(1)
+
+
 def app_profile(
     info: OtaInfo,
     kernel: KernelArtifacts,
@@ -215,7 +222,7 @@ def app_profile(
         "payloadId": f"{info.device}-{info.post_build}-ksunext",
         "displayName": f"Galaxy S23 Ultra {info.model} | {info.post_build} | KernelSU Next",
         "models": [info.model],
-        "kernelVersions": [".".join(kernel.identity.release.split(".")[:3])],
+        "kernelVersions": [_kernel_version(kernel.identity.release)],
         "buildDisplays": [_build_display(info.post_fingerprint, info.post_build)],
         "fingerprints": [info.post_fingerprint],
         "kernelReleases": [kernel.identity.release],
