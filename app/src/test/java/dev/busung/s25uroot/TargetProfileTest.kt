@@ -63,6 +63,30 @@ class TargetProfileTest {
         assertFalse(fzf5.matches(device.copy(kernelVersionInfo = "different build")))
     }
 
+    @Test
+    fun fzi1IdentityDoesNotRequireExactFingerprint() {
+        val device = snapshot(
+            "SM-S918B",
+            "5.15.189-android13-8-33413713-abS918BXXSAFZI1",
+        ).copy(
+            buildId = "BP4A.251205.006.S918BXXSAFZI1",
+            fingerprint = "samsung/dm3qxxx/dm3q:16/BP4A.251205.006/S918BXXSAFZI1:user/release-keys",
+            kernelVersionInfo = "#1 SMP PREEMPT Mon Sep 7 11:01:09 UTC 2026",
+        )
+        val fzi1 = profile.copy(
+            profileId = "dm3q-S918BXXSAFZI1-ksunext",
+            models = setOf(device.model),
+            kernelVersions = setOf(device.kernelVersion),
+            buildDisplays = setOf(device.buildId),
+            fingerprints = emptySet(),
+            kernelReleases = setOf(device.kernelRelease),
+            kernelVersionInfos = setOf(device.kernelVersionInfo),
+        )
+
+        assertTrue(fzi1.matches(device))
+        assertTrue(fzi1.matches(device.copy(fingerprint = device.fingerprint.replace("FZI1", "FZH3"))))
+    }
+
     private fun snapshot(
         model: String,
         kernelRelease: String,

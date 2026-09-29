@@ -216,6 +216,45 @@
         "url": "asset://mm-exec-factory-zzi8",
         "size": 1816
       }
+    },
+    {
+      "payloadId": "dm3q-S918BXXSAFZI1-ksunext",
+      "displayName": "Galaxy S23 Ultra SM-S918B | S918BXXSAFZI1 | KernelSU Next",
+      "models": [
+        "SM-S918B"
+      ],
+      "kernelVersions": [
+        "5.15.189"
+      ],
+      "buildDisplays": [
+        "BP4A.251205.006.S918BXXSAFZI1"
+      ],
+      "kernelReleases": [
+        "5.15.189-android13-8-33413713-abS918BXXSAFZI1"
+      ],
+      "kernelVersionInfos": [
+        "#1 SMP PREEMPT Mon Sep 7 11:01:09 UTC 2026"
+      ],
+      "exploit": {
+        "url": "asset://cve-2026-43499-app-fzi1.so",
+        "size": 171600
+      },
+      "kernelsu": {
+        "url": "asset://ksud-next-v3.4.0-fzi1",
+        "size": 4290936
+      },
+      "helper": {
+        "url": "asset://cve-2026-43499-root-fzi1",
+        "size": 26560
+      },
+      "launcher": {
+        "url": "asset://stability-launcher-fzi1",
+        "size": 17952
+      },
+      "mmFactory": {
+        "url": "asset://mm-exec-factory-fzi1",
+        "size": 1816
+      }
     }
   ]
 }
