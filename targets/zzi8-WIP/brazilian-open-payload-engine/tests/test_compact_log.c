@@ -23,6 +23,13 @@ static int capture_logs(char *output, size_t capacity) {
   fprintf(stderr, "[pipe_rw] selection page=7 candidate=19\n");
   fprintf(stderr, "[pipe_rw] terminal failure stage=proof\n");
   fprintf(stderr,
+          "[futex-v14] summary gate_seen=1 sig_ok=1 sched_done=1 "
+          "attempt_count=1 success_count=1 cmp_ret=-1 cmp_errno=11 "
+          "sched_ret=0 sched_errno=0 cpu=0/1/3\n");
+  fprintf(stderr,
+          "[retry-gate] stable=2/2 runnable=2 psi=1.00/0.00/0.00 "
+          "mm=704/704 slabs=22 delta=0 readable=1\n");
+  fprintf(stderr,
           "[launcher] gate=1/2 temp=37.0C mem=6800MB runnable=1 load=3.0\n");
   rmg_log_success(47);
   fflush(stdout);
@@ -52,6 +59,8 @@ int main(void) {
   if (strstr(output, "[launcher] gate=1/2 temp=37.0C") == NULL) return 5;
   if (strstr(output, "selection page=7") != NULL) return 6;
   if (strstr(output, "terminal failure") == NULL) return 7;
+  if (strstr(output, "[futex-v14] summary gate_seen=1") == NULL) return 13;
+  if (strstr(output, "[retry-gate] stable=2/2") == NULL) return 14;
   if (strstr(output, "BOPE :: Success\n        Root achieved in 47 seconds\n") == NULL) return 11;
   if (!strstr(output, "Root achieved in 47 seconds\n") ||
       strcmp(output + strlen(output) - strlen("Root achieved in 47 seconds\n"),

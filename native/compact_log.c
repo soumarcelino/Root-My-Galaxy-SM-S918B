@@ -83,6 +83,11 @@ static int rmg_should_emit(const char *line, size_t length) {
       "[groom] installed fops",
       "[futex-v14] dbg phase=callback-entry",
       "[futex-v14] dbg phase=route-done",
+      "[futex-v14] summary",
+      "[futex-v14] CPU contract failed",
+      "[futex-v14] CPU placement failed",
+      "[futex-v14] CPU probe",
+      "[futex-v14] SIGUSR1 unblock failed",
       "[futex] trigger result=",
       "[aar_aaw] verify ok",
       "[immediate] restore",
@@ -96,6 +101,7 @@ static int rmg_should_emit(const char *line, size_t length) {
       "[holder]",
       "[recovery]",
       "[supervisor]",
+      "[retry-gate]",
   };
   for (size_t i = 0;
        i < sizeof(forensic_markers) / sizeof(forensic_markers[0]); i++) {

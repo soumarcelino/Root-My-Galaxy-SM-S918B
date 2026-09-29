@@ -20,4 +20,8 @@ void sigusr1_build_null_write_payload(uint64_t page_base,
 
 int sigusr1_fire_and_wait(void);
 
+int sigusr1_last_handler_result(void);
+int sigusr1_last_handler_reason(void);
+const char *sigusr1_handler_reason_name(int reason);
+
 #endif

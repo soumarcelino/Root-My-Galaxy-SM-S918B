@@ -20,6 +20,16 @@
 
 static unsigned char g_payload[TARGET_SIGNAL_PAYLOAD_SIZE];
 static atomic_int g_handler_result; /* 0=not run yet, 1=success, -1=failed */
+static atomic_int g_handler_reason;
+
+enum sigusr1_handler_reason {
+  SIGUSR1_REASON_NOT_DELIVERED = 0,
+  SIGUSR1_REASON_INVALID_SIZE_OR_ALIGNMENT = 1,
+  SIGUSR1_REASON_RECORD_OUT_OF_BOUNDS = 2,
+  SIGUSR1_REASON_FPSIMD_MISSING = 3,
+  SIGUSR1_REASON_SUCCESS = 4,
+  SIGUSR1_REASON_TGKILL_FAILED = 5,
+};
 
 static void put64(unsigned char *base, size_t off, uint64_t value) {
   memcpy(base + off, &value, sizeof(value));
@@ -81,10 +91,13 @@ static void sigusr1_handler(int sig, siginfo_t *info, void *ucontext_v) {
       break; /* end of the record list, real kernel uses the same sentinel */
     }
     if (size < sizeof(struct _aarch64_ctx) || (size & 0xf) != 0) {
+      atomic_store(&g_handler_reason,
+                   SIGUSR1_REASON_INVALID_SIZE_OR_ALIGNMENT);
       atomic_store(&g_handler_result, -1);
       return;
     }
     if (offset + size > limit) {
+      atomic_store(&g_handler_reason, SIGUSR1_REASON_RECORD_OUT_OF_BOUNDS);
       atomic_store(&g_handler_result, -1);
       return;
     }
@@ -94,6 +107,7 @@ static void sigusr1_handler(int sig, siginfo_t *info, void *ucontext_v) {
     offset += size;
   }
   if (fpsimd == NULL) {
+    atomic_store(&g_handler_reason, SIGUSR1_REASON_FPSIMD_MISSING);
     atomic_store(&g_handler_result, -1);
     return;
   }
@@ -104,6 +118,7 @@ static void sigusr1_handler(int sig, siginfo_t *info, void *ucontext_v) {
   for (size_t i = 0; i < sizeof(g_payload); i++) {
     dst[i] = src[i];
   }
+  atomic_store(&g_handler_reason, SIGUSR1_REASON_SUCCESS);
   atomic_store(&g_handler_result, 1);
 }
 
@@ -122,14 +137,43 @@ int sigusr1_install_handler(void) {
 
 int sigusr1_fire_and_wait(void) {
   atomic_store(&g_handler_result, 0);
+  atomic_store(&g_handler_reason, SIGUSR1_REASON_NOT_DELIVERED);
 
   pid_t pid = getpid();
   long tid = syscall(SYS_gettid);
   long ret = syscall(SYS_tgkill, pid, tid, SIGUSR1);
   if (ret != 0) {
+    atomic_store(&g_handler_reason, SIGUSR1_REASON_TGKILL_FAILED);
     fprintf(stderr, "[sigusr1] tgkill failed errno=%d\n", errno);
     return 0;
   }
 
   return atomic_load(&g_handler_result) == 1;
+}
+
+int sigusr1_last_handler_result(void) {
+  return atomic_load(&g_handler_result);
+}
+
+int sigusr1_last_handler_reason(void) {
+  return atomic_load(&g_handler_reason);
+}
+
+const char *sigusr1_handler_reason_name(int reason) {
+  switch (reason) {
+    case SIGUSR1_REASON_NOT_DELIVERED:
+      return "not-delivered";
+    case SIGUSR1_REASON_INVALID_SIZE_OR_ALIGNMENT:
+      return "invalid-size-or-alignment";
+    case SIGUSR1_REASON_RECORD_OUT_OF_BOUNDS:
+      return "record-out-of-bounds";
+    case SIGUSR1_REASON_FPSIMD_MISSING:
+      return "fpsimd-missing";
+    case SIGUSR1_REASON_SUCCESS:
+      return "success";
+    case SIGUSR1_REASON_TGKILL_FAILED:
+      return "tgkill-failed";
+    default:
+      return "unknown";
+  }
 }

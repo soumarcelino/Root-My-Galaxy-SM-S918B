@@ -65,6 +65,79 @@ static void fatal_usage(void) {
 static const int32_t kAttemptDelayOffsetsUsec[TARGET_ATTEMPT_DELAY_COUNT] =
     TARGET_ATTEMPT_DELAYS_USEC;
 
+static uint64_t retry_now_ms(void) {
+  struct timespec ts;
+  if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+  return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
+}
+
+static int read_retry_psi(const char *path, double *avg10) {
+  FILE *fp = fopen(path, "re");
+  if (!fp) return 0;
+  char line[256];
+  int ok = fgets(line, sizeof(line), fp) != NULL &&
+           sscanf(line, "some avg10=%lf", avg10) == 1;
+  fclose(fp);
+  return ok;
+}
+
+static int read_retry_runnable(int *runnable) {
+  FILE *fp = fopen("/proc/loadavg", "re");
+  if (!fp) return 0;
+  double load1, load5, load15;
+  int total;
+  int ok = fscanf(fp, "%lf %lf %lf %d/%d", &load1, &load5, &load15,
+                  runnable, &total) == 5;
+  fclose(fp);
+  return ok;
+}
+
+static int wait_for_retry_stability(void) {
+  struct mm_slabinfo previous = {0};
+  int have_previous = 0;
+  int stable = 0;
+  uint64_t deadline = retry_now_ms() +
+      (uint64_t)TARGET_RETRY_GATE_TIMEOUT_SEC * 1000ULL;
+
+  while (retry_now_ms() < deadline) {
+    int runnable = 0;
+    double cpu_psi = 0.0, mem_psi = 0.0, io_psi = 0.0;
+    struct mm_slabinfo mm = {0};
+    int readable = read_retry_runnable(&runnable) &&
+        read_retry_psi("/proc/pressure/cpu", &cpu_psi) &&
+        read_retry_psi("/proc/pressure/memory", &mem_psi) &&
+        read_retry_psi("/proc/pressure/io", &io_psi) &&
+        read_mm_slabinfo(&mm);
+    unsigned long mm_delta = have_previous
+        ? (mm.num_slabs > previous.num_slabs
+               ? mm.num_slabs - previous.num_slabs
+               : previous.num_slabs - mm.num_slabs) * mm.objperslab
+        : TARGET_RETRY_MAX_MM_DELTA + 1;
+    int sample_ok = readable && have_previous &&
+        runnable <= TARGET_RETRY_MAX_RUNNABLE &&
+        cpu_psi <= TARGET_RETRY_MAX_CPU_PSI &&
+        mem_psi <= TARGET_RETRY_MAX_MEM_PSI &&
+        io_psi <= TARGET_RETRY_MAX_IO_PSI &&
+        mm.num_slabs <= TARGET_RETRY_MAX_MM_SLABS &&
+        mm_delta <= TARGET_RETRY_MAX_MM_DELTA;
+    stable = sample_ok ? stable + 1 : 0;
+    fprintf(stderr,
+            "[retry-gate] stable=%d/%d runnable=%d psi=%.2f/%.2f/%.2f "
+            "mm=%lu/%lu slabs=%lu delta=%lu readable=%d\n",
+            stable, TARGET_RETRY_GATE_STABLE_SAMPLES, runnable,
+            cpu_psi, mem_psi, io_psi, mm.active_objs, mm.num_objs,
+            mm.num_slabs, mm_delta, readable);
+    if (stable >= TARGET_RETRY_GATE_STABLE_SAMPLES) return 1;
+    if (readable) {
+      previous = mm;
+      have_previous = 1;
+    }
+    usleep(TARGET_RETRY_GATE_SAMPLE_MSEC * 1000U);
+  }
+  fprintf(stderr, "[retry-gate] timeout action=abort-safe\n");
+  return 0;
+}
+
 enum attempt_kernel_state {
   ATTEMPT_PRE_MUTATION = 0,
   ATTEMPT_MUTATION_PENDING = 1,
@@ -724,8 +797,8 @@ static int app_main(void) {
       }
     }
 
-    if (attempt < attempts) {
-      sleep(5);
+    if (attempt < attempts && !wait_for_retry_stability()) {
+      break;
     }
   }
 
