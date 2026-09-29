@@ -1,0 +1,27 @@
+/*
+ * Declares construction, handler installation, and bounded delivery of the
+ * FPSIMD signal-frame payload.
+ */
+#ifndef OSS_CLONE_SIGNAL_FRAME_PAYLOAD_H
+#define OSS_CLONE_SIGNAL_FRAME_PAYLOAD_H
+
+#include <stdint.h>
+
+int sigusr1_install_handler(void);
+
+void sigusr1_build_payload(uint64_t page_base, uint64_t ashmem_misc_fops_addr);
+
+void sigusr1_build_pointer_write_payload(uint64_t page_base,
+                                         uint64_t target_addr,
+                                         uint64_t replacement_addr);
+
+void sigusr1_build_null_write_payload(uint64_t page_base,
+                                      uint64_t target_addr);
+
+int sigusr1_fire_and_wait(void);
+
+int sigusr1_last_handler_result(void);
+int sigusr1_last_handler_reason(void);
+const char *sigusr1_handler_reason_name(int reason);
+
+#endif

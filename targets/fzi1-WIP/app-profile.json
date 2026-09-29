@@ -1,0 +1,39 @@
+{
+  "buildDisplays": [
+    "BP4A.251205.006.S918BXXSAFZI1"
+  ],
+  "displayName": "Galaxy S23 Ultra SM-S918B | S918BXXSAFZI1 | KernelSU Next",
+  "exploit": {
+    "size": 171600,
+    "url": "asset://cve-2026-43499-app-fzi1.so"
+  },
+  "helper": {
+    "size": 26560,
+    "url": "asset://cve-2026-43499-root-fzi1"
+  },
+  "kernelReleases": [
+    "5.15.189-android13-8-33413713-abS918BXXSAFZI1"
+  ],
+  "kernelVersionInfos": [
+    "#1 SMP PREEMPT Mon Sep 7 11:01:09 UTC 2026"
+  ],
+  "kernelVersions": [
+    "5.15.189"
+  ],
+  "kernelsu": {
+    "size": 4290936,
+    "url": "asset://ksud-next-v3.4.0-fzi1"
+  },
+  "launcher": {
+    "size": 17952,
+    "url": "asset://stability-launcher-fzi1"
+  },
+  "mmFactory": {
+    "size": 1816,
+    "url": "asset://mm-exec-factory-fzi1"
+  },
+  "models": [
+    "SM-S918B"
+  ],
+  "payloadId": "dm3q-S918BXXSAFZI1-ksunext"
+}

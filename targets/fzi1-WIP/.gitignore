@@ -1,0 +1,6 @@
+firmware/boot_FZI1.img
+firmware/unpacked/
+firmware/vmlinux_FZI1.elf
+brazilian-open-payload-engine/build/
+helper/build/
+firmware/boot_FZI1.img.lz4
