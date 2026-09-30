@@ -114,20 +114,15 @@ BTF_SIZES: dict[str, str] = {
     "TARGET_UMH_COMPLETION_SIZE": "completion",
 }
 
-# BTF enums that pin the kmalloc_caches geometry. The array is
-# [NR_KMALLOC_TYPES][KMALLOC_BUCKETS]; a donor whose kernel ordered the types
-# differently (e.g. cgroup before reclaim) leaves these stale.
+
+# kmalloc_caches is a two-dimensional array indexed first by this enum and
+# then by the power-of-two allocation size. These values are ABI: carrying a
+# donor row number can make the pipe selector inspect the wrong slab cache.
 BTF_ENUM_CONSTANTS: dict[str, tuple[str, str]] = {
+    "TARGET_KMALLOC_NORMAL_TYPE": ("kmalloc_cache_type", "KMALLOC_NORMAL"),
     "TARGET_KMALLOC_CGROUP_TYPE": ("kmalloc_cache_type", "KMALLOC_CGROUP"),
     "TARGET_KMALLOC_TYPES": ("kmalloc_cache_type", "NR_KMALLOC_TYPES"),
 }
-
-# KMALLOC_BUCKETS is KMALLOC_SHIFT_HIGH + 1, the number of power-of-two size
-# classes from 8 bytes to PAGE_SIZE. KMALLOC_SHIFT_HIGH is PAGE_SHIFT + 1, so
-# it is 14 for this kernel; the slot constants are arithmetic on the enum row
-# index and this bucket count.
-KMALLOC_BUCKETS = 14
-KMALLOC_PIPE_INDEX = 11
 
 
 DERIVED_RELATIONS = {
@@ -194,13 +189,77 @@ def structure_size(layout: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def enum_values(btf: Path, pahole: Path, enum_name: str) -> dict[str, int]:
-    """Parse `pahole -E -C <enum>` output into {enumerator: value}."""
-    output = run([pahole, "-F", "btf", "-E", "-C", enum_name, btf])
+def parse_enum_values(layout: str) -> dict[str, int]:
+    """Parse a pahole enum dump into ``{enumerator: value}``."""
     values: dict[str, int] = {}
-    for match in re.finditer(r"(\w+)\s*=\s*(-?\d+)", output):
+    for match in re.finditer(r"\b([A-Za-z_]\w*)\s*=\s*(-?\d+)\s*,?", layout):
         values.setdefault(match.group(1), int(match.group(2)))
     return values
+
+
+def enum_values(btf: Path, pahole: Path, enum_name: str) -> dict[str, int]:
+    return parse_enum_values(
+        run([pahole, "-F", "btf", "-E", "-C", enum_name, btf])
+    )
+
+
+def derive_kmalloc_geometry(
+    macros: dict[str, int], enum_constants: dict[str, int]
+) -> dict[str, int]:
+    """Derive the flat kmalloc_caches slots used by the pipe engine.
+
+    Samsung's 5.15 layout uses indexes equal to the allocation size's binary
+    logarithm and carries classes through ``PAGE_SIZE * 2``. Deriving both
+    dimensions from the target contract removes the PR's hidden 4 KiB/2 KiB
+    constants while retaining a fail-closed check for unsupported geometry.
+    """
+    required_macros = ("TARGET_PAGE_SIZE", "TARGET_PIPE_OBJECT_SIZE")
+    missing_macros = [name for name in required_macros if name not in macros]
+    if missing_macros:
+        raise BopeError(
+            "missing kmalloc geometry macros: " + ", ".join(missing_macros)
+        )
+    missing_enums = [
+        name for name in BTF_ENUM_CONSTANTS if name not in enum_constants
+    ]
+    if missing_enums:
+        raise BopeError(
+            "missing kmalloc enum constants: " + ", ".join(missing_enums)
+        )
+
+    page_size = macros["TARGET_PAGE_SIZE"]
+    pipe_size = macros["TARGET_PIPE_OBJECT_SIZE"]
+    if page_size <= 0 or page_size & (page_size - 1):
+        raise BopeError(f"TARGET_PAGE_SIZE is not a power of two: {page_size}")
+    if pipe_size < 8 or pipe_size & (pipe_size - 1):
+        raise BopeError(
+            f"TARGET_PIPE_OBJECT_SIZE is not a supported power of two: {pipe_size}"
+        )
+
+    normal_type = enum_constants["TARGET_KMALLOC_NORMAL_TYPE"]
+    cgroup_type = enum_constants["TARGET_KMALLOC_CGROUP_TYPE"]
+    types = enum_constants["TARGET_KMALLOC_TYPES"]
+    if types <= 0 or not 0 <= normal_type < types or not 0 <= cgroup_type < types:
+        raise BopeError(
+            "invalid kmalloc_cache_type values: "
+            f"normal={normal_type} cgroup={cgroup_type} types={types}"
+        )
+
+    buckets = page_size.bit_length() + 1
+    pipe_index = pipe_size.bit_length() - 1
+    if pipe_index >= buckets:
+        raise BopeError(
+            f"pipe allocation index {pipe_index} exceeds {buckets} kmalloc buckets"
+        )
+    return {
+        "TARGET_KMALLOC_TYPES": types,
+        "TARGET_KMALLOC_NORMAL_TYPE": normal_type,
+        "TARGET_KMALLOC_CGROUP_TYPE": cgroup_type,
+        "TARGET_KMALLOC_BUCKETS": buckets,
+        "TARGET_KMALLOC_NORMAL_2K_SLOT": normal_type * buckets + pipe_index,
+        "TARGET_KMALLOC_CGROUP_2K_SLOT": cgroup_type * buckets + pipe_index,
+        "TARGET_KMALLOC_CACHE_SLOTS": types * buckets,
+    }
 
 
 def _numeric_style(raw: str, value: int) -> str:
@@ -230,15 +289,16 @@ def _replace_numeric(text: str, name: str, value: int) -> tuple[str, int | None]
 
 
 def _define_numeric(text: str, name: str, value: int, anchor: str) -> str:
-    """Rewrite a numeric macro, inserting it before `anchor` when the donor
-    predates it. Derived additions must not depend on donor hand-editing."""
+    """Rewrite a macro, or insert a newly derived unsigned value at an anchor."""
     if re.search(rf"^#define[ \t]+{re.escape(name)}[ \t]", text, re.MULTILINE):
         text, _ = _replace_numeric(text, name, value)
         return text
-    anchor_match = re.search(rf"^#define[ \t]+{re.escape(anchor)}[ \t]", text, re.MULTILINE)
+    anchor_match = re.search(
+        rf"^#define[ \t]+{re.escape(anchor)}[ \t]", text, re.MULTILINE
+    )
     if not anchor_match:
         raise BopeError(f"insertion anchor macro is missing: {anchor}")
-    line = f"#define {name} {value}\n"
+    line = f"#define {name} {value}U\n"
     return text[: anchor_match.start()] + line + text[anchor_match.start() :]
 
 
@@ -334,29 +394,22 @@ def derive_contract(
         values[macro] = values[parent] + delta
 
     enums: dict[str, dict[str, int]] = {}
+    enum_constants: dict[str, int] = {}
     for macro, (enum_name, enumerator) in BTF_ENUM_CONSTANTS.items():
         enums.setdefault(enum_name, enum_values(btf, pahole, enum_name))
         if enumerator not in enums[enum_name]:
             raise BopeError(f"BTF enum is missing: {enum_name}.{enumerator}")
-        values[macro] = enums[enum_name][enumerator]
-    cgroup_type = values["TARGET_KMALLOC_CGROUP_TYPE"]
-    derived_slots = {
-        "TARGET_KMALLOC_TYPES": values["TARGET_KMALLOC_TYPES"],
-        "TARGET_KMALLOC_CGROUP_TYPE": cgroup_type,
-        "TARGET_KMALLOC_BUCKETS": KMALLOC_BUCKETS,
-        "TARGET_KMALLOC_NORMAL_2K_SLOT": KMALLOC_PIPE_INDEX,
-        "TARGET_KMALLOC_CGROUP_2K_SLOT": cgroup_type * KMALLOC_BUCKETS
-        + KMALLOC_PIPE_INDEX,
-        "TARGET_KMALLOC_CACHE_SLOTS": values["TARGET_KMALLOC_TYPES"]
-        * KMALLOC_BUCKETS,
-    }
-    for macro, value in derived_slots.items():
-        text = _define_numeric(text, macro, value, "TARGET_KMALLOC_CACHES_OFF")
-        derived[macro] = value
-        old = old_numeric.get(macro)
+        enum_constants[macro] = enums[enum_name][enumerator]
+    geometry_inputs = dict(old_numeric)
+    geometry_inputs.update(values)
+    kmalloc_geometry = derive_kmalloc_geometry(geometry_inputs, enum_constants)
+    for name, value in kmalloc_geometry.items():
+        text = _define_numeric(text, name, value, "TARGET_KMALLOC_BUCKETS")
+        derived[name] = value
+        old = old_numeric.get(name)
         if old != value:
-            changed[macro] = {"from": old, "to": value}
-        values.pop(macro, None)
+            changed[name] = {"from": old, "to": value}
+        values.pop(name, None)
 
     for name, value in values.items():
         text, old = _replace_numeric(text, name, value)
@@ -425,36 +478,33 @@ def verify_contract(
             checks[macro] = expected
 
     enums: dict[str, dict[str, int]] = {}
+    enum_constants: dict[str, int] = {}
     for macro, (enum_name, enumerator) in BTF_ENUM_CONSTANTS.items():
         enums.setdefault(enum_name, enum_values(btf, pahole, enum_name))
         expected = enums[enum_name].get(enumerator)
+        if expected is None:
+            errors.append(f"BTF enum is missing: {enum_name}.{enumerator}")
+        else:
+            enum_constants[macro] = expected
+    try:
+        geometry = derive_kmalloc_geometry(macros, enum_constants)
+    except BopeError as error:
+        errors.append(str(error))
+        geometry = {}
+    for macro, expected in geometry.items():
         actual = macros.get(macro)
         if actual != expected:
-            errors.append(f"{macro}: header={actual!r} BTF enum={expected!r}")
-        elif expected is not None:
+            errors.append(f"{macro}: header={actual!r} derived={expected}")
+        else:
             checks[macro] = expected
-    cgroup_type = enums.get("kmalloc_cache_type", {}).get("KMALLOC_CGROUP")
-    types = enums.get("kmalloc_cache_type", {}).get("NR_KMALLOC_TYPES")
-    if cgroup_type is not None and types is not None:
-        slot_expectations = {
-            "TARGET_KMALLOC_BUCKETS": KMALLOC_BUCKETS,
-            "TARGET_KMALLOC_NORMAL_2K_SLOT": KMALLOC_PIPE_INDEX,
-            "TARGET_KMALLOC_CGROUP_2K_SLOT": cgroup_type * KMALLOC_BUCKETS
-            + KMALLOC_PIPE_INDEX,
-            "TARGET_KMALLOC_CACHE_SLOTS": types * KMALLOC_BUCKETS,
-        }
-        for macro, expected in slot_expectations.items():
-            actual = macros.get(macro)
-            if actual != expected:
-                errors.append(f"{macro}: header={actual!r} derived={expected}")
-            else:
-                checks[macro] = expected
     return {
         "passed": not errors,
         "header": str(header),
         "elf_symbols": len(SYMBOLS),
         "btf_fields": len(BTF_FIELDS),
         "btf_sizes": len(BTF_SIZES),
+        "btf_enum_constants": len(BTF_ENUM_CONSTANTS),
+        "kmalloc_geometry": len(geometry),
         "derived_relations": len(relations),
         "checks": checks,
         "errors": errors,

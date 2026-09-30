@@ -161,6 +161,39 @@ class TargetProfileTest {
         assertFalse(fzf5.matches(device.copy(kernelVersionInfo = "different build")))
     }
 
+    @Test
+    fun s911u1Dyi3MatchesOnlyItsExactFirmwareIdentity() {
+        val device = snapshot(
+            "SM-S911U1",
+            "5.15.153-android13-8-30958972-abS911U1UES6DYI3",
+        ).copy(
+            buildId = "AP3A.240905.015.A2.S911U1UES6DYI3",
+            fingerprint =
+                "samsung/dm1quew/dm1q:15/AP3A.240905.015.A2/" +
+                    "S911U1UES6DYI3:user/release-keys",
+            kernelVersionInfo = "#1 SMP PREEMPT Wed Sep 3 06:21:36 UTC 2025",
+        )
+        val dyi3 = profile.copy(
+            profileId = "dm1q-S911U1UES6DYI3-ksunext",
+            models = setOf(device.model),
+            kernelVersions = setOf(device.kernelVersion),
+            buildDisplays = setOf(device.buildId),
+            fingerprints = setOf(device.fingerprint),
+            kernelReleases = setOf(device.kernelRelease),
+            kernelVersionInfos = setOf(device.kernelVersionInfo),
+        )
+
+        assertTrue(dyi3.matches(device))
+        assertFalse(dyi3.matches(device.copy(model = "SM-S918B")))
+        assertFalse(dyi3.matches(device.copy(buildId = device.buildId.replace("DYI3", "DYJ1"))))
+        assertFalse(
+            dyi3.matches(
+                device.copy(kernelRelease = device.kernelRelease.replace("DYI3", "DYJ1")),
+            ),
+        )
+        assertFalse(dyi3.matches(device.copy(kernelVersionInfo = "different kernel build")))
+    }
+
     private fun snapshot(
         model: String,
         kernelRelease: String,

@@ -86,10 +86,12 @@ static void check_pinned_plans_preserved(void) {
 
 /* Every address the kernel may be asked to write must resolve, including the
  * whole vmemmap slot space and both ends of the direct map. */
-static void check_coverage(void) {
+static void check_coverage(int full) {
   size_t lens[] = {1, 2, 4, 8, 16, 23, 24, 32, 64, 128, 256};
   long checked = 0, unsolved = 0;
-  for (uint64_t pfn = 0; pfn < (12ULL << 30) / TARGET_PAGE_SIZE; pfn += 1) {
+  uint64_t stride = full ? 1 : 977;
+  for (uint64_t pfn = 0; pfn < (12ULL << 30) / TARGET_PAGE_SIZE;
+       pfn += stride) {
     uint64_t slot =
         TARGET_VMEMMAP_START + pfn * TARGET_STRUCT_PAGE_SIZE +
         TARGET_PAGE_SLAB_CACHE_OFF;
@@ -106,8 +108,16 @@ static void check_coverage(void) {
   }
   assert(unsolved == 0);
 
+  /* The fast suite samples the range, but must still pin both boundaries. */
+  assert(plan_encodes(TARGET_VMEMMAP_START + TARGET_PAGE_SLAB_CACHE_OFF,
+                      sizeof(uint64_t)));
+  assert(plan_encodes(TARGET_VMEMMAP_END - TARGET_STRUCT_PAGE_SIZE +
+                          TARGET_PAGE_SLAB_CACHE_OFF,
+                      sizeof(uint64_t)));
+
   uint64_t seed = 0x243f6a8885a308d3ULL;
-  for (long i = 0; i < 200000; i++) {
+  long samples = full ? 200000 : 20000;
+  for (long i = 0; i < samples; i++) {
     seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;
     uint64_t bits = seed >> 8;
     uint64_t addr;
@@ -139,10 +149,12 @@ static void check_coverage(void) {
   assert(unsolved == 0);
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+  int full = argc == 2 && strcmp(argv[1], "--full") == 0;
+  assert(argc == 1 || full);
   check_ondevice_guard_slots();
   check_pinned_plans_preserved();
-  check_coverage();
+  check_coverage(full);
   puts("PASS write plans encode at every address (position is a free parameter)");
   return 0;
 }

@@ -1,0 +1,19 @@
+*.o
+*.d
+*.log
+*.gcda
+*.gcno
+*.profraw
+*.profdata
+core
+core.*
+.DS_Store
+.cache/
+.clangd/
+compile_commands.json
+__pycache__/
+*.pyc
+evidence/
+
+# Generated target artifacts.
+/build/

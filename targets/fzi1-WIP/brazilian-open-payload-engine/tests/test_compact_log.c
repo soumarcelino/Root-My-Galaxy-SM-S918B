@@ -57,7 +57,7 @@ int main(void) {
                      "verify=4ms total=137ms\n") == NULL)
     return 9;
   if (strstr(output, "[launcher] gate=1/2 temp=37.0C") == NULL) return 5;
-  if (strstr(output, "selection page=7") != NULL) return 6;
+  if (strstr(output, "selection page=7") == NULL) return 6;
   if (strstr(output, "terminal failure") == NULL) return 7;
   if (strstr(output, "[futex-v14] summary gate_seen=1") == NULL) return 13;
   if (strstr(output, "[retry-gate] stable=2/2") == NULL) return 14;

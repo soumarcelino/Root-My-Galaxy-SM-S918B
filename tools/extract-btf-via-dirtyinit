@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+[[ $# -eq 0 ]] || { echo "Usage: $0" >&2; exit 2; }
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+output_dir=/tmp/universal
+dirtyinit=/data/local/tmp/dirtyinit
+kptr_path=/proc/sys/kernel/kptr_restrict
+base_address=0xffffffc008000000
+
+for executable in adb python3 pahole; do
+    command -v "$executable" >/dev/null || { echo "Missing command: $executable" >&2; exit 1; }
+done
+
+mkdir -p -- "$output_dir"
+workdir=$(mktemp -d "$output_dir/.extract-bope.XXXXXX")
+kptr_changed=0
+restore_kptr() {
+    if [[ "$kptr_changed" == 1 ]]; then
+        adb shell "$dirtyinit -r 'echo $original_kptr > $kptr_path'" >/dev/null
+        restored=$(adb shell "$dirtyinit cat $kptr_path" | tr -d '\r\n')
+        [[ "$restored" == "$original_kptr" ]] || {
+            echo "ERROR: kptr_restrict was not restored ($restored != $original_kptr)" >&2
+            return 1
+        }
+        kptr_changed=0
+    fi
+}
+cleanup() {
+    restore_kptr || echo "ERROR: could not restore kptr_restrict" >&2
+    rm -rf -- "$workdir"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+relay_identity=$(adb shell "$dirtyinit id")
+[[ "$relay_identity" == *"uid=0(root)"* && "$relay_identity" == *"u:r:init:s0"* ]] || {
+    echo "dirtyinit is not running as root in the init domain: $relay_identity" >&2
+    exit 1
+}
+boot_id_before=$(adb shell "$dirtyinit cat /proc/sys/kernel/random/boot_id" | tr -d '\r\n')
+[[ -n "$boot_id_before" ]] || { echo "Could not read boot ID" >&2; exit 1; }
+original_kptr=$(adb shell "$dirtyinit cat $kptr_path" | tr -d '\r\n')
+[[ "$original_kptr" =~ ^[0-2]$ ]] || { echo "Invalid kptr_restrict value: $original_kptr" >&2; exit 1; }
+
+echo "Boot ID: $boot_id_before"
+echo "Collecting BOPE kernel evidence..."
+adb exec-out "$dirtyinit" cat /dev/block/by-name/boot > "$workdir/boot.img"
+adb exec-out "$dirtyinit" cat /sys/kernel/tracing/events/sched/sched_blocked_reason/format > "$workdir/sched_blocked_reason.format"
+# dirtyinit's /proc/slabinfo reader stops early; the ordinary ADB shell can read it fully.
+adb exec-out cat /proc/slabinfo > "$workdir/slabinfo.txt"
+
+{
+    printf 'dirtyinit_id=%s\nboot_id=%s\nkptr_restrict_original=%s\n' "$relay_identity" "$boot_id_before" "$original_kptr"
+    for property in ro.product.model ro.product.device ro.build.display.id ro.build.version.incremental ro.build.fingerprint; do
+        printf '%s=%s\n' "$property" "$(adb shell getprop "$property" | tr -d '\r\n')"
+    done
+    printf 'kernel_release=%s\n' "$(adb shell uname -r | tr -d '\r\n')"
+    printf 'kernel_version=%s\n' "$(adb shell uname -v | tr -d '\r\n')"
+} > "$workdir/identity.txt"
+
+if [[ "$original_kptr" != 0 ]]; then
+    echo "Temporarily setting kptr_restrict to 0..."
+    kptr_changed=1
+    adb shell "$dirtyinit -r 'echo 0 > $kptr_path'" >/dev/null
+    current_kptr=$(adb shell "$dirtyinit cat $kptr_path" | tr -d '\r\n')
+    [[ "$current_kptr" == 0 ]] || { echo "Could not expose kernel pointers" >&2; exit 1; }
+fi
+adb exec-out "$dirtyinit" cat /proc/kallsyms > "$workdir/kallsyms.live.txt"
+restore_kptr
+
+PYTHONPATH="$script_dir" python3 - "$workdir" "$base_address" <<'PY'
+from pathlib import Path
+import hashlib
+import json
+import re
+import shutil
+import sys
+
+from bope.common import run_logged
+from bope.contract import BTF_FIELDS, BTF_SIZES, SYMBOLS, btf_layout, field_offset, parse_symbols, structure_size
+from bope.kernel import default_kallsyms_finder, default_vmlinux_to_elf, extract_btf, kernel_identity, unpack_boot
+
+out = Path(sys.argv[1])
+base = int(sys.argv[2], 0)
+boot = out / "boot.img"
+if boot.open("rb").read(8) != b"ANDROID!":
+    raise SystemExit("The partition dump is not an Android boot image")
+kernel = unpack_boot(boot, out / "unpacked")
+kernel.rename(out / "kernel")
+identity = kernel_identity(out / "kernel")
+run_logged([default_kallsyms_finder(), out / "kernel", "--output", out / "kallsyms.static.kallsyms", "--base-address", hex(base)], out / "kallsyms-finder.log")
+run_logged([default_vmlinux_to_elf(), out / "kernel", out / "vmlinux.elf", "--base-address", hex(base)], out / "vmlinux-to-elf.log")
+extract_btf(out / "kernel", out / "vmlinux.btf", Path("pahole"))
+
+llvm_nm = shutil.which("llvm-nm")
+if not llvm_nm:
+    raise SystemExit("llvm-nm is required to derive BOPE symbol offsets")
+symbols = parse_symbols(out / "vmlinux.elf", Path(llvm_nm))
+static_base = symbols.get("_text")
+if static_base is None:
+    raise SystemExit("Reconstructed ELF is missing _text")
+values = {"TARGET_KIMAGE_TEXT_BASE": hex(static_base)}
+missing = []
+for macro, (name, delta) in SYMBOLS.items():
+    if name in symbols:
+        values[macro] = hex(symbols[name] - static_base + delta)
+    else:
+        missing.append(name)
+layouts = {}
+for macro, (name, field) in BTF_FIELDS.items():
+    layouts.setdefault(name, btf_layout(out / "vmlinux.btf", name, Path("pahole")))
+    offset = field_offset(layouts[name], field)
+    if offset is None:
+        missing.append(f"{name}.{field}")
+    else:
+        values[macro] = hex(offset)
+for macro, name in BTF_SIZES.items():
+    layouts.setdefault(name, btf_layout(out / "vmlinux.btf", name, Path("pahole")))
+    size = structure_size(layouts[name])
+    if size is None:
+        missing.append(f"sizeof({name})")
+    else:
+        values[macro] = hex(size)
+
+live_text = (out / "kallsyms.live.txt").read_text(errors="replace")
+match = re.search(r"^([0-9a-fA-F]{16})\s+[tT]\s+_text$", live_text, re.MULTILINE)
+if not match:
+    raise SystemExit("Live kallsyms lacks an unmasked _text address")
+slide = int(match.group(1), 16) - static_base
+if not 0 <= slide < 0x200000:
+    raise SystemExit(f"Implausible live KASLR slide: {slide:#x}")
+props = dict(line.split("=", 1) for line in (out / "identity.txt").read_text().splitlines() if "=" in line)
+if props["kernel_release"] != identity.release:
+    raise SystemExit("Live kernel release does not match extracted boot kernel")
+report = {
+    "identity": props,
+    "kernel_image_version": identity.full_version,
+    "boot_sha1": hashlib.sha1(boot.read_bytes()).hexdigest(),
+    "btf_sha256": hashlib.sha256((out / "vmlinux.btf").read_bytes()).hexdigest(),
+    "static_text_base": hex(static_base),
+    "live_kaslr_slide_this_boot_only": hex(slide),
+    "derived_target_macros": values,
+    "missing_derivations": missing,
+    "requires_device_calibration": ["allocator/reclaim timing", "pipe capacity", "launcher stability", "root and KernelSU validation"],
+}
+(out / "bope-contract-evidence.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+if missing:
+    raise SystemExit("Missing BOPE derivations: " + ", ".join(missing))
+print(f"Recovered {len(values)} firmware-bound macros; live slide for this boot: {slide:#x}")
+PY
+
+boot_id_after=$(adb shell "$dirtyinit cat /proc/sys/kernel/random/boot_id" | tr -d '\r\n')
+[[ "$boot_id_after" == "$boot_id_before" ]] || {
+    echo "Boot ID changed during collection; refusing to publish evidence" >&2
+    exit 1
+}
+
+files=(boot.img kernel vmlinux.elf vmlinux.btf kallsyms.static.kallsyms kallsyms.live.txt slabinfo.txt sched_blocked_reason.format identity.txt bope-contract-evidence.json kallsyms-finder.log vmlinux-to-elf.log)
+for name in "${files[@]}"; do
+    [[ -s "$workdir/$name" ]] || { echo "Missing or empty artifact: $name" >&2; exit 1; }
+done
+for name in "${files[@]}"; do
+    mv -- "$workdir/$name" "$output_dir/$name"
+done
+echo "BOPE evidence saved to: $output_dir"

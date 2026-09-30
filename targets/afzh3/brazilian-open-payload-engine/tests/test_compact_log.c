@@ -50,7 +50,7 @@ int main(void) {
                      "verify=4ms total=137ms\n") == NULL)
     return 9;
   if (strstr(output, "[launcher] gate=1/2 temp=37.0C") == NULL) return 5;
-  if (strstr(output, "selection page=7") != NULL) return 6;
+  if (strstr(output, "selection page=7") == NULL) return 6;
   if (strstr(output, "terminal failure") == NULL) return 7;
   if (strstr(output, "BOPE :: Success\n        Root achieved in 47 seconds\n") == NULL) return 11;
   if (!strstr(output, "Root achieved in 47 seconds\n") ||

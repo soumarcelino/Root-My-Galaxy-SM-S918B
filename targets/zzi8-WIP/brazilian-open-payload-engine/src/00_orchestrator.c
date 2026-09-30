@@ -455,6 +455,28 @@ static int do_one_attempt(struct attempt_shared_state *shared,
             "[kaslr] source=forced-p0 base=%016llx p0_offset=%016llx\n",
             (unsigned long long)kernel_base,
             (unsigned long long)p0_offset);
+  } else {
+    if (kernel_base < TARGET_KIMAGE_TEXT_BASE) {
+      fprintf(stderr, "[kaslr] tracefs base below link base\n");
+      return 0;
+    }
+    uint64_t tracefs_offset = kernel_base - TARGET_KIMAGE_TEXT_BASE;
+    if (tracefs_offset > TARGET_KASLR_MAX_SLIDE ||
+        (tracefs_offset & (TARGET_KASLR_ALIGNMENT - 1ULL)) != 0) {
+      fprintf(stderr,
+              "[kaslr] tracefs offset invalid base=%016llx offset=%016llx\n",
+              (unsigned long long)kernel_base,
+              (unsigned long long)tracefs_offset);
+      return 0;
+    }
+    if (has_forced_offset && p0_offset != tracefs_offset) {
+      fprintf(stderr,
+              "[kaslr] cached offset stale cached=%016llx tracefs=%016llx; "
+              "using tracefs\n",
+              (unsigned long long)p0_offset,
+              (unsigned long long)tracefs_offset);
+    }
+    p0_offset = tracefs_offset;
   }
   puts("\x1b[33m[*] \x1b[0mstage=kernel-location-ready");
   __atomic_store_n(&shared->p0_gate_page_struct, 0, __ATOMIC_RELEASE);

@@ -7,13 +7,20 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
-from tools.bope.contract import field_offset, structure_size
+from tools.bope.contract import (
+    derive_kmalloc_geometry,
+    field_offset,
+    parse_enum_values,
+    structure_size,
+)
 from tools.bope.errors import BopeError
 from tools.bope.factory import extract_factory_member, inspect_factory
 from tools.bope.factory_cli import _enforce_exact_runtime_identity
 from tools.bope.kernel import apply_bsdiff
+from tools.bope.kernelsu import this_module_relocation_mismatches
 from tools.bope.ota import inspect_ota
 from tools.bope.target import _kernel_version
 
@@ -233,6 +240,78 @@ struct example {
         self.assertEqual(field_offset(layout, "comm"), 12)
         self.assertEqual(field_offset(layout, "read"), 32)
         self.assertEqual(structure_size(layout), 40)
+
+    def test_derives_kmalloc_rows_and_slots_from_target_evidence(self) -> None:
+        layout = '''
+enum kmalloc_cache_type {
+        KMALLOC_NORMAL   = 0,
+        KMALLOC_DMA      = 0,
+        KMALLOC_CGROUP   = 1,
+        KMALLOC_RECLAIM  = 2,
+        NR_KMALLOC_TYPES = 3,
+};
+'''
+        values = parse_enum_values(layout)
+        geometry = derive_kmalloc_geometry(
+            {"TARGET_PAGE_SIZE": 0x1000, "TARGET_PIPE_OBJECT_SIZE": 0x800},
+            {
+                "TARGET_KMALLOC_NORMAL_TYPE": values["KMALLOC_NORMAL"],
+                "TARGET_KMALLOC_CGROUP_TYPE": values["KMALLOC_CGROUP"],
+                "TARGET_KMALLOC_TYPES": values["NR_KMALLOC_TYPES"],
+            },
+        )
+        self.assertEqual(geometry["TARGET_KMALLOC_BUCKETS"], 14)
+        self.assertEqual(geometry["TARGET_KMALLOC_NORMAL_2K_SLOT"], 11)
+        self.assertEqual(geometry["TARGET_KMALLOC_CGROUP_2K_SLOT"], 25)
+        self.assertEqual(geometry["TARGET_KMALLOC_CACHE_SLOTS"], 42)
+
+    def test_rejects_non_power_of_two_kmalloc_geometry(self) -> None:
+        with self.assertRaises(BopeError):
+            derive_kmalloc_geometry(
+                {"TARGET_PAGE_SIZE": 4096, "TARGET_PIPE_OBJECT_SIZE": 2000},
+                {
+                    "TARGET_KMALLOC_NORMAL_TYPE": 0,
+                    "TARGET_KMALLOC_CGROUP_TYPE": 1,
+                    "TARGET_KMALLOC_TYPES": 3,
+                },
+            )
+
+
+class KernelSuAuditTests(unittest.TestCase):
+    module_layout = '''
+struct module {
+        int (*init)(void);          /*   376     8 */
+        void (*exit)(void);         /*   888     8 */
+};
+/* size: 960, cachelines: 15, members: 2 */
+'''
+
+    @patch("tools.bope.kernelsu._btf_layout")
+    @patch("tools.bope.kernelsu._this_module_relocations")
+    def test_accepts_entry_relocations_at_target_module_fields(
+        self, relocations, layout
+    ) -> None:
+        relocations.return_value = {"init_module": 376, "cleanup_module": 888}
+        layout.return_value = self.module_layout
+        self.assertEqual(
+            this_module_relocation_mismatches(
+                Path("module.ko"), Path("target.btf"), Path("pahole")
+            ),
+            {},
+        )
+
+    @patch("tools.bope.kernelsu._btf_layout")
+    @patch("tools.bope.kernelsu._this_module_relocations")
+    def test_rejects_cleanup_relocation_at_donor_only_offset(
+        self, relocations, layout
+    ) -> None:
+        relocations.return_value = {"init_module": 376, "cleanup_module": 872}
+        layout.return_value = self.module_layout
+        mismatch = this_module_relocation_mismatches(
+            Path("module.ko"), Path("target.btf"), Path("pahole")
+        )
+        self.assertEqual(mismatch["cleanup_module"]["target_offset"], 888)
+        self.assertEqual(mismatch["cleanup_module"]["relocation_offset"], 872)
 
 
 class AppProfileTests(unittest.TestCase):

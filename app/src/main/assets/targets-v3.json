@@ -192,7 +192,7 @@
       ],
       "exploit": {
         "url": "asset://cve-2026-43499-app-zzi8.so",
-        "size": 170280
+        "size": 171096
       },
       "kernelsu": {
         "url": "asset://ksud-next-v3.4.0-zzi8",
@@ -333,6 +333,48 @@
         "SM-S918U"
       ],
       "payloadId": "dm3q-S918USQS8FZF5-ksunext"
+    },
+    {
+      "payloadId": "dm1q-S911U1UES6DYI3-ksunext",
+      "displayName": "Galaxy S23 (base) SM-S911U1 | One UI 7 DYI3 | BOPE + KernelSU Next",
+      "models": [
+        "SM-S911U1"
+      ],
+      "kernelVersions": [
+        "5.15.153"
+      ],
+      "buildDisplays": [
+        "AP3A.240905.015.A2.S911U1UES6DYI3"
+      ],
+      "fingerprints": [
+        "samsung/dm1quew/dm1q:15/AP3A.240905.015.A2/S911U1UES6DYI3:user/release-keys"
+      ],
+      "kernelReleases": [
+        "5.15.153-android13-8-30958972-abS911U1UES6DYI3"
+      ],
+      "kernelVersionInfos": [
+        "#1 SMP PREEMPT Wed Sep 3 06:21:36 UTC 2025"
+      ],
+      "exploit": {
+        "url": "asset://cve-2026-43499-app-dyi3.so",
+        "size": 168808
+      },
+      "helper": {
+        "url": "asset://cve-2026-43499-root-dyi3",
+        "size": 26560
+      },
+      "launcher": {
+        "url": "asset://stability-launcher-dyi3",
+        "size": 22280
+      },
+      "mmFactory": {
+        "url": "asset://mm-exec-factory-dyi3",
+        "size": 1816
+      },
+      "kernelsu": {
+        "url": "asset://ksud-next-v3.4.0-dyi3",
+        "size": 4269136
+      }
     }
   ]
 }

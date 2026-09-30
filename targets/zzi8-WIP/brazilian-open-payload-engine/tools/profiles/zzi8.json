@@ -7,9 +7,9 @@
   "kernel": "5.15.197-android13-8-34343818-abS918BXXUAZZI8",
   "checks": [
     {
-      "name": "target_guard",
-      "file": "src/00_orchestrator.c",
-      "literal": "target_matches()",
+      "name": "target_fingerprint_contract",
+      "file": "src/target.h",
+      "literal": "TARGET_FINGERPRINT",
       "minimum": 1
     },
     {
@@ -82,6 +82,30 @@
       "name": "kmalloc_caches",
       "file": "src/target.h",
       "literal": "0x02067930",
+      "minimum": 1
+    },
+    {
+      "name": "kmalloc_types",
+      "file": "src/target.h",
+      "literal": "#define TARGET_KMALLOC_TYPES 3U",
+      "minimum": 1
+    },
+    {
+      "name": "kmalloc_normal_2k_slot",
+      "file": "src/target.h",
+      "literal": "#define TARGET_KMALLOC_NORMAL_2K_SLOT 11U",
+      "minimum": 1
+    },
+    {
+      "name": "kmalloc_cgroup_2k_slot",
+      "file": "src/target.h",
+      "literal": "#define TARGET_KMALLOC_CGROUP_2K_SLOT 25U",
+      "minimum": 1
+    },
+    {
+      "name": "kmalloc_cache_slots",
+      "file": "src/target.h",
+      "literal": "#define TARGET_KMALLOC_CACHE_SLOTS 42U",
       "minimum": 1
     },
     {

@@ -1,9 +1,25 @@
 {
-  "passed": true,
-  "target": "S918BXXUAZZI8",
-  "vermagic": "5.15.197-android13-8-34343818-abS918BXXUAZZI8 SMP preempt mod_unload modversions aarch64",
-  "undefined_symbols": 203,
-  "missing_symbols": [],
   "btf_mismatches": [],
-  "note": "ZZI8 is the latest One UI 9 Beta 2 firmware. Its BTF layouts match ZZHL for the seven KernelSU structures; all undefined module symbols exist in ZZI8 kallsyms."
+  "btf_structures": [
+    "cred",
+    "task_struct",
+    "work_struct",
+    "completion",
+    "ucounts",
+    "user_struct",
+    "user_namespace",
+    "module"
+  ],
+  "crc_mismatches": {},
+  "matched_symbol_crcs": 139,
+  "missing_crc_targets": [],
+  "missing_symbols": [],
+  "module_version_entries": 139,
+  "note": "Fail-closed ZZI8 audit: donor and target BTF layouts match for eight KernelSU structures, all versioned symbols match target CRCs, and init/cleanup relocations match target struct module offsets.",
+  "passed": true,
+  "relocation_mismatches": {},
+  "sha256": "eb518dd33f782fa4e47f58e16a7148029b96eaff98974e10067b409f9b5ff090",
+  "target": "S918BXXUAZZI8",
+  "undefined_symbols": 203,
+  "vermagic": "5.15.197-android13-8-34343818-abS918BXXUAZZI8 SMP preempt mod_unload modversions aarch64"
 }

@@ -21,6 +21,9 @@ static int capture_logs(char *output, size_t capacity) {
   fprintf(stderr, "[pipe_rw] telemetry stage_ms");
   fprintf(stderr, " locate=120ms reclaim=13ms verify=4ms total=137ms\n");
   fprintf(stderr, "[pipe_rw] selection page=7 candidate=19\n");
+  fprintf(stderr, "[pipe_rw] det: task walk stopped reason=list-head\n");
+  fprintf(stderr, "[pipe_rw] det miss attempt=1/12 reason=cache-select\n");
+  fprintf(stderr, "[pipe_rw] det terminal action=preserve-holder\n");
   fprintf(stderr, "[pipe_rw] terminal failure stage=proof\n");
   fprintf(stderr,
           "[futex-v14] summary gate_seen=1 sig_ok=1 sched_done=1 "
@@ -57,8 +60,11 @@ int main(void) {
                      "verify=4ms total=137ms\n") == NULL)
     return 9;
   if (strstr(output, "[launcher] gate=1/2 temp=37.0C") == NULL) return 5;
-  if (strstr(output, "selection page=7") != NULL) return 6;
+  if (strstr(output, "selection page=7") == NULL) return 6;
   if (strstr(output, "terminal failure") == NULL) return 7;
+  if (strstr(output, "[pipe_rw] det: task walk stopped") == NULL) return 15;
+  if (strstr(output, "[pipe_rw] det miss attempt=1/12") == NULL) return 16;
+  if (strstr(output, "[pipe_rw] det terminal action=") == NULL) return 17;
   if (strstr(output, "[futex-v14] summary gate_seen=1") == NULL) return 13;
   if (strstr(output, "[retry-gate] stable=2/2") == NULL) return 14;
   if (strstr(output, "BOPE :: Success\n        Root achieved in 47 seconds\n") == NULL) return 11;

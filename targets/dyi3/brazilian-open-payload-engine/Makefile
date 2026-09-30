@@ -23,7 +23,8 @@ LAUNCHER_SRC := ../../../stability-launcher/stability-launcher.c
 COMPACT_LOG_HEADER := ../../../native/compact_log.h
 COMPACT_LOG_SRC := ../../../native/compact_log.c
 
-.PHONY: all so launcher tests test-aar-read-plan test-fops-layout test-compact-log clean
+.PHONY: all so launcher tests test-aar-read-plan test-aar-write-plan \
+	test-aar-write-plan-full test-fops-layout test-compact-log clean
 all: $(BIN) $(FACTORY_BIN) $(LAUNCHER_BIN)
 so: $(SOBIN) $(FACTORY_BIN) $(LAUNCHER_BIN)
 launcher: $(LAUNCHER_BIN)
@@ -62,6 +63,14 @@ tests: $(addprefix $(TEST_OUTDIR)/,$(TEST_BINS))
 test-aar-read-plan: | $(TEST_OUTDIR)
 	$(or $(HOST_CC),cc) -O2 -Wall -Wextra -Wno-format-truncation tests/test_aar_read_plan.c -o $(TEST_OUTDIR)/test_aar_read_plan_host
 	$(TEST_OUTDIR)/test_aar_read_plan_host
+
+test-aar-write-plan: | $(TEST_OUTDIR)
+	$(or $(HOST_CC),cc) -O2 -Wall -Wextra -Werror -Wno-format-truncation tests/test_aar_write_plan.c -o $(TEST_OUTDIR)/test_aar_write_plan_host
+	$(TEST_OUTDIR)/test_aar_write_plan_host
+
+test-aar-write-plan-full: | $(TEST_OUTDIR)
+	$(or $(HOST_CC),cc) -O2 -Wall -Wextra -Werror -Wno-format-truncation tests/test_aar_write_plan.c -o $(TEST_OUTDIR)/test_aar_write_plan_host
+	$(TEST_OUTDIR)/test_aar_write_plan_host --full
 
 test-fops-layout: | $(TEST_OUTDIR)
 	$(or $(HOST_CC),cc) -O2 -Wall -Wextra -Werror -Isrc tests/test_fops_layout.c src/04_fake_kernel_objects.c -o $(TEST_OUTDIR)/test_fops_layout_host

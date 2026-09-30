@@ -113,7 +113,7 @@ flowchart TD
         W3["Resolve exact active pipe_buffer<br/>using structure, marker and length"]
         W4{"Deterministic victim found<br/>and descriptor write plan safe?"}
         W5["Legacy fallback:<br/>two 240-pipe banks + another mm leak,<br/>socket reclaim and ring-page resize"]
-        W6["Find kmalloc-2k slabs through vmemmap<br/>scan structural pipe_buffer candidates"]
+        W6["Find kmalloc-2k slabs through vmemmap<br/>using BTF-derived NORMAL/CGROUP rows;<br/>scan structural pipe_buffer candidates"]
         W7["Temporarily forge victim pipe_buffer.page,<br/>offset and len for one-page operation"]
         W8["Prove read and write with two strings<br/>and two 64-bit tags in payload scratch"]
         W9{"Proof passes and original descriptor<br/>is restored after every operation?"}
@@ -297,7 +297,11 @@ table, ashmem operations are redirected to ConfigFS read/write iterators.
 `ASHMEM_SET_NAME` carries the control bytes, and `pread64`/`pwrite64` perform
 the actual access. Before triggering, BOPE simulates the target kernel's real
 word-at-a-time `strscpy()` behavior and rejects any plan whose required bytes
-would be changed by NUL handling.
+would be changed by NUL handling. For writes, `ki_pos` is treated as a free
+parameter while preserving `bin_buffer + ki_pos == target`: the planner tries
+positions congruent modulo 24 address bits and a bounded size slack until the
+control survives exactly. Reads remain exact-length and do not use the PR's
+speculative over-read fallback.
 
 That bootstrap primitive is used to find and prove a pipe victim. For each
 operation, BOPE temporarily rewrites one live `pipe_buffer`, accesses a direct
@@ -305,6 +309,9 @@ map page through the pipe, and restores the original descriptor. String and
 64-bit round trips prove both directions. Once pipe R/W is live, the real
 `ashmem_fops` pointer is restored and verified through its linear-map alias.
 All later reads and writes use the pipe path; ConfigFS is no longer trusted.
+The `kmalloc_caches` row count and NORMAL/CGROUP indices come from the target
+BTF enum, and compile-time relations tie the resulting flat slots to the 2 KiB
+pipe allocation class.
 
 ### Root without editing workqueue globals
 
@@ -335,24 +342,15 @@ read of the current ZZI8 tree for the latest One UI 9 Beta 2 firmware also
 exposed a few implementation details that
 are easy to miss:
 
-1. **The latest One UI 9 Beta 2 firmware's ZZI8 launcher build is not
-   self-contained.** Its Makefile currently
-   reads `../../../../ksu-payload-functional/stability-launcher.c`, a sibling
-   project outside this repository. That file is different from the local
-   `stability-launcher/stability-launcher.c`: the external version uses three
-   baseline samples, a 300-second timeout, terminal pipe-gate failure, no
-   `am kill-all`, and no final two-second delay. The Mermaid follows the
-   external source actually selected by the latest One UI 9 Beta 2 firmware's
-   ZZI8 Makefile.
-2. **The in-process KASLR retry cache loses a tracefs-derived slide.**
-   `kaslr_locate_via_tracefs()` returns the absolute kernel base, but
-   `do_one_attempt()` does not recalculate its local `p0_offset` afterward.
-   The shared field therefore remains zero unless `SLIDE_P0_OFFSET` was
-   already forced. After a safe first-attempt failure, the supervisor can set
-   `SLIDE_P0_OFFSET=0` for its next child even when tracefs found a non-zero
-   slide. The trace log still prints the correct offset, so the Android app can
-   cache it for a later app execution, but that does not repair the current
-   supervisor loop.
+1. **The ZZI8 launcher build is self-contained.** Its Makefile selects
+   `stability-launcher/bope-stability-launcher.c` from this repository and
+   compiles it with the exact ZZI8 target contract and validation gate.
+2. **The in-process KASLR retry cache stores the tracefs-derived slide.**
+   After `kaslr_locate_via_tracefs()` returns an absolute base,
+   `do_one_attempt()` now revalidates and subtracts the link base before
+   publishing `slide_p0_offset`. A cached value that disagrees with a fresh
+   tracefs result is reported as stale and the fresh result wins. A safe retry
+   in the same boot therefore cannot silently turn a non-zero slide into zero.
 3. **Post-mutation recovery is preservation, not an active rewrite.** The
    function named `recover_ashmem_fops()` records a reboot-required checkpoint
    and relies on the allocation keeper to preserve the reclaimed page. The
@@ -387,7 +385,7 @@ are easy to miss:
 
 | Stage | Production source |
 | --- | --- |
-| ZZI8 launcher selection for the latest One UI 9 Beta 2 firmware | [`../Makefile`](../Makefile), which currently points to the external `ksu-payload-functional/stability-launcher.c` |
+| ZZI8 launcher selection for the latest One UI 9 Beta 2 firmware | [`../Makefile`](../Makefile), which selects the in-repository `stability-launcher/bope-stability-launcher.c` |
 | Target contract | [`../src/target.h`](../src/target.h) |
 | Supervisor and complete chain | [`../src/00_orchestrator.c`](../src/00_orchestrator.c) |
 | CPU selection | [`../src/00_cpu_discovery.c`](../src/00_cpu_discovery.c) |

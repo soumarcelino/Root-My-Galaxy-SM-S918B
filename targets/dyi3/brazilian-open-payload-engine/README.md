@@ -41,7 +41,8 @@ cobre **todos** os endereços que a rota determinística pode tocar (varredura d
 
 ```sh
 make test-aar-read-plan test-fops-layout test-compact-log
-cc -O2 -Isrc tests/test_aar_write_plan.c -o /tmp/t && /tmp/t   # ~46 min
+make test-aar-write-plan       # sampled fast regression
+make test-aar-write-plan-full  # exhaustive sweep (~46 min)
 ```
 
 ## KernelSU Next

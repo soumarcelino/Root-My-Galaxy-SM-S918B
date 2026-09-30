@@ -296,21 +296,34 @@ def _layout_mismatch(build: str, target: str) -> dict[str, object] | None:
 
 
 def _this_module_relocations(module: Path) -> dict[str, int]:
-    """Offsets the kernel writes init/cleanup_module into during load_module."""
+    """Return init/exit relocation offsets within ``__this_module``."""
     offsets: dict[str, int] = {}
     with module.open("rb") as stream:
         elf = ELFFile(stream)
-        symbols = elf.get_section_by_name(".symtab")
-        if symbols is None:
+        if elf.get_section_by_name(".symtab") is None:
             raise BopeError(f"{module} has no .symtab; cannot audit relocations")
-        names = [symbol.name for symbol in symbols.iter_symbols()]
         for section in elf.iter_sections():
-            if not (section.name.startswith(".rela") and section.name.endswith("this_module")):
+            if not (
+                section.name.startswith((".rel", ".rela"))
+                and section.name.endswith("this_module")
+            ):
                 continue
+            symbols = elf.get_section(section["sh_link"])
+            if symbols is None or not hasattr(symbols, "get_symbol"):
+                raise BopeError(
+                    f"{module} relocation section {section.name} has no symbol table"
+                )
             for relocation in section.iter_relocations():
-                name = names[relocation["r_info_sym"]]
-                if name in ("init_module", "cleanup_module"):
-                    offsets[name] = relocation["r_offset"]
+                symbol = symbols.get_symbol(relocation["r_info_sym"])
+                if symbol.name not in ("init_module", "cleanup_module"):
+                    continue
+                offset = int(relocation["r_offset"])
+                previous = offsets.setdefault(symbol.name, offset)
+                if previous != offset:
+                    raise BopeError(
+                        f"{module} has conflicting {symbol.name} relocations: "
+                        f"0x{previous:x} and 0x{offset:x}"
+                    )
     return offsets
 
 
@@ -349,13 +362,14 @@ def audit_module(
     target_release: str,
     kallsyms: Path,
     vmlinux: Path,
-    build_module: Path,
+    build_module: Path | None = None,
+    donor_btf: Path | None = None,
     target_btf: Path,
     llvm_nm: Path,
     pahole: Path,
     modinfo: Path,
     modprobe: Path,
-    require_layout_check: bool = False,
+    require_layout_check: bool = True,
     crctab: Path | None = None,
 ) -> dict[str, object]:
     undefined = _undefined_symbols(module, llvm_nm)
@@ -382,13 +396,27 @@ def audit_module(
             layout_source = candidate
             break
     btf_mismatches: dict[str, object] = {}
-    layout_check = "unavailable: no DWARF in " + " or ".join(
-        str(candidate) for candidate in (module, build_module) if candidate is not None
-    )
+    candidates = [candidate for candidate in (module, build_module) if candidate is not None]
+    layout_check = "unavailable: no DWARF in " + " or ".join(map(str, candidates))
+    layout_evidence = False
     if layout_source is not None:
+        layout_evidence = True
         layout_check = f"dwarf:{layout_source}"
         for structure in KSU_BTF_STRUCTURES:
             build = _btf_layout(layout_source, structure, pahole, "dwarf")
+            target = _btf_layout(target_btf, structure, pahole, "btf")
+            mismatch = _layout_mismatch(build, target)
+            if mismatch:
+                btf_mismatches[structure] = mismatch
+    elif donor_btf is not None and donor_btf.is_file():
+        # Retargeting copies a module byte-for-byte apart from vermagic. When
+        # the committed donor module is stripped, its kernel BTF is the only
+        # trustworthy build-side ABI evidence available. Compare parsed
+        # layouts instead of silently skipping the gate.
+        layout_evidence = True
+        layout_check = f"btf:{donor_btf}"
+        for structure in KSU_BTF_STRUCTURES:
+            build = _btf_layout(donor_btf, structure, pahole, "btf")
             target = _btf_layout(target_btf, structure, pahole, "btf")
             mismatch = _layout_mismatch(build, target)
             if mismatch:
@@ -402,7 +430,7 @@ def audit_module(
         and not btf_mismatches
         and not relocation_mismatches
         and vermagic.startswith(target_release + " ")
-        and (layout_source is not None or not require_layout_check)
+        and (layout_evidence or not require_layout_check)
     )
     return {
         "passed": passed,
@@ -416,7 +444,7 @@ def audit_module(
         "crc_mismatches": crc_mismatches,
         "missing_crc_targets": missing_crc_targets,
         "layout_check": layout_check,
-        "build_layout_source": str(build_module),
+        "build_layout_source": str(layout_source or donor_btf or ""),
         "btf_structures": list(KSU_BTF_STRUCTURES),
         "btf_mismatches": btf_mismatches,
         "relocation_mismatches": relocation_mismatches,
@@ -559,13 +587,16 @@ def prepare_kernelsu(
         kallsyms=target_kallsyms,
         vmlinux=target_vmlinux,
         # Retargeting copies the donor module byte-for-byte (only the vermagic
-        # string changes), so the donor's own DWARF is the build-side layout.
+        # string changes). Prefer its DWARF and fall back to the matching
+        # donor-kernel BTF; never let a missing layout source pass silently.
         build_module=donor_module,
+        donor_btf=donor_btf,
         target_btf=target_btf,
         llvm_nm=llvm_nm,
         pahole=pahole,
         modinfo=executable("modinfo"),
         modprobe=executable("modprobe"),
+        require_layout_check=True,
     )
     if not report["passed"]:
         raise BopeError(
