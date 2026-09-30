@@ -29,9 +29,12 @@ class FactoryInfo:
     pre_fingerprint: str
     post_fingerprint: str
     android_version: str
+    target_slug: str | None = None
 
     @property
     def slug(self) -> str:
+        if self.target_slug:
+            return self.target_slug
         match = re.search(r"([A-Z0-9]{4})$", self.post_build)
         if not match:
             raise BopeError(f"cannot derive target slug from {self.post_build!r}")
@@ -50,6 +53,7 @@ def inspect_factory(
     donor_fingerprint: str,
     target_fingerprint: str,
     device: str,
+    target_slug: str | None = None,
 ) -> FactoryInfo:
     if not path.is_file():
         raise BopeError(f"factory firmware archive does not exist: {path}")
@@ -81,6 +85,10 @@ def inspect_factory(
         )
     if donor_build not in donor_fingerprint:
         raise BopeError("donor fingerprint does not contain the donor build")
+    if target_slug is not None and not re.fullmatch(r"[a-z0-9]+", target_slug):
+        raise BopeError(
+            "target slug must contain only lowercase ASCII letters and digits"
+        )
     fingerprint_device = target_fingerprint.split(":", 1)[0].rsplit("/", 1)[-1]
     if fingerprint_device != device:
         raise BopeError(
@@ -96,6 +104,7 @@ def inspect_factory(
         pre_fingerprint=donor_fingerprint,
         post_fingerprint=target_fingerprint,
         android_version=android_version,
+        target_slug=target_slug,
     )
 
 

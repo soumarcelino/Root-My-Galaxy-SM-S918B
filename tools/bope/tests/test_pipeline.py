@@ -118,6 +118,34 @@ class FactoryInspectionTests(unittest.TestCase):
                     device="dm3q",
                 )
 
+    def test_accepts_explicit_slug_for_colliding_firmware_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "factory.zip"
+            self._archive(archive)
+            info = inspect_factory(
+                archive,
+                donor_build=self.donor_build,
+                donor_fingerprint=self.donor_fingerprint,
+                target_fingerprint=self.target_fingerprint,
+                device="dm3q",
+                target_slug="s918ufzi1",
+            )
+        self.assertEqual(info.slug, "s918ufzi1")
+
+    def test_rejects_unsafe_explicit_slug(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "factory.zip"
+            self._archive(archive)
+            with self.assertRaises(BopeError):
+                inspect_factory(
+                    archive,
+                    donor_build=self.donor_build,
+                    donor_fingerprint=self.donor_fingerprint,
+                    target_fingerprint=self.target_fingerprint,
+                    device="dm3q",
+                    target_slug="S918U-FZI1",
+                )
+
     def test_factory_target_checks_fingerprint_and_kernel_version(self) -> None:
         source = '''static int target_matches(void) {
   struct utsname info;

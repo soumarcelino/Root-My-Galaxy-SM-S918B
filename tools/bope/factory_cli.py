@@ -78,6 +78,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("factory", type=Path, help="Samsung Odin factory ZIP")
     parser.add_argument("--fingerprint", required=True, help="exact runtime target fingerprint")
     parser.add_argument("--device", default="dm3q")
+    parser.add_argument(
+        "--target-slug",
+        help=(
+            "explicit lowercase alphanumeric target slug; use this when the "
+            "four-character firmware suffix already exists"
+        ),
+    )
     parser.add_argument("--donor", type=Path, required=True)
     parser.add_argument("--donor-contract", type=Path)
     parser.add_argument(
@@ -283,6 +290,7 @@ def generate(args: argparse.Namespace) -> Path:
         donor_fingerprint=donor_fingerprint,
         target_fingerprint=args.fingerprint,
         device=args.device,
+        target_slug=args.target_slug,
     )
     output_root = (
         args.output_root.expanduser().resolve()

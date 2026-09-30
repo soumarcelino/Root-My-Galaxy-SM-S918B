@@ -291,6 +291,48 @@
         "url": "asset://mm-exec-factory-fzf5",
         "size": 1816
       }
+    },
+    {
+      "buildDisplays": [
+        "BP4A.251205.006.S918USQS8FZF5"
+      ],
+      "displayName": "Galaxy S23 Ultra SM-S918U | S918USQS8FZF5 | KernelSU Next",
+      "exploit": {
+        "size": 171328,
+        "url": "asset://cve-2026-43499-app-s918ufzf5.so"
+      },
+      "fingerprints": [
+        "samsung/dm3qsqw/dm3q:16/BP4A.251205.006/S918USQS8FZF5:user/release-keys"
+      ],
+      "helper": {
+        "size": 26560,
+        "url": "asset://cve-2026-43499-root-s918ufzf5"
+      },
+      "kernelReleases": [
+        "5.15.189-android13-8-33413713-abS918USQS8FZF5"
+      ],
+      "kernelVersionInfos": [
+        "#1 SMP PREEMPT Fri Jun 12 06:10:36 UTC 2026"
+      ],
+      "kernelVersions": [
+        "5.15.189"
+      ],
+      "kernelsu": {
+        "size": 4290936,
+        "url": "asset://ksud-next-v3.4.0-s918ufzf5"
+      },
+      "launcher": {
+        "size": 18736,
+        "url": "asset://stability-launcher-s918ufzf5"
+      },
+      "mmFactory": {
+        "size": 1816,
+        "url": "asset://mm-exec-factory-s918ufzf5"
+      },
+      "models": [
+        "SM-S918U"
+      ],
+      "payloadId": "dm3q-S918USQS8FZF5-ksunext"
     }
   ]
 }
