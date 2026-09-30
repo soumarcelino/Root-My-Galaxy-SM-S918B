@@ -7,11 +7,13 @@ in `src/target.h`.
 Validation:
 
 ```sh
-python3 tools/verify-zzi8-target.py
-make test-aar-read-plan test-fops-layout test-compact-log
+../../../tools/bope-verify-target --header src/target.h \
+  --elf ../firmware/vmlinux_ZZI8.elf --btf ../firmware/vmlinux_ZZI8.btf
+make test-aar-read-plan test-pipe-plan test-umh-binfmt-plan \
+  test-fops-layout test-compact-log
 make so
 ```
 
-The verifier checks 22 symbols, 33 BTF fields, and 5 structure sizes against the
-reconstructed ZZI8 kernel for the latest One UI 9 Beta 2 firmware. Device
-execution is intentionally separate from build/install.
+The verifier checks the symbol/BTF contract and decodes the ARM64 reference to
+the empty static usermode-helper path against the reconstructed ZZI8 kernel.
+Device execution is intentionally separate from build/install.

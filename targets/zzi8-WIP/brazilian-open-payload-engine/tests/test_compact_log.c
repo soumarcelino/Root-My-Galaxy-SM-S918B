@@ -20,6 +20,12 @@ static int capture_logs(char *output, size_t capacity) {
   fprintf(stderr, "\x1b[33m[*] \x1b[0mstage=temporary-root-ready\n");
   fprintf(stderr, "[pipe_rw] telemetry stage_ms");
   fprintf(stderr, " locate=120ms reclaim=13ms verify=4ms total=137ms\n");
+  fprintf(stderr,
+          "[pipe_rw] pre-mutation plan ready base=ffffff8800000000 "
+          "candidates=32\n");
+  fprintf(stderr,
+          "[root_umh] preflight ready helper=/data/local/tmp/r "
+          "request=binfmt-07d0\n");
   fprintf(stderr, "[pipe_rw] selection page=7 candidate=19\n");
   fprintf(stderr, "[pipe_rw] det: task walk stopped reason=list-head\n");
   fprintf(stderr, "[pipe_rw] det miss attempt=1/12 reason=cache-select\n");
@@ -34,6 +40,7 @@ static int capture_logs(char *output, size_t capacity) {
           "mm=704/704 slabs=22 delta=0 readable=1\n");
   fprintf(stderr,
           "[launcher] gate=1/2 temp=37.0C mem=6800MB runnable=1 load=3.0\n");
+  puts("BOPE :: Preflight success");
   rmg_log_success(47);
   fflush(stdout);
   fflush(stderr);
@@ -67,6 +74,9 @@ int main(void) {
   if (strstr(output, "[pipe_rw] det terminal action=") == NULL) return 17;
   if (strstr(output, "[futex-v14] summary gate_seen=1") == NULL) return 13;
   if (strstr(output, "[retry-gate] stable=2/2") == NULL) return 14;
+  if (strstr(output, "[pipe_rw] pre-mutation plan ready") == NULL) return 15;
+  if (strstr(output, "[root_umh] preflight ready") == NULL) return 16;
+  if (strstr(output, "BOPE :: Preflight success") == NULL) return 17;
   if (strstr(output, "BOPE :: Success\n        Root achieved in 47 seconds\n") == NULL) return 11;
   if (!strstr(output, "Root achieved in 47 seconds\n") ||
       strcmp(output + strlen(output) - strlen("Root achieved in 47 seconds\n"),

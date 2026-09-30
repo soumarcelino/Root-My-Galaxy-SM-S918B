@@ -11,8 +11,13 @@ make tests
 ```
 
 Run the host-only regression for configfs AAR address encoding with
-`make test-aar-read-plan`. It includes the three historical addresses whose
-old 256-offset search returned `EOVERFLOW`.
+`make test-aar-read-plan`. It includes the historical crash geometry plus the
+four real read/write addresses rejected by recent ZZI8 runs. Run
+`make test-pipe-plan` to prove that only aligned candidates with complete
+read/write plans can make `pipe_plan.ready` true before mutation.
+Run `make test-umh-binfmt-plan` to pin the real ZZI8 static-helper offset,
+the short replacement path, UID-to-binfmt encoding, and the complete original
+firmware guard bytes used for restoration.
 
 `test_futex_trigger` touches live kernel state and requires the exact current
 boot kernel base. The remaining tests keep their original scope and safety

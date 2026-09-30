@@ -8,8 +8,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-int oss_pipe_rw_pending(void);
-int oss_pipe_rw_service_pending(void);
+/* Allocates the reclaim pipe rings, resolves their known order-3 range, and
+ * preflights every ConfigFS operation. Must complete before futex mutation. */
+int oss_pipe_rw_prepare(uint64_t kernel_base, uint64_t payload_base);
+int oss_pipe_rw_plan_ready(void);
 
 int oss_pipe_rw_install(int fd, uint64_t kernel_base, uint64_t payload_base);
 

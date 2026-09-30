@@ -16,7 +16,7 @@ flowchart TD
     TARGET["target.h firmware contract<br/>identity, symbols, BTF layouts,<br/>object geometry and calibrated limits"]
 
     subgraph APP["1 · Android app and Stability Launcher"]
-        A1["App requires the supported model,<br/>One UI 9 and a build ending in ZZI8"]
+        A1["Match exact model, build, fingerprint,<br/>kernel release and kernel version"]
         A2{"Latest One UI 9 Beta 2<br/>ZZI8 profile matches?"}
         A3["Extract and stage verified artifacts<br/>payload.so, root helper, mm factory,<br/>Stability Launcher and target ksud"]
         A4["Launcher validates mm_struct geometry,<br/>inherited LD_PRELOAD and every ELF"]
@@ -44,6 +44,7 @@ flowchart TD
     subgraph PREFLIGHT["3 · Child preflight and live kernel base"]
         C1["Raise RLIMIT_NOFILE and RLIMIT_NPROC"]
         C2["Validate executable root helper<br/>and freestanding mm exec factory"]
+        C2A["Atomically copy and verify helper at /data/local/tmp/r,<br/>stage UID-encoded invalid binary and<br/>prove ENOEXEC under the exact ELF contract"]
         C3["Resolve an openable ashmem node<br/>boot-id alias, matching device alias,<br/>then canonical /dev/ashmem"]
         C4["Select fastest allowed stable CPU<br/>respect cpuset and Samsung core_ctl;<br/>pin and verify it"]
         C5["Enable sched_blocked_reason in tracefs<br/>and generate blocking I/O activity"]
@@ -77,7 +78,11 @@ flowchart TD
         P1["Compute read/write control blobs for<br/>ashmem_misc.fops, memstart_addr,<br/>kimage_voffset and scratch space"]
         P2["Simulate target strscpy word stores<br/>including NUL and word-tail zeroing"]
         P3{"Every control field survives exactly<br/>and address arithmetic is safe?"}
-        P4["No syscall and no mutation<br/>reject this attempt safely"]
+        P4["Create drain/reclaim pipe banks<br/>and leak one known order-3 base"]
+        P5["Resize all 240 rings to 32 slots,<br/>write unique markers and pre-create<br/>the non-destructive tee pipe"]
+        P6["Enumerate only 0x800-aligned objects<br/>inside the known order-3 range and<br/>preflight every descriptor read/write"]
+        P7{"pipe_plan.ready with at least<br/>one exactly encodable candidate?"}
+        P8["No syscall and no mutation<br/>reject this attempt safely"]
     end
 
     subgraph TRIGGER["6 · Futex PI v14 pointer-write trigger"]
@@ -108,12 +113,10 @@ flowchart TD
     end
 
     subgraph PIPE["8 · Upgrade to pipe-backed physical R/W"]
-        W1["Default deterministic route:<br/>create 240 pipes, resize to 32 slots,<br/>write unique length/content markers"]
-        W2["Walk init_task.tasks backward<br/>find current task, files, fdtable<br/>and each live pipe_inode_info"]
-        W3["Resolve exact active pipe_buffer<br/>using structure, marker and length"]
-        W4{"Deterministic victim found<br/>and descriptor write plan safe?"}
-        W5["Legacy fallback:<br/>two 240-pipe banks + another mm leak,<br/>socket reclaim and ring-page resize"]
-        W6["Find kmalloc-2k slabs through vmemmap<br/>using BTF-derived NORMAL/CGROUP rows;<br/>scan structural pipe_buffer candidates"]
+        W1["Use the pipe banks and order-3 range<br/>frozen by the pre-mutation pipe_plan"]
+        W2["Read only preapproved 0x800-aligned<br/>candidate descriptors; no task walk,<br/>vmemmap guard or new allocation"]
+        W3["Resolve the exact active pipe_buffer<br/>using structure, marker and length"]
+        W4{"Planned victim found and<br/>all stored plans still match?"}
         W7["Temporarily forge victim pipe_buffer.page,<br/>offset and len for one-page operation"]
         W8["Prove read and write with two strings<br/>and two 64-bit tags in payload scratch"]
         W9{"Proof passes and original descriptor<br/>is restored after every operation?"}
@@ -123,23 +126,20 @@ flowchart TD
         W13["Mark FOPS_RESTORED then PIPE_READY<br/>ConfigFS AAR/AAW is abandoned"]
     end
 
-    subgraph ROOT["9 · Native PTY workqueue root bootstrap"]
-        U1["Open a private PTY master/slave pair"]
-        U2["Walk current task and fdtable via pipe R/W<br/>resolve file, tty_file_private and tty_struct"]
-        U3["Validate tty magic, index, image ops,<br/>port pointer and idle self-linked SAK work"]
-        U4["Save original tty ops table<br/>and complete SAK work tail"]
-        U5["Stage subprocess_info, completion,<br/>helper path, --umh and caller UID<br/>inside reclaimed payload page"]
-        U6["Clone tty ops and replace flush_buffer<br/>with CFI-compatible do_SAK"]
-        U7["Convert SELinux enforcing symbol<br/>to linear alias and save original byte"]
-        U8["Mark NATIVE_WORK_SUBMITTED<br/>publish fake work tail and fake ops"]
-        U9["Set SELinux permissive through pipe R/W<br/>and verify readback"]
-        U10["TCFLSH ioctl calls fake flush_buffer<br/>do_SAK queues the existing SAK work<br/>through the kernel native schedule_work path"]
-        U11["Restore original tty ops immediately"]
-        U12["call_usermodehelper_exec_work runs<br/>root helper --umh caller_UID"]
-        U13["Helper verifies euid=0 and UID argument,<br/>sets real/effective UID and GID to 0,<br/>then opens temp_su.sock"]
-        U14["Poll completion and root socket<br/>restore and verify original SAK work tail"]
-        U15{"Root socket ready and TTY restored?"}
-        U16["Clear fake FOPS owner through pipe R/W<br/>mark ROOT_READY and close ashmem FD"]
+    subgraph ROOT["9 · Deterministic binfmt usermode-helper bootstrap"]
+        U1["Derive the linear alias for<br/>kernel_base + static UMH path offset"]
+        U2["Read and require the exact 24-byte<br/>empty-path plus firmware guard"]
+        U3["Revalidate the byte-identical short helper<br/>and four-byte invalid trigger"]
+        U4["Save SELinux enforcing byte,<br/>set permissive and verify readback"]
+        U5["Mark UMH_TRIGGERED; replace exactly<br/>18 static-path bytes and read them back"]
+        U6["Sacrificial child execves the preflighted<br/>invalid binary encoding the caller UID"]
+        U7["Kernel exec_binprm requests binfmt-%04x<br/>and synchronously runs native UMH"]
+        U8["Helper strictly validates -q -- binfmt-UID,<br/>sets UID/GID 0 and forks the daemon"]
+        U9["Immediate helper parent exits;<br/>request_module returns to the trigger"]
+        U10["Restore and verify all original<br/>static-helper guard bytes immediately"]
+        U11["Poll temp_su.sock; on failure restore<br/>SELinux and require a clean reboot"]
+        U12{"Root socket ready and<br/>static helper restored?"}
+        U13["Clear fake FOPS owner through pipe R/W<br/>mark ROOT_READY and close ashmem FD"]
     end
 
     subgraph FINISH["10 · Supervisor, KernelSU Next and final verification"]
@@ -175,18 +175,23 @@ flowchart TD
     A9 -- Stable --> A11 --> A13
     A9 -- No, keep sampling --> A7
     A9 -- 300 second timeout or pipe failure --> A12 --> FAIL
-    A13 --> A14 --> B1 --> B2 --> B4 --> B5 --> B6
-    B6 --> C1 --> C2 --> C3 --> C4 --> C5 --> C6 --> C7
+    A13 --> A14 --> B1 --> B2 --> B3
+
+    B3 -- No --> INCOMPAT
+    B3 -- Yes --> B4 --> B5 --> B6
+    B6 --> C1 --> C2 --> C2A --> C3 --> C4 --> C5 --> C6 --> C7
     C7 -- Yes --> C9
     C7 -- No --> C8
     C8 -- Yes --> C9
     C8 -- No --> SAFE
-    C9 --> G1
+    C9 --> C10
     C2 -. invalid .-> SAFE
+    C2A -. binfmt plan or trace proof failed .-> SAFE
     C3 -. unavailable .-> SAFE
     C4 -. no stable CPU .-> SAFE
+    C10 -. wrong geometry or load .-> SAFE
 
-    G1 --> G2 --> G3 --> G4 --> G5 --> G6
+    C10 --> G1 --> G2 --> G3 --> G4 --> G5 --> G6
     G6 -- No --> SAFE
     G6 -- Yes --> G7 --> G8
     G8 -- No --> SAFE
@@ -197,8 +202,10 @@ flowchart TD
     G15 -- Yes --> G16
     G16 -- No --> SAFE
     G16 -- Yes --> G17 --> P1 --> P2 --> P3
-    P3 -- No --> P4 --> SAFE
-    P3 -- Yes --> F1 --> F2 --> F3 --> F4 --> F5 --> F6
+    P3 -- No --> P8 --> SAFE
+    P3 -- Yes --> P4 --> P5 --> P6 --> P7
+    P7 -- No --> P8
+    P7 -- Yes --> F1 --> F2 --> F3 --> F4 --> F5 --> F6
 
     F6 -- No --> SAFE
     F6 -- Yes --> F7 --> F8
@@ -211,20 +218,19 @@ flowchart TD
     R6 -- No --> UNSAFE
     R6 -- Yes --> R7 --> W1 --> W2 --> W3 --> W4
     W4 -- Yes --> W7
-    W4 -- No --> W5 --> W6 --> W7
+    W4 -- No --> UNSAFE
     W7 --> W8 --> W9
-    W9 -- No, bounded retry up to 12 --> W1
-    W9 -- Terminal restore failure or timeout --> UNSAFE
+    W9 -- No or restore failure --> UNSAFE
     W9 -- Yes --> W10 --> W11 --> W12
     W12 -- No --> UNSAFE
-    W12 -- Yes --> W13 --> U1 --> U2 --> U3 --> U4 --> U5 --> U6 --> U7 --> U8 --> U9 --> U10 --> U11 --> U12 --> U13 --> U14 --> U15
+    W12 -- Yes --> W13 --> U1 --> U2 --> U3 --> U4 --> U5 --> U6 --> U7 --> U8 --> U9 --> U10 --> U11 --> U12
 
-    U1 -. failed before publication .-> UNSAFE
-    U2 -. resolution failed .-> UNSAFE
-    U3 -. validation failed .-> UNSAFE
-    U7 -. alias or read failed .-> UNSAFE
-    U15 -- No --> UNSAFE
-    U15 -- Yes --> U16 --> Z1 --> Z1A
+    U1 -. alias failed .-> UNSAFE
+    U2 -. firmware guard mismatch .-> UNSAFE
+    U3 -. deterministic input changed .-> UNSAFE
+    U10 -. restoration failed .-> UNSAFE
+    U12 -- No --> UNSAFE
+    U12 -- Yes --> U13 --> Z1 --> Z1A
     Z1A -- Yes --> Z2 --> Z3 --> Z4 --> Z5 --> Z6 --> Z7 --> Z8 --> Z9 --> DONE
 
     SAFE --> B7 --> CACHE
@@ -236,12 +242,13 @@ flowchart TD
     Z1A -- No --> HOLD --> FAIL2
 
     TARGET -. identity .-> A1
+    TARGET -. identity .-> B3
     TARGET -. symbols and KASLR geometry .-> C6
     TARGET -. slab and object geometry .-> G10
     TARGET -. futex ABI and timing .-> F1
     TARGET -. ConfigFS and strscpy ABI .-> P1
     TARGET -. pipe and vmemmap ABI .-> W1
-    TARGET -. TTY, workqueue and SELinux ABI .-> U1
+    TARGET -. static UMH offset, guard and SELinux ABI .-> U1
 
     classDef app fill:#e8f1ff,stroke:#2563eb,color:#111827;
     classDef pre fill:#eefcf3,stroke:#15803d,color:#111827;
@@ -252,9 +259,9 @@ flowchart TD
     classDef contract fill:#f3e8ff,stroke:#7e22ce,color:#111827;
 
     class A1,A2,A3,A4,A5,A6,A7,A8,A9,A10,A11,A12,A13,A14 app;
-    class B1,B2,B4,B5,B6,B7,C1,C2,C3,C4,C5,C6,C7,C8,C9 pre;
-    class G1,G2,G3,G4,G5,G6,G7,G8,G9,G10,G11,G12,G13,G14,G15,G16,G17,P1,P2,P3,P4 exploit;
-    class F1,F2,F3,F4,F5,F6,F7,F8,F9,F10,F11,F12,F13,F14,R1,R2,R3,R4,R5,R6,R7,W1,W2,W3,W4,W5,W6,W7,W8,W9,W10,W11,W12,W13,U1,U2,U3,U4,U5,U6,U7,U8,U9,U10,U11,U12,U13,U14,U15,U16 mutation;
+    class B1,B2,B3,B4,B5,B6,B7,C1,C2,C2A,C3,C4,C5,C6,C7,C8,C9,C10 pre;
+    class G1,G2,G3,G4,G5,G6,G7,G8,G9,G10,G11,G12,G13,G14,G15,G16,G17,P1,P2,P3,P4,P5,P6,P7,P8 exploit;
+    class F1,F2,F3,F4,F5,F6,F7,F8,F9,F10,F11,F12,F13,F14,R1,R2,R3,R4,R5,R6,R7,W1,W2,W3,W4,W7,W8,W9,W10,W11,W12,W13,U1,U2,U3,U4,U5,U6,U7,U8,U9,U10,U11,U12,U13 mutation;
     class Z1,Z1A,Z2,Z3,Z4,Z5,Z6,Z7,Z8,Z9,DONE success;
     class SAFE,CACHE,RETRY,RETRY2,FAIL,UNSAFE,HOLD,FAIL2,INCOMPAT fail;
     class TARGET contract;
@@ -303,29 +310,41 @@ positions congruent modulo 24 address bits and a bounded size slack until the
 control survives exactly. Reads remain exact-length and do not use the PR's
 speculative over-read fallback.
 
-That bootstrap primitive is used to find and prove a pipe victim. For each
-operation, BOPE temporarily rewrites one live `pipe_buffer`, accesses a direct
-map page through the pipe, and restores the original descriptor. String and
-64-bit round trips prove both directions. Once pipe R/W is live, the real
-`ashmem_fops` pointer is restored and verified through its linear-map alias.
-All later reads and writes use the pipe path; ConfigFS is no longer trusted.
-The `kmalloc_caches` row count and NORMAL/CGROUP indices come from the target
-BTF enum, and compile-time relations tie the resulting flat slots to the 2 KiB
-pipe allocation class.
+Before the futex trigger, BOPE allocates both pipe banks, leaks the known
+order-3 range that receives their rings, writes markers, and builds a complete
+`pipe_plan`. Only 0x800-aligned object starts whose exact ConfigFS descriptor
+read and write plans survive `strscpy()` are retained. The trigger is blocked
+unless this plan is ready.
 
-### Root without editing workqueue globals
+After mutation, BOPE inspects only those frozen candidates. It does not walk
+`init_task`, edit vmemmap slab metadata, allocate new pipe rings, or discover a
+new address that needs an unplanned ConfigFS operation. For each operation it
+temporarily rewrites the selected `pipe_buffer`, accesses a direct-map page,
+and restores the original descriptor. String and 64-bit round trips prove both
+directions. Once pipe R/W is live, the real `ashmem_fops` pointer is restored
+and ConfigFS is abandoned.
 
-The root stage creates a private PTY and borrows its already initialized SAK
-work item. BOPE preserves the original TTY state, stages a valid
-`subprocess_info`, replaces only the copied TTY `flush_buffer` callback with
-`do_SAK`, and uses `TCFLSH` to reach the kernel's native `schedule_work()`
-path. The queued work executes the root helper through
-`call_usermodehelper_exec_work`.
+### Root through the native binfmt/UMH path
 
-Success requires three independent facts: the work completion changed, the
-root daemon socket accepts a connection, and the original TTY work tail was
-restored byte-for-byte. The global ashmem FOPS and temporary TTY ops are also
-restored before the payload reports temporary root.
+Before mutation, BOPE atomically copies and byte-verifies the helper at the short
+path `/data/local/tmp/r`, writes a four-byte invalid executable whose bytes
+encode the caller UID, and proves its `ENOEXEC` completion under the exact
+kernel identity. The host ELF/BTF verifier separately pins the firmware's
+`call_usermodehelper_setup()` reference and static path bytes. The futex gate
+remains closed if either contract is missing.
+
+ZZI8 has `CONFIG_STATIC_USERMODEHELPER_PATH=""`. After pipe R/W is proven,
+BOPE verifies the exact 24-byte firmware guard at
+`kernel_base + 0x01e14b34`, sets SELinux permissive, and replaces only the
+first 18 bytes with the short helper path. Executing the invalid binary then
+uses the kernel's synchronous `exec_binprm -> request_module -> UMH` path.
+The helper validates `-q -- binfmt-UID`, forks the long-lived root daemon and
+lets its immediate parent exit so the kernel request completes.
+
+The original static bytes are restored and read back immediately after the
+trigger returns. Success requires the exact guard restoration and a reachable
+root socket. There is no task/fdtable walker, PTY, dynamically discovered
+kernel object, forged callback, or manual workqueue insertion.
 
 ### KernelSU is a separate final stage
 
@@ -368,6 +387,15 @@ are easy to miss:
    the preload. It includes target checks, KASLR, grooming, trigger, pipe R/W,
    and temporary-root bootstrap, then rounds up to an integer number of
    seconds. KernelSU late-load happens afterward and is not part of that time.
+6. **Pipe discovery is now frozen before mutation.** The production binary
+   excludes the former task/fdtable walker, vmemmap slab-cache guard, and late
+   fallback. ConfigFS reports `PLAN_REJECTED`, `IO_FAILED`, or `OK`;
+   restoration is never attempted for a plan rejected before its syscall.
+7. **Root bootstrap no longer resolves a PTY.** The firmware verifier decodes
+   the ARM64 `ADRP+ADD` reference in `call_usermodehelper_setup()` and pins the
+   real empty static-helper offset. Runtime preflight proves the exact binfmt
+   module request before futex, and the post-pipe stage restores the complete
+   original guard before accepting the root socket.
 
 ## Shared attempt state
 
@@ -378,8 +406,8 @@ are easy to miss:
 | `ATTEMPT_KERNEL_MUTATED` | The pointer-write route ran and fake FOPS may be globally visible | Preserve allocations; reboot on failure |
 | `ATTEMPT_FOPS_RESTORED` | Real `ashmem_fops` was restored and read back through pipe R/W | Still no retry in this boot |
 | `ATTEMPT_PIPE_READY` | Pipe-backed R/W is proven and owns later kernel access | Continue to root bootstrap |
-| `ATTEMPT_NATIVE_WORK_SUBMITTED` | PTY SAK work may be queued by the kernel | Preserve PTY if restoration is uncertain |
-| `ATTEMPT_ROOT_READY` | Root socket is ready and borrowed TTY state was restored | Report temporary root |
+| `ATTEMPT_UMH_TRIGGERED` | Static helper path is published or the synchronous binfmt request is active | Restore only after confirmed request completion; otherwise preserve state and reboot |
+| `ATTEMPT_ROOT_READY` | Root socket is ready and the static helper guard was restored | Report temporary root |
 
 ## Source map
 
@@ -398,5 +426,5 @@ are easy to miss:
 | Futex PI v14 trigger | [`../src/07_futex_pi_trigger.c`](../src/07_futex_pi_trigger.c) |
 | Bootstrap AAR/AAW | [`../src/08_ashmem_configfs_rw.c`](../src/08_ashmem_configfs_rw.c) |
 | Pipe physical R/W | [`../src/09_pipe_buffer_rw.c`](../src/09_pipe_buffer_rw.c) |
-| PTY workqueue root | [`../src/10_workqueue_umh_root.c`](../src/10_workqueue_umh_root.c) |
+| binfmt/UMH root | [`../src/10_workqueue_umh_root.c`](../src/10_workqueue_umh_root.c) and [`../src/10_umh_binfmt_plan.c`](../src/10_umh_binfmt_plan.c) |
 | Fresh-mm exec factory | [`../factory/mm_exec_factory.c`](../factory/mm_exec_factory.c) |

@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import re
+import struct
+
+from elftools.elf.elffile import ELFFile
 
 from .common import run
 from .errors import BopeError
@@ -132,6 +135,78 @@ DERIVED_RELATIONS = {
     "TARGET_RT_WAITER_PI_RIGHT_OFF": ("TARGET_RT_WAITER_PI_PARENT_OFF", 0x08),
     "TARGET_RT_WAITER_PI_LEFT_OFF": ("TARGET_RT_WAITER_PI_PARENT_OFF", 0x10),
 }
+
+
+STATIC_UMH_GUARD = b"\x00nfc_llcp_send_ui_frame\x00"
+
+
+def _read_elf_virtual(elf_path: Path, address: int, size: int) -> bytes:
+    with elf_path.open("rb") as stream:
+        elf = ELFFile(stream)
+        for segment in elf.iter_segments():
+            if segment["p_type"] != "PT_LOAD":
+                continue
+            start = segment["p_vaddr"]
+            end = start + segment["p_filesz"]
+            if start <= address and address + size <= end:
+                stream.seek(segment["p_offset"] + address - start)
+                return stream.read(size)
+    raise BopeError(f"vmlinux address 0x{address:x} is not backed by PT_LOAD")
+
+
+def _find_elf_bytes(elf_path: Path, needle: bytes) -> list[int]:
+    matches: list[int] = []
+    with elf_path.open("rb") as stream:
+        elf = ELFFile(stream)
+        for segment in elf.iter_segments():
+            if segment["p_type"] != "PT_LOAD":
+                continue
+            data = segment.data()
+            offset = data.find(needle)
+            while offset >= 0:
+                matches.append(segment["p_vaddr"] + offset)
+                offset = data.find(needle, offset + 1)
+    return matches
+
+
+def _aarch64_adrp_add_targets(code: bytes, start: int) -> set[int]:
+    targets: set[int] = set()
+    for offset in range(0, len(code) - 7, 4):
+        adrp, add = struct.unpack_from("<II", code, offset)
+        if adrp & 0x9F000000 != 0x90000000:
+            continue
+        if add & 0xFF000000 != 0x91000000:
+            continue
+        register = adrp & 0x1F
+        if add & 0x1F != register or (add >> 5) & 0x1F != register:
+            continue
+        immediate = (((adrp >> 5) & 0x7FFFF) << 2) | ((adrp >> 29) & 0x3)
+        if immediate & (1 << 20):
+            immediate -= 1 << 21
+        page = ((start + offset) & ~0xFFF) + (immediate << 12)
+        add_immediate = (add >> 10) & 0xFFF
+        if add & (1 << 22):
+            add_immediate <<= 12
+        targets.add(page + add_immediate)
+    return targets
+
+
+def _find_static_umh_guard_address(
+    elf_path: Path, symbols: dict[str, int]
+) -> int:
+    matches = _find_elf_bytes(elf_path, STATIC_UMH_GUARD)
+    setup = symbols.get("call_usermodehelper_setup")
+    if setup is None:
+        raise BopeError("required kernel symbol is missing: call_usermodehelper_setup")
+    code = _read_elf_virtual(elf_path, setup, 0x100)
+    referenced = sorted(set(matches) & _aarch64_adrp_add_targets(code, setup))
+    if len(referenced) != 1:
+        rendered = ", ".join(f"0x{address:x}" for address in matches[:8])
+        raise BopeError(
+            "expected call_usermodehelper_setup to reference one empty static "
+            f"UMH guard, found {len(referenced)}; candidates: {rendered or 'none'}"
+        )
+    return referenced[0]
 
 
 @dataclass(frozen=True)
@@ -371,6 +446,10 @@ def derive_contract(
     )
 
     values: dict[str, int] = {"TARGET_KIMAGE_TEXT_BASE": base}
+    if "TARGET_STATIC_UMH_PATH_OFF" in old_numeric:
+        values["TARGET_STATIC_UMH_PATH_OFF"] = (
+            _find_static_umh_guard_address(elf, symbols) - base
+        )
     for macro, (symbol, delta) in SYMBOLS.items():
         if symbol not in symbols:
             raise BopeError(f"required kernel symbol is missing: {symbol}")
@@ -439,6 +518,31 @@ def verify_contract(
     if base is None:
         errors.append("missing TARGET_KIMAGE_TEXT_BASE")
         base = 0
+    if "TARGET_STATIC_UMH_PATH_OFF" in macros:
+        static_umh_address = base + macros["TARGET_STATIC_UMH_PATH_OFF"]
+        try:
+            actual_guard = _read_elf_virtual(
+                elf, static_umh_address, len(STATIC_UMH_GUARD)
+            )
+            referenced_address = _find_static_umh_guard_address(elf, symbols)
+        except BopeError as error:
+            errors.append(str(error))
+        else:
+            if actual_guard != STATIC_UMH_GUARD:
+                errors.append(
+                    "TARGET_STATIC_UMH_PATH_OFF: header does not point at "
+                    "the empty static helper guard"
+                )
+            elif static_umh_address != referenced_address:
+                errors.append(
+                    "TARGET_STATIC_UMH_PATH_OFF: header points at "
+                    f"0x{static_umh_address:x}, call_usermodehelper_setup "
+                    f"references 0x{referenced_address:x}"
+                )
+            else:
+                checks["TARGET_STATIC_UMH_PATH_OFF"] = (
+                    macros["TARGET_STATIC_UMH_PATH_OFF"]
+                )
     for macro, (symbol, delta) in SYMBOLS.items():
         expected = symbols.get(symbol)
         actual = macros.get(macro)

@@ -24,7 +24,8 @@ COMPACT_LOG_HEADER := ../../../native/compact_log.h
 COMPACT_LOG_SRC := ../../../native/compact_log.c
 
 .PHONY: all so launcher tests test-aar-read-plan test-aar-write-plan \
-	test-aar-write-plan-full test-fops-layout test-compact-log clean
+	test-aar-write-plan-full test-pipe-plan test-umh-binfmt-plan \
+	test-fops-layout test-compact-log clean
 all: $(BIN) $(FACTORY_BIN) $(LAUNCHER_BIN)
 so: $(SOBIN) $(FACTORY_BIN) $(LAUNCHER_BIN)
 launcher: $(LAUNCHER_BIN)
@@ -32,9 +33,9 @@ launcher: $(LAUNCHER_BIN)
 $(OUTDIR):
 	mkdir -p $@
 
-SRCS := src/00_orchestrator.c src/00_cpu_discovery.c src/01_kernel_base_tracefs.c src/02_slab_cache_probe.c src/04_fake_kernel_objects.c src/05_mm_slab_grooming.c src/06_signal_frame_payload.c src/07_futex_pi_trigger.c src/08_ashmem_configfs_rw.c src/09_pipe_buffer_rw.c src/10_workqueue_umh_root.c
+SRCS := src/00_orchestrator.c src/00_cpu_discovery.c src/01_kernel_base_tracefs.c src/02_slab_cache_probe.c src/04_fake_kernel_objects.c src/05_mm_slab_grooming.c src/06_signal_frame_payload.c src/07_futex_pi_trigger.c src/08_ashmem_configfs_rw.c src/09_pipe_plan.c src/09_pipe_buffer_rw.c src/10_umh_binfmt_plan.c src/10_workqueue_umh_root.c
 
-$(BIN) $(SOBIN): src/target.h src/90_diagnostic_checkpoint.h src/03_mm_address_sidechannel/mm_address_leak.h $(COMPACT_LOG_HEADER) $(COMPACT_LOG_SRC)
+$(BIN) $(SOBIN): src/target.h src/09_pipe_plan.h src/10_umh_binfmt_plan.h src/90_diagnostic_checkpoint.h src/03_mm_address_sidechannel/mm_address_leak.h $(COMPACT_LOG_HEADER) $(COMPACT_LOG_SRC)
 
 $(BIN): $(SRCS) | $(OUTDIR)
 	$(TARGET_CC) -fPIE -pie -O2 -g0 -Wall -Wextra -Wno-unused-parameter -Isrc -include $(COMPACT_LOG_HEADER) $(SRCS) $(COMPACT_LOG_SRC) -pthread -o $@
@@ -72,6 +73,14 @@ test-aar-write-plan: | $(TEST_OUTDIR)
 test-aar-write-plan-full: | $(TEST_OUTDIR)
 	$(or $(HOST_CC),cc) -O2 -Wall -Wextra -Werror -Wno-format-truncation tests/test_aar_write_plan.c -o $(TEST_OUTDIR)/test_aar_write_plan_host
 	$(TEST_OUTDIR)/test_aar_write_plan_host --full
+
+test-pipe-plan: | $(TEST_OUTDIR)
+	$(or $(HOST_CC),cc) -O2 -Wall -Wextra -Werror -Wno-format-truncation -Isrc tests/test_pipe_plan.c src/08_ashmem_configfs_rw.c src/09_pipe_plan.c -o $(TEST_OUTDIR)/test_pipe_plan_host
+	$(TEST_OUTDIR)/test_pipe_plan_host
+
+test-umh-binfmt-plan: | $(TEST_OUTDIR)
+	$(or $(HOST_CC),cc) -O2 -Wall -Wextra -Werror -Isrc tests/test_umh_binfmt_plan.c src/10_umh_binfmt_plan.c -o $(TEST_OUTDIR)/test_umh_binfmt_plan_host
+	$(TEST_OUTDIR)/test_umh_binfmt_plan_host
 
 test-fops-layout: | $(TEST_OUTDIR)
 	$(or $(HOST_CC),cc) -O2 -Wall -Wextra -Werror -Isrc tests/test_fops_layout.c src/04_fake_kernel_objects.c -o $(TEST_OUTDIR)/test_fops_layout_host

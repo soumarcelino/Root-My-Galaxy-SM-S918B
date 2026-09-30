@@ -160,6 +160,9 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
+private const val EXTRA_DEBUG_CAMPAIGN_INSTALL = "debug_campaign_install"
+private const val EXTRA_DEBUG_CAMPAIGN_PROFILE_ID = "debug_campaign_profile_id"
+
 class MainActivity : ComponentActivity() {
     private val installViewModel by viewModels<InstallViewModel>()
     private var resumedOnce = false
@@ -179,6 +182,17 @@ class MainActivity : ComponentActivity() {
         advancedMode = AppPreferences.advancedMode(this)
         optimizeOnExploit = AppPreferences.optimizeOnExploit(this)
         skipStabilityLauncher = AppPreferences.skipStabilityLauncher(this)
+        if (BuildConfig.DEBUG &&
+            intent.getBooleanExtra(EXTRA_DEBUG_CAMPAIGN_INSTALL, false)
+        ) {
+            val installer = Intent(this, InstallActivity::class.java)
+                .putExtra(InstallActivity.EXTRA_INSTALL_REQUEST_ID, UUID.randomUUID().toString())
+            intent.getStringExtra(EXTRA_DEBUG_CAMPAIGN_PROFILE_ID)?.let {
+                installer.putExtra(InstallActivity.EXTRA_PROFILE_ID, it)
+            }
+            intent.removeExtra(EXTRA_DEBUG_CAMPAIGN_INSTALL)
+            startActivity(installer)
+        }
         setContent {
             RootMyGalaxyTheme(accentColor = accentColor, themeMode = themeMode) {
                 RootApp(

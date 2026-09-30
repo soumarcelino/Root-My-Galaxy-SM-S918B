@@ -29,6 +29,7 @@
 #define SH_PATH "/system/bin/sh"
 #define KSU_LOADER_PATH "/data/local/tmp/ksud-selected"
 #define LOGCAT_PATH "/system/bin/logcat"
+#define BINFMT_MODULE_PREFIX "binfmt-"
 
 static uid_t allowed_client_uid = 2000;
 
@@ -927,6 +928,63 @@ static int daemon_main(void) {
   }
 }
 
+static int parse_binfmt_uid(const char *module_name, uid_t *uid_out) {
+  if (!module_name || !uid_out ||
+      strncmp(module_name, BINFMT_MODULE_PREFIX,
+              sizeof(BINFMT_MODULE_PREFIX) - 1) != 0 ||
+      strlen(module_name) != sizeof(BINFMT_MODULE_PREFIX) - 1 + 4) {
+    return 0;
+  }
+  uint32_t value = 0;
+  const char *hex = module_name + sizeof(BINFMT_MODULE_PREFIX) - 1;
+  for (size_t i = 0; i < 4; i++) {
+    unsigned int digit;
+    if (hex[i] >= '0' && hex[i] <= '9') {
+      digit = (unsigned int)(hex[i] - '0');
+    } else if (hex[i] >= 'a' && hex[i] <= 'f') {
+      digit = (unsigned int)(hex[i] - 'a') + 10U;
+    } else {
+      return 0;
+    }
+    value = (value << 4) | digit;
+  }
+  if (value == 0 || value > UINT16_MAX) {
+    return 0;
+  }
+  *uid_out = (uid_t)value;
+  return 1;
+}
+
+/* request_module() invokes the configured path with
+ * argv = {modprobe_path, "-q", "--", module_name}. It waits for this process,
+ * so the immediate helper must exit after forking the long-lived daemon. */
+static int binfmt_umh_main(int argc, char **argv) {
+  uid_t client_uid = 0;
+  if (geteuid() != 0 || argc != 4 || strcmp(argv[1], "-q") != 0 ||
+      strcmp(argv[2], "--") != 0 ||
+      !parse_binfmt_uid(argv[3], &client_uid)) {
+    return 124;
+  }
+  allowed_client_uid = client_uid;
+  if (setresgid(0, 0, 0) != 0 || setresuid(0, 0, 0) != 0 ||
+      getuid() != 0 || geteuid() != 0 || getgid() != 0 || getegid() != 0) {
+    return 125;
+  }
+  pid_t daemon = fork();
+  if (daemon < 0) {
+    return 126;
+  }
+  if (daemon > 0) {
+    return 0;
+  }
+  prctl(PR_SET_PDEATHSIG, 0);
+  if (setsid() < 0) {
+    _exit(127);
+  }
+  prctl(PR_SET_NAME, "cve43499-root", 0, 0, 0);
+  _exit(daemon_main());
+}
+
 static int umh_main(int argc, char **argv) {
   if (geteuid() != 0) {
     return 126;
@@ -1060,17 +1118,10 @@ static pid_t follow_payload_log(const char *path, int transport_fd,
   }
 }
 
-static int payload_runner_main(int argc, char **argv) {
-  if (argc != 5) {
-    return 2;
-  }
-
+static int prepare_runner_log(const char *path, int *transport_fd_out) {
   int transport_fd = fcntl(STDOUT_FILENO, F_DUPFD_CLOEXEC, 3);
-  if (transport_fd < 0) {
-    return errno;
-  }
-
-  int log_fd = open(argv[4], O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+  if (transport_fd < 0) return errno;
+  int log_fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
   if (log_fd < 0 || dup2(log_fd, STDOUT_FILENO) < 0 ||
       dup2(log_fd, STDERR_FILENO) < 0) {
     int saved_errno = errno ? errno : EIO;
@@ -1084,8 +1135,34 @@ static int payload_runner_main(int argc, char **argv) {
   }
   if (setvbuf(stdout, NULL, _IONBF, 0) != 0 ||
       setvbuf(stderr, NULL, _IONBF, 0) != 0) {
+    close(transport_fd);
     return errno ? errno : EIO;
   }
+  *transport_fd_out = transport_fd;
+  return 0;
+}
+
+static int follow_runner_child(const char *path, int transport_fd,
+                               pid_t child) {
+  int status = 0;
+  pid_t waited = follow_payload_log(path, transport_fd, child, &status);
+  if (waited < 0) {
+    int saved_errno = errno;
+    relay_payload_log_tail(path, transport_fd);
+    close(transport_fd);
+    return saved_errno;
+  }
+  close(transport_fd);
+  if (WIFEXITED(status)) return WEXITSTATUS(status);
+  if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+  return ECHILD;
+}
+
+static int payload_runner_main(int argc, char **argv) {
+  if (argc != 5) return 2;
+  int transport_fd = -1;
+  int setup_error = prepare_runner_log(argv[4], &transport_fd);
+  if (setup_error != 0) return setup_error;
 
   /*
    * RDB can drop while the allocator search is still running.  Keep a
@@ -1101,23 +1178,7 @@ static int payload_runner_main(int argc, char **argv) {
     return errno;
   }
   if (payload_pid > 0) {
-    int status = 0;
-    pid_t waited = follow_payload_log(argv[4], transport_fd, payload_pid,
-                                      &status);
-    if (waited < 0) {
-      int saved_errno = errno;
-      relay_payload_log_tail(argv[4], transport_fd);
-      close(transport_fd);
-      return saved_errno;
-    }
-    close(transport_fd);
-    if (WIFEXITED(status)) {
-      return WEXITSTATUS(status);
-    }
-    if (WIFSIGNALED(status)) {
-      return 128 + WTERMSIG(status);
-    }
-    return ECHILD;
+    return follow_runner_child(argv[4], transport_fd, payload_pid);
   }
 
   close(transport_fd);
@@ -1150,10 +1211,80 @@ static int payload_runner_main(int argc, char **argv) {
   return 0;
 }
 
+/* Keep the stability gate and subsequent payload alive if the screen turns
+ * off, RDB drops, or the Shizuku RemoteProcess binder disappears. The parent
+ * remains a live log relay while available; the session-owning child has no
+ * parent-death signal and writes the complete run to a persistent file. */
+static int launcher_runner_main(int argc, char **argv) {
+  if (argc != 7) return 2;
+  int transport_fd = -1;
+  int setup_error = prepare_runner_log(argv[6], &transport_fd);
+  if (setup_error != 0) return setup_error;
+
+  signal(SIGHUP, SIG_IGN);
+  pid_t launcher_pid = fork();
+  if (launcher_pid < 0) {
+    int saved_errno = errno;
+    close(transport_fd);
+    return saved_errno;
+  }
+  if (launcher_pid > 0) {
+    return follow_runner_child(argv[6], transport_fd, launcher_pid);
+  }
+
+  close(transport_fd);
+  signal(SIGHUP, SIG_IGN);
+  if (prctl(PR_SET_PDEATHSIG, 0) != 0 || setsid() < 0) {
+    return errno ? errno : EPERM;
+  }
+  prctl(PR_SET_NAME, "cve43499-gate", 0, 0, 0);
+
+  char launcher_path[PATH_MAX];
+  char payload_path[PATH_MAX];
+  char helper_path[PATH_MAX];
+  char factory_path[PATH_MAX];
+  int has_factory = strcmp(argv[5], "-") != 0;
+  if (!realpath(argv[2], launcher_path) ||
+      !realpath(argv[3], payload_path) ||
+      !realpath(argv[4], helper_path) ||
+      (has_factory && !realpath(argv[5], factory_path))) {
+    dprintf(STDERR_FILENO,
+            "[runner-live] launcher input realpath failed errno=%d\n", errno);
+    return errno ? errno : ENOENT;
+  }
+
+  char *child_argv[9];
+  size_t next = 0;
+  child_argv[next++] = launcher_path;
+  child_argv[next++] = "--payload";
+  child_argv[next++] = payload_path;
+  child_argv[next++] = "--helper";
+  child_argv[next++] = helper_path;
+  if (has_factory) {
+    child_argv[next++] = "--mm-factory";
+    child_argv[next++] = factory_path;
+  }
+  child_argv[next] = NULL;
+  dprintf(STDERR_FILENO,
+          "[runner-live] detached launcher pid=%d log=%s\n", (int)getpid(),
+          argv[6]);
+  execv(launcher_path, child_argv);
+  dprintf(STDERR_FILENO, "[runner-live] launcher exec failed errno=%d\n",
+          errno);
+  return errno ? errno : ENOEXEC;
+}
+
 int main(int argc, char **argv) {
   signal(SIGPIPE, SIG_IGN);
+  if (argc == 4 && strcmp(argv[1], "-q") == 0 &&
+      strcmp(argv[2], "--") == 0) {
+    return binfmt_umh_main(argc, argv);
+  }
   if (argc >= 2 && strcmp(argv[1], "--run-payload") == 0) {
     return payload_runner_main(argc, argv);
+  }
+  if (argc >= 2 && strcmp(argv[1], "--run-launcher") == 0) {
+    return launcher_runner_main(argc, argv);
   }
   if (argc >= 2 && strcmp(argv[1], "--daemon") == 0) {
     return daemon_main();

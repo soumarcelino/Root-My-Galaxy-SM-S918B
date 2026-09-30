@@ -96,6 +96,7 @@ static int rmg_should_emit(const char *line, size_t length) {
       "[immediate] restore",
       "[immediate] fake fops",
       "[pipe_rw] telemetry stage_ms",
+      "[pipe_rw] pre-mutation plan ready",
       "[pipe_rw] ready",
       /* The deterministic path's diagnostics decide the outcome: its prints
        * carry the walk stop reason, the victim it resolved, and whether it
@@ -110,6 +111,10 @@ static int rmg_should_emit(const char *line, size_t length) {
       "[root_umh] result",
       "[root_umh] native PTY work",
       "[root_umh] selinux restore=",
+      "[root_umh] preflight ready",
+      "[root_umh] binfmt result",
+      "[root_umh] SELinux restore=",
+      "BOPE :: Preflight success",
       "[holder]",
       "[recovery]",
       "[supervisor]",

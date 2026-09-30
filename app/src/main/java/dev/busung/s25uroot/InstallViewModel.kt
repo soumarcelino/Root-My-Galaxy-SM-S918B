@@ -1,6 +1,7 @@
 package dev.busung.s25uroot
 
 import android.app.Application
+import android.os.PowerManager
 import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -193,6 +194,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 probeOutput = mutableState.value.probeOutput,
             )
             startHistory()
+            val wakeLock = acquireInstallWakeLock()
             try {
                 ensureShizukuReady()
                 awaitMinimumUptime()
@@ -221,6 +223,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 finishHistory(InstallRunResult.Succeeded)
             } catch (error: Throwable) {
                 handleRunFailure(error)
+            } finally {
+                if (wakeLock?.isHeld == true) wakeLock.release()
             }
         }
     }
@@ -408,10 +412,13 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 val launcherEnv = buildList {
                     cachedP0Offset(bootToken)?.let { add("$P0_OFFSET_ENV=$it") }
                 }.toTypedArray()
-                val command = "exec ${shellQuote(stagedLauncher.absolutePath)} " +
-                    "--payload ${shellQuote(stagedPayload.absolutePath)} " +
-                    "--helper ${shellQuote(helper.absolutePath)}" +
-                    (stagedFactory?.let { " --mm-factory ${shellQuote(it.absolutePath)}" } ?: "") +
+                val factoryArgument = stagedFactory?.absolutePath ?: "-"
+                val command = "exec ${shellQuote(helper.absolutePath)} --run-launcher " +
+                    "${shellQuote(stagedLauncher.absolutePath)} " +
+                    "${shellQuote(stagedPayload.absolutePath)} " +
+                    "${shellQuote(helper.absolutePath)} " +
+                    "${shellQuote(factoryArgument)} " +
+                    "${shellQuote(SHIZUKU_LAUNCH_LOG_PATH)}" +
                     " 2>&1"
                 ShizukuController.exec(
                     arrayOf("/system/bin/sh", "-c", command),
@@ -423,17 +430,14 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 mutableListOf("/system/bin/true")
             } else {
                 mutableListOf(
-                    launcher.absolutePath,
-                    "--payload",
-                    payload.absolutePath,
-                    "--helper",
                     helper.absolutePath,
-                ).apply {
-                    mmFactory?.let {
-                        add("--mm-factory")
-                        add(it.absolutePath)
-                    }
-                }
+                    "--run-launcher",
+                    launcher.absolutePath,
+                    payload.absolutePath,
+                    helper.absolutePath,
+                    mmFactory?.absolutePath ?: "-",
+                    File(app.filesDir, "rmg-launcher-run.log").absolutePath,
+                )
             }
             val processBuilder = ProcessBuilder(command).redirectErrorStream(true)
             processBuilder.environment().apply {
@@ -773,16 +777,20 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     private fun cachedP0Offset(bootToken: String?): String? {
         if (bootToken == null) return null
         val stored = app.getSharedPreferences(P0_CACHE, Application.MODE_PRIVATE)
-        if (stored.getString(P0_CACHE_BOOT_TOKEN, null) != bootToken) return null
-        return stored.getString(P0_CACHE_OFFSET, null)
+        if (stored.getString(P0_CACHE_BOOT_TOKEN, null) != bootToken) {
+            stored.edit().clear().apply()
+            return null
+        }
+        val raw = stored.getString(P0_CACHE_OFFSET, null)
+        val normalized = normalizeP0Offset(raw)
+        if (normalized == null) stored.edit().clear().apply()
+        return normalized
     }
 
     private fun cacheP0Offset(bootToken: String?, log: String) {
         if (bootToken == null) return
         val match = P0_OFFSET_PATTERN.findAll(log).lastOrNull() ?: return
-        val offset = match.groupValues[1].toLongOrNull(16) ?: return
-        if (offset !in 0..P0_OFFSET_MAX || offset and P0_OFFSET_MASK != 0L) return
-        val value = "0x${offset.toString(16)}"
+        val value = normalizeP0Offset(match.groupValues[1]) ?: return
         val stored = app.getSharedPreferences(P0_CACHE, Application.MODE_PRIVATE)
         if (stored.getString(P0_CACHE_BOOT_TOKEN, null) == bootToken &&
             stored.getString(P0_CACHE_OFFSET, null) == value
@@ -819,6 +827,16 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         } else {
             source
         }
+
+    private fun acquireInstallWakeLock(): PowerManager.WakeLock? =
+        runCatching {
+            app.getSystemService(PowerManager::class.java)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "RootMyGalaxy:install")
+                .apply {
+                    setReferenceCounted(false)
+                    acquire(INSTALL_WAKE_LOCK_MILLIS)
+                }
+        }.getOrNull()
 
     private fun shizukuEnabled(): Boolean = true
 
@@ -961,14 +979,14 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private const val P0_CACHE_BOOT_TOKEN = "kernel_boot_id"
         private const val P0_CACHE_OFFSET = "offset"
         private const val P0_OFFSET_ENV = "SLIDE_P0_OFFSET"
-        private const val P0_OFFSET_MAX = 0x1f0000L
-        private const val P0_OFFSET_MASK = 0xffffL
         private const val SHIZUKU_HELPER_PATH = "/data/local/tmp/ksu-helper"
         private const val SHIZUKU_PAYLOAD_PATH = "/data/local/tmp/ksu-payload"
         private const val SHIZUKU_LAUNCHER_PATH = "/data/local/tmp/stability-launcher"
+        private const val SHIZUKU_LAUNCH_LOG_PATH = "/data/local/tmp/rmg-launcher-run.log"
         private const val SHIZUKU_MM_FACTORY_PATH = "/data/local/tmp/mm-exec-factory"
         private const val SHIZUKU_KSUD_PATH = "/data/local/tmp/ksud-s25u-kdp"
         private const val SHIZUKU_KSUD_STAGE_PATH = "/data/local/tmp/.ksud-stage"
+        private const val INSTALL_WAKE_LOCK_MILLIS = 1_200_000L
         private val LOG_POLL_INTERVAL = 1_000.milliseconds
         private val ANSI_ESCAPE = Regex("\u001B\\[[0-?]*[ -/]*[@-~]")
         private val MODULE_PREFIX = Regex("^\\[[A-Za-z0-9][A-Za-z0-9_-]*]")
@@ -999,4 +1017,12 @@ internal fun directPayloadEnvironment(
     put("KSNITCH_REPEAT", "64")
     put("LD_PRELOAD", payloadPath)
     p0Offset?.let { put("SLIDE_P0_OFFSET", it) }
+}
+
+internal fun normalizeP0Offset(raw: String?): String? {
+    val text = raw?.trim()?.removePrefix("0x")?.removePrefix("0X")
+        ?.takeIf(String::isNotEmpty) ?: return null
+    val offset = text.toLongOrNull(16) ?: return null
+    if (offset !in 0L..0x1f8000L || offset and 0x7fffL != 0L) return null
+    return "0x${offset.toString(16)}"
 }

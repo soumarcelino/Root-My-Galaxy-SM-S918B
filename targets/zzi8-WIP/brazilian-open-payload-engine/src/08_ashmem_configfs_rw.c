@@ -324,7 +324,8 @@ int oss_kernel_write_plan_supported(uint64_t target_addr, size_t len) {
   return prepare_configfs_write_control(target_addr, len, &plan, control);
 }
 
-int oss_kernel_read(int fd, uint64_t target_addr, void *buf, size_t len) {
+enum oss_kernel_io_result oss_kernel_read_result(
+    int fd, uint64_t target_addr, void *buf, size_t len) {
   struct configfs_read_plan plan;
   unsigned char control[TARGET_CONFIGFS_CONTROL_LEN];
   if (!buf ||
@@ -333,7 +334,7 @@ int oss_kernel_read(int fd, uint64_t target_addr, void *buf, size_t len) {
             "[aar_aaw] unsafe read plan rejected fd=%d addr=%016llx len=%zu "
             "errno=%d(%s)\n",
             fd, (unsigned long long)target_addr, len, errno, strerror(errno));
-    return 0;
+    return OSS_KERNEL_IO_PLAN_REJECTED;
   }
 
   errno = 0;
@@ -344,7 +345,7 @@ int oss_kernel_read(int fd, uint64_t target_addr, void *buf, size_t len) {
             "errno=%d(%s)\n",
             fd, (unsigned long long)target_addr, len, saved_errno,
             strerror(saved_errno));
-    return 0;
+    return OSS_KERNEL_IO_FAILED;
   }
 
   errno = 0;
@@ -355,13 +356,13 @@ int oss_kernel_read(int fd, uint64_t target_addr, void *buf, size_t len) {
             "[aar_aaw] pread64(fd=%d, addr=%016llx, len=%zu) ret=%zd errno=%d(%s)\n",
             fd, (unsigned long long)target_addr, len, n, saved_errno,
             strerror(saved_errno));
-    return 0;
+    return OSS_KERNEL_IO_FAILED;
   }
-  return 1;
+  return OSS_KERNEL_IO_OK;
 }
 
-int oss_kernel_write(int fd, uint64_t target_addr, const void *buf,
-                      size_t len) {
+enum oss_kernel_io_result oss_kernel_write_result(
+    int fd, uint64_t target_addr, const void *buf, size_t len) {
   struct configfs_write_plan plan;
   unsigned char control[TARGET_CONFIGFS_CONTROL_LEN];
   if (!buf ||
@@ -370,7 +371,7 @@ int oss_kernel_write(int fd, uint64_t target_addr, const void *buf,
             "[aar_aaw] unsafe write plan rejected fd=%d addr=%016llx len=%zu "
             "errno=%d(%s)\n",
             fd, (unsigned long long)target_addr, len, errno, strerror(errno));
-    return 0;
+    return OSS_KERNEL_IO_PLAN_REJECTED;
   }
   errno = 0;
   if (set_ashmem_name_blob(fd, control, sizeof(control)) != 0) {
@@ -380,7 +381,7 @@ int oss_kernel_write(int fd, uint64_t target_addr, const void *buf,
             "errno=%d(%s)\n",
             fd, (unsigned long long)target_addr, len, saved_errno,
             strerror(saved_errno));
-    return 0;
+    return OSS_KERNEL_IO_FAILED;
   }
 
   errno = 0;
@@ -391,9 +392,20 @@ int oss_kernel_write(int fd, uint64_t target_addr, const void *buf,
             "[aar_aaw] pwrite64(fd=%d, addr=%016llx, len=%zu) ret=%zd errno=%d(%s)\n",
             fd, (unsigned long long)target_addr, len, n, saved_errno,
             strerror(saved_errno));
-    return 0;
+    return OSS_KERNEL_IO_FAILED;
   }
-  return 1;
+  return OSS_KERNEL_IO_OK;
+}
+
+int oss_kernel_read(int fd, uint64_t target_addr, void *buf, size_t len) {
+  return oss_kernel_read_result(fd, target_addr, buf, len) ==
+         OSS_KERNEL_IO_OK;
+}
+
+int oss_kernel_write(int fd, uint64_t target_addr, const void *buf,
+                     size_t len) {
+  return oss_kernel_write_result(fd, target_addr, buf, len) ==
+         OSS_KERNEL_IO_OK;
 }
 
 uint64_t oss_kernel_read64(int fd, uint64_t target_addr) {

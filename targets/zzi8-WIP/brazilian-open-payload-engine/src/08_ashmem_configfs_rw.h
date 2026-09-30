@@ -14,6 +14,16 @@ int oss_prepare_kernel_rw_path(void);
  * callers that do not run app_main(). Returns -1 on failure. */
 int oss_open_kernel_rw(void);
 
+enum oss_kernel_io_result {
+  OSS_KERNEL_IO_PLAN_REJECTED = -1,
+  OSS_KERNEL_IO_FAILED = 0,
+  OSS_KERNEL_IO_OK = 1,
+};
+
+enum oss_kernel_io_result oss_kernel_read_result(
+    int fd, uint64_t target_addr, void *buf, size_t len);
+enum oss_kernel_io_result oss_kernel_write_result(
+    int fd, uint64_t target_addr, const void *buf, size_t len);
 int oss_kernel_read(int fd, uint64_t target_addr, void *buf, size_t len);
 int oss_kernel_write(int fd, uint64_t target_addr, const void *buf,
                       size_t len);

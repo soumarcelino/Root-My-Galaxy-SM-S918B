@@ -60,6 +60,44 @@ static void reproduce_crash_geometry(void) {
   assert(plan.kernel_check_len == 8);
 }
 
+static void check_real_failure_regressions(void) {
+  uint64_t value = 0;
+
+  errno = 0;
+  assert(!oss_kernel_read_plan_supported(0xfffffffe293f6588ULL, 8));
+  assert(errno == EILSEQ);
+  assert(oss_kernel_read_result(-1, 0xfffffffe293f6588ULL, &value,
+                                sizeof(value)) ==
+         OSS_KERNEL_IO_PLAN_REJECTED);
+
+  /* These addresses were rejected by the old fixed-position AAW encoder.
+   * The flexible-position planner must now encode them and distinguish the
+   * subsequent invalid-FD failure from a pre-syscall plan rejection. */
+  const uint64_t recovered_writes[] = {
+      0xfffffffe24440018ULL,
+      0xfffffffe00bd3e18ULL,
+      0xfffffffe00eb4598ULL,
+  };
+  for (size_t i = 0;
+       i < sizeof(recovered_writes) / sizeof(recovered_writes[0]);
+       i++) {
+    errno = 0;
+    assert(oss_kernel_write_plan_supported(recovered_writes[i],
+                                            sizeof(value)));
+    assert(oss_kernel_write_result(-1, recovered_writes[i], &value,
+                                   sizeof(value)) ==
+           OSS_KERNEL_IO_FAILED);
+    assert(errno == EBADF);
+  }
+
+  /* An encodable plan reaches I/O; an invalid FD must not look like a plan
+   * rejection. Restoration code uses this distinction. */
+  errno = 0;
+  assert(oss_kernel_write_result(-1, 0xffffffc00ae96600ULL, &value,
+                                 sizeof(value)) == OSS_KERNEL_IO_FAILED);
+  assert(errno == EBADF);
+}
+
 int main(void) {
   /* Successful app execution: both verification reads are representable. */
   check_supported_read(0xffffff8a41f4a180ULL, 35);
@@ -84,6 +122,7 @@ int main(void) {
   assert(oss_kernel_write_plan_supported(0xffffff895399b000ULL, 40));
 
   reproduce_crash_geometry();
+  check_real_failure_regressions();
 
   struct configfs_read_plan rejected;
   assert(!make_configfs_read_plan(UINT64_MAX - 3, 8, &rejected));
