@@ -1,0 +1,26 @@
+{
+  "passed": true,
+  "module": "targets/dyi3/kernelsu-next/out/kernelsu-next-dyi3-v3.4.0/android13-5.15_kernelsu.ko",
+  "sha256": "8c34f234f42e568ce6e8ccbd185e2dc31ca1e800e9f964106bfa3a78d1902c9d",
+  "vermagic": "5.15.153-android13-8-30958972-abS911U1UES6DYI3 SMP preempt mod_unload modversions aarch64",
+  "undefined_symbols": 203,
+  "missing_symbols": [],
+  "module_version_entries": 139,
+  "matched_symbol_crcs": 139,
+  "crc_mismatches": {},
+  "missing_crc_targets": [],
+  "layout_check": "dwarf:KernelSU-Next/kernel/kernelsu.ko",
+  "build_layout_source": "KernelSU-Next/kernel/kernelsu.ko",
+  "btf_structures": [
+    "cred",
+    "task_struct",
+    "work_struct",
+    "completion",
+    "ucounts",
+    "user_struct",
+    "user_namespace",
+    "module"
+  ],
+  "btf_mismatches": {},
+  "relocation_mismatches": {}
+}

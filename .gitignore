@@ -14,6 +14,16 @@ local.properties
 *.tar
 *.tar.*
 *.bin
+# The unpacked kernel/ramdisk are raw firmware extracts (~46 MB) that no other
+# target commits; they are reproducible from boot.img and the contract only
+# needs the derived artifacts (config, kallsyms, BTF, CRC table).
+targets/dyi3/firmware/unpacked/
+# Device dmesg captures are diagnostics from the porter's own phone, not
+# build inputs; regenerate with RMG_DIAG_CAPTURE=1 when needed.
+assets-dyi3/diag/
+# Staging directory: simple-root-dyi3.sh rebuilds and repopulates it on every
+# run, so the copies are redundant with the target's own build outputs.
+assets-dyi3/
 targets/afzh3/kernelsu-next/out/
 targets/afzg1/kernelsu-next/out/
 simple-root/evidence/

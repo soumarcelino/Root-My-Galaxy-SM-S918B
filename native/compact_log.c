@@ -97,6 +97,15 @@ static int rmg_should_emit(const char *line, size_t length) {
       "[immediate] fake fops",
       "[pipe_rw] telemetry stage_ms",
       "[pipe_rw] ready",
+      /* The deterministic path's diagnostics decide the outcome: its prints
+       * carry the walk stop reason, the victim it resolved, and whether it
+       * fell back to the legacy path. Without these the only surviving lines
+       * are the ones that happen to contain an error word, which makes a
+       * failed boot indistinguishable from a different failed boot. */
+      "[pipe_rw] det:",
+      "[pipe_rw] det miss",
+      "[pipe_rw] det terminal",
+      "[pipe_rw] selection",
       "[root_umh] queued",
       "[root_umh] result",
       "[root_umh] native PTY work",

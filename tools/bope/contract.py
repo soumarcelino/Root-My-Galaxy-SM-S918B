@@ -114,6 +114,21 @@ BTF_SIZES: dict[str, str] = {
     "TARGET_UMH_COMPLETION_SIZE": "completion",
 }
 
+# BTF enums that pin the kmalloc_caches geometry. The array is
+# [NR_KMALLOC_TYPES][KMALLOC_BUCKETS]; a donor whose kernel ordered the types
+# differently (e.g. cgroup before reclaim) leaves these stale.
+BTF_ENUM_CONSTANTS: dict[str, tuple[str, str]] = {
+    "TARGET_KMALLOC_CGROUP_TYPE": ("kmalloc_cache_type", "KMALLOC_CGROUP"),
+    "TARGET_KMALLOC_TYPES": ("kmalloc_cache_type", "NR_KMALLOC_TYPES"),
+}
+
+# KMALLOC_BUCKETS is KMALLOC_SHIFT_HIGH + 1, the number of power-of-two size
+# classes from 8 bytes to PAGE_SIZE. KMALLOC_SHIFT_HIGH is PAGE_SHIFT + 1, so
+# it is 14 for this kernel; the slot constants are arithmetic on the enum row
+# index and this bucket count.
+KMALLOC_BUCKETS = 14
+KMALLOC_PIPE_INDEX = 11
+
 
 DERIVED_RELATIONS = {
     "TARGET_WORKER_CALLER_OFF": ("TARGET_WORKER_THREAD_OFF", 0x78),
@@ -179,6 +194,15 @@ def structure_size(layout: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def enum_values(btf: Path, pahole: Path, enum_name: str) -> dict[str, int]:
+    """Parse `pahole -E -C <enum>` output into {enumerator: value}."""
+    output = run([pahole, "-F", "btf", "-E", "-C", enum_name, btf])
+    values: dict[str, int] = {}
+    for match in re.finditer(r"(\w+)\s*=\s*(-?\d+)", output):
+        values.setdefault(match.group(1), int(match.group(2)))
+    return values
+
+
 def _numeric_style(raw: str, value: int) -> str:
     raw = raw.strip()
     match = re.fullmatch(r"(0x[0-9a-fA-F]+|[0-9]+)([uUlL]*)", raw)
@@ -203,6 +227,19 @@ def _replace_numeric(text: str, name: str, value: int) -> tuple[str, int | None]
     old_value = int(match.group(2), 0)
     replacement = match.group(1) + _numeric_style(old_raw, value)
     return text[: match.start()] + replacement + text[match.end() :], old_value
+
+
+def _define_numeric(text: str, name: str, value: int, anchor: str) -> str:
+    """Rewrite a numeric macro, inserting it before `anchor` when the donor
+    predates it. Derived additions must not depend on donor hand-editing."""
+    if re.search(rf"^#define[ \t]+{re.escape(name)}[ \t]", text, re.MULTILINE):
+        text, _ = _replace_numeric(text, name, value)
+        return text
+    anchor_match = re.search(rf"^#define[ \t]+{re.escape(anchor)}[ \t]", text, re.MULTILINE)
+    if not anchor_match:
+        raise BopeError(f"insertion anchor macro is missing: {anchor}")
+    line = f"#define {name} {value}\n"
+    return text[: anchor_match.start()] + line + text[anchor_match.start() :]
 
 
 def _replace_string(text: str, name: str, value: str) -> tuple[str, str]:
@@ -296,6 +333,31 @@ def derive_contract(
     for macro, (parent, delta) in DERIVED_RELATIONS.items():
         values[macro] = values[parent] + delta
 
+    enums: dict[str, dict[str, int]] = {}
+    for macro, (enum_name, enumerator) in BTF_ENUM_CONSTANTS.items():
+        enums.setdefault(enum_name, enum_values(btf, pahole, enum_name))
+        if enumerator not in enums[enum_name]:
+            raise BopeError(f"BTF enum is missing: {enum_name}.{enumerator}")
+        values[macro] = enums[enum_name][enumerator]
+    cgroup_type = values["TARGET_KMALLOC_CGROUP_TYPE"]
+    derived_slots = {
+        "TARGET_KMALLOC_TYPES": values["TARGET_KMALLOC_TYPES"],
+        "TARGET_KMALLOC_CGROUP_TYPE": cgroup_type,
+        "TARGET_KMALLOC_BUCKETS": KMALLOC_BUCKETS,
+        "TARGET_KMALLOC_NORMAL_2K_SLOT": KMALLOC_PIPE_INDEX,
+        "TARGET_KMALLOC_CGROUP_2K_SLOT": cgroup_type * KMALLOC_BUCKETS
+        + KMALLOC_PIPE_INDEX,
+        "TARGET_KMALLOC_CACHE_SLOTS": values["TARGET_KMALLOC_TYPES"]
+        * KMALLOC_BUCKETS,
+    }
+    for macro, value in derived_slots.items():
+        text = _define_numeric(text, macro, value, "TARGET_KMALLOC_CACHES_OFF")
+        derived[macro] = value
+        old = old_numeric.get(macro)
+        if old != value:
+            changed[macro] = {"from": old, "to": value}
+        values.pop(macro, None)
+
     for name, value in values.items():
         text, old = _replace_numeric(text, name, value)
         derived[name] = value
@@ -361,6 +423,32 @@ def verify_contract(
             errors.append(f"{macro}: expected {parent}+0x{delta:x}")
         else:
             checks[macro] = expected
+
+    enums: dict[str, dict[str, int]] = {}
+    for macro, (enum_name, enumerator) in BTF_ENUM_CONSTANTS.items():
+        enums.setdefault(enum_name, enum_values(btf, pahole, enum_name))
+        expected = enums[enum_name].get(enumerator)
+        actual = macros.get(macro)
+        if actual != expected:
+            errors.append(f"{macro}: header={actual!r} BTF enum={expected!r}")
+        elif expected is not None:
+            checks[macro] = expected
+    cgroup_type = enums.get("kmalloc_cache_type", {}).get("KMALLOC_CGROUP")
+    types = enums.get("kmalloc_cache_type", {}).get("NR_KMALLOC_TYPES")
+    if cgroup_type is not None and types is not None:
+        slot_expectations = {
+            "TARGET_KMALLOC_BUCKETS": KMALLOC_BUCKETS,
+            "TARGET_KMALLOC_NORMAL_2K_SLOT": KMALLOC_PIPE_INDEX,
+            "TARGET_KMALLOC_CGROUP_2K_SLOT": cgroup_type * KMALLOC_BUCKETS
+            + KMALLOC_PIPE_INDEX,
+            "TARGET_KMALLOC_CACHE_SLOTS": types * KMALLOC_BUCKETS,
+        }
+        for macro, expected in slot_expectations.items():
+            actual = macros.get(macro)
+            if actual != expected:
+                errors.append(f"{macro}: header={actual!r} derived={expected}")
+            else:
+                checks[macro] = expected
     return {
         "passed": not errors,
         "header": str(header),
