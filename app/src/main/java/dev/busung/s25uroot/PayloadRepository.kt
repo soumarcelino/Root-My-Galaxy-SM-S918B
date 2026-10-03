@@ -16,6 +16,7 @@ data class VerifiedPayloads(
     val helper: File,
     val launcher: File,
     val mmFactory: File?,
+    val contract: File? = null,
 )
 
 class PayloadRepository(private val context: Context) {
@@ -79,7 +80,53 @@ class PayloadRepository(private val context: Context) {
         Os.chmod(helper.absolutePath, 0b111101101)
         Os.chmod(launcher.absolutePath, 0b111101101)
         mmFactory?.let { Os.chmod(it.absolutePath, 0b111101101) }
-        return VerifiedPayloads(profile, exploit, kernelSu, helper, launcher, mmFactory)
+        /* Contract-driven engines bind every runtime value to the current boot:
+         * the bundled contract carries a boot_id placeholder that must be
+         * replaced with this boot's real id or the payload rejects it. */
+        val contract = profile.contract?.let { artifact ->
+            bundledAssetFor(artifact, directory, onProgress, context.getString(R.string.artifact_helper_bundled))
+                ?.let { staged -> materializeContract(staged) }
+        }
+        contract?.let { Os.chmod(it.absolutePath, 0b100100100) }
+        return VerifiedPayloads(profile, exploit, kernelSu, helper, launcher, mmFactory, contract)
+    }
+
+    /** Replace the contract's boot_id placeholder with the running boot id. */
+    private fun materializeContract(staged: File): File? = try {
+        val bootId = File("/proc/sys/kernel/random/boot_id")
+            .readText(Charsets.US_ASCII)
+            .trim()
+            .takeIf(String::isNotBlank)
+        if (bootId == null) {
+            null
+        } else {
+            val resolved = File(staged.parentFile, "target.contract")
+            /* The payload parser requires every line to contain '='; a blank
+             * trailing line fails the whole contract with "missing or invalid
+             * runtime target contract". The bundled asset already ends with a
+             * newline, so lineSequence() yields a trailing empty element and
+             * appending another "\n" produced "...\n\n". Filter the empty tail
+             * and emit exactly one terminating newline. */
+            val text = staged.readText(Charsets.UTF_8).lineSequence()
+                .filter { it.isNotEmpty() }
+                .joinToString("\n") { line ->
+                    if (line.startsWith("boot_id=")) "boot_id=$bootId" else line
+                }
+            /* The previous run chmods this file 0444, so an existing copy must
+             * be removed first or writeText fails with EACCES and the stale
+             * boot_id survives, making the payload reject the contract on the
+             * next boot. Same fix as bundledAsset()'s v0.2.36 handling. */
+            if (resolved.exists() && !resolved.delete()) {
+                val alt = File(staged.parentFile, "target.contract.${System.currentTimeMillis()}.tmp")
+                alt.writeText("$text\n", Charsets.UTF_8)
+                alt.renameTo(resolved)
+            } else {
+                resolved.writeText("$text\n", Charsets.UTF_8)
+            }
+            resolved
+        }
+    } catch (e: Throwable) {
+        null
     }
 
     private fun bundledAssetFor(

@@ -60,6 +60,7 @@ These are all payload profiles currently shipped in the app:
 | `SM-S918B` | `S918BXXSAFZG1` | One UI 8.5 / Android 16 | **BOPE-Beta :: Brazilian Open Payload Engine** | KernelSU Next v3.3.0 | [`targets/afzg1/`](targets/afzg1/) |
 | `SM-S918N` | `S918NKSS8FZG1` | One UI 8.5 / Android 16 | **BOPE-Beta :: Brazilian Open Payload Engine** | KernelSU Next | App-bundled profile |
 | `SM-S918B` | `S918BXXSAFZF5` | One UI 8.5 / Android 16 | **Old Chinese Payload** | KernelSU | [`targets/afzf5/`](targets/afzf5/) |
+| `SM-X518U` | `X518UVLSFEZG3` | One UI 8.5 / Android 16 | **BOPE :: Brazilian Open Payload Engine** | KernelSU Next v3.4.0 | [`targets/gts9fe-WIP/`](targets/gts9fe-WIP/) |
 
 The app's [target manifest](app/src/main/assets/targets-v3.json) is the source of
 truth for the exact build display, kernel release, kernel version, and binaries.

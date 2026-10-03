@@ -2,6 +2,52 @@
   "schemaVersion": 3,
   "payloads": [
     {
+      "payloadId": "gts9fe-X518UVLSFEZG3-ksunext",
+      "displayName": "Galaxy Tab S9 FE 5G SM-X518U | X518UVLSFEZG3 | KernelSU Next",
+      "models": [
+        "SM-X518U"
+      ],
+      "kernelVersions": [
+        "5.15.189"
+      ],
+      "buildDisplays": [
+        "BP4A.251205.006.X518UVLSFEZG3"
+      ],
+      "fingerprints": [
+        "samsung/gts9fecs/gts9fe:16/BP4A.251205.006/X518UVLSFEZG3:user/release-keys"
+      ],
+      "kernelReleases": [
+        "5.15.189-android13-3-33478785"
+      ],
+      "kernelVersionInfos": [
+        "#1 SMP PREEMPT Sat Jul 18 02:16:22 KST 2026"
+      ],
+      "exploit": {
+        "url": "asset://cve-2026-43499-app-gts9fe.so",
+        "size": 179528
+      },
+      "kernelsu": {
+        "url": "asset://ksud-next-v3.4.0-gts9fe",
+        "size": 6268176
+      },
+      "helper": {
+        "url": "asset://cve-2026-43499-root-gts9fe",
+        "size": 28408
+      },
+      "launcher": {
+        "url": "asset://stability-launcher-gts9fe",
+        "size": 18800
+      },
+      "mmFactory": {
+        "url": "asset://mm-exec-factory-gts9fe",
+        "size": 1816
+      },
+      "contract": {
+        "url": "asset://bope-contract-gts9fe.txt",
+        "size": 3592
+      }
+    },
+    {
       "payloadId": "dm3q-S918BXXSAFZF5",
       "displayName": "Galaxy S23 Ultra SM-S918B | S918BXXSAFZF5 | KernelSU",
       "models": [

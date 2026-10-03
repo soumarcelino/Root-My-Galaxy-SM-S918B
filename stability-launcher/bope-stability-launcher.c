@@ -57,8 +57,16 @@
 #define FAST_STABLE_SAMPLES 2
 #define FAST_INTERVAL_SEC 1
 #define TEMP_HEADROOM_MC 5000L
+
+/* Sentinel for targets where no thermal sensor is readable by this UID. */
+#define TEMP_UNAVAILABLE_MC (-1L)
 #define MAX_WAIT_SEC 300
-#define PIPE_COUNT 480
+/* Pipe capacity is a per-UID resource (fs.pipe-user-pages-soft), not a
+ * per-process one. The engine's own banks already hold ~480 pipes for the
+ * lifetime of the run, so a second 480-pipe probe on top of them is refused
+ * with EPERM on targets whose pipe budget is smaller than S918B's. The probe
+ * only has to prove that a full bank can be sized to PIPE_TARGET_SIZE. */
+#define PIPE_COUNT 240
 #define PIPE_INITIAL_SIZE (2 * 4096)
 #define PIPE_TARGET_SIZE (32 * 4096)
 
@@ -278,6 +286,36 @@ static int read_mm_struct_slab(long *active, long *total, long *slabs) {
   return ok;
 }
 
+/* Some targets (SM-X518U among them) restrict the thermal-zone temp
+ * system domain, so the shell/exploit UID can never read a temperature.
+ * Treating that as a hard failure made the gate loop forever at
+ * phase=cheap because the expensive phase was never reached. The
+ * temperature ceiling is a thermal-safety guard, not a correctness
+ * requirement, so when no sensor is readable the gate proceeds and the
+ * remaining (memory, runnable, PSI, mm-slab) checks still apply. */
+static int collect_expensive_metrics(struct metrics *m) {
+  if (!read_max_temperature(&m->temp_mc)) {
+    m->temp_mc = TEMP_UNAVAILABLE_MC;
+  }
+  return read_mm_struct_slab(&m->mm_active, &m->mm_total, &m->mm_slabs);
+}
+
+static int metrics_stable(const struct metrics *m) {
+  return m->boot_complete && m->selinux_enforcing == 1 &&
+         m->uptime >= gate.min_uptime_sec &&
+         m->mem_kb >= gate.min_mem_kb &&
+         (m->temp_mc == TEMP_UNAVAILABLE_MC ||
+          m->temp_mc <= gate.max_temp_mc) &&
+         m->runnable <= gate.max_runnable && m->cpu_psi <= gate.max_cpu_psi &&
+         m->mem_psi <= gate.max_mem_psi && m->io_psi <= gate.max_io_psi
+#ifndef RMG_BOPE_VALIDATION
+         && m->mm_active <= gate.max_mm_objects &&
+         m->mm_total <= gate.max_mm_objects &&
+         m->mm_slabs <= gate.max_mm_slabs
+#endif
+         ;
+}
+
 static int collect_cheap_metrics(struct metrics *m) {
   memset(m, 0, sizeof(*m));
   m->boot_complete = read_boot_complete();
@@ -298,25 +336,6 @@ static int metrics_cheap_stable(const struct metrics *m) {
          m->mem_psi <= gate.max_mem_psi && m->io_psi <= gate.max_io_psi;
 }
 
-static int collect_expensive_metrics(struct metrics *m) {
-  return read_max_temperature(&m->temp_mc) &&
-         read_mm_struct_slab(&m->mm_active, &m->mm_total, &m->mm_slabs);
-}
-
-static int metrics_stable(const struct metrics *m) {
-  return m->boot_complete && m->selinux_enforcing == 1 &&
-         m->uptime >= gate.min_uptime_sec &&
-         m->mem_kb >= gate.min_mem_kb && m->temp_mc <= gate.max_temp_mc &&
-         m->runnable <= gate.max_runnable && m->cpu_psi <= gate.max_cpu_psi &&
-         m->mem_psi <= gate.max_mem_psi && m->io_psi <= gate.max_io_psi
-#ifndef RMG_BOPE_VALIDATION
-         && m->mm_active <= gate.max_mm_objects &&
-         m->mm_total <= gate.max_mm_objects &&
-         m->mm_slabs <= gate.max_mm_slabs
-#endif
-         ;
-}
-
 /* Comfortable = passes every threshold with margin: half the PSI ceilings,
  * half the runnable ceiling, 1.5x the memory floor, temperature TEMP_HEADROOM_MC
  * below its ceiling. Implies metrics_stable(). Used to shorten the gate on a
@@ -325,7 +344,8 @@ static int metrics_comfortable(const struct metrics *m) {
   return m->boot_complete && m->selinux_enforcing == 1 &&
          m->uptime >= gate.min_uptime_sec &&
          m->mem_kb >= gate.min_mem_kb + gate.min_mem_kb / 2 &&
-         m->temp_mc <= gate.max_temp_mc - TEMP_HEADROOM_MC &&
+         (m->temp_mc == TEMP_UNAVAILABLE_MC ||
+          m->temp_mc <= gate.max_temp_mc - TEMP_HEADROOM_MC) &&
          m->runnable <= gate.max_runnable / 2 &&
          m->cpu_psi <= gate.max_cpu_psi / 2.0 &&
          m->mem_psi <= gate.max_mem_psi / 2.0 &&
@@ -482,24 +502,25 @@ int main(int argc, char **argv) {
   fprintf(stderr,
           "[launcher] gate %s: %d amostras/%ds (fast %d/%ds) temp<=%ldC "
           "mem>=%ldGB tarefas<=%d PSI<=%.0f/%.0f/%.0f uptime>=%.0fs "
-          "mm-delta<=%ld pipe=480x32 timeout=%ds\n",
+          "mm-delta<=%ld pipe=%dx%d timeout=%ds\n",
           gate.name, gate.stable_samples, SAMPLE_INTERVAL_SEC,
           FAST_STABLE_SAMPLES, FAST_INTERVAL_SEC,
           gate.max_temp_mc / 1000, gate.min_mem_kb / (1024 * 1024),
           gate.max_runnable, gate.max_cpu_psi, gate.max_mem_psi,
           gate.max_io_psi, gate.min_uptime_sec, gate.max_mm_delta,
-          MAX_WAIT_SEC);
+          PIPE_COUNT, PIPE_TARGET_SIZE / 4096, MAX_WAIT_SEC);
 #else
   fprintf(stderr,
           "[launcher] gate %s: %d amostras/%ds (fast %d/%ds) temp<=%ldC "
           "mem>=%ldGB tarefas<=%d PSI<=%.0f/%.0f/%.0f uptime>=%.0fs mm<=%ld/%ld "
-          "mm-delta<=%ld pipe=480x32 timeout=%ds\n",
+          "mm-delta<=%ld pipe=%dx%d timeout=%ds\n",
           gate.name, gate.stable_samples, SAMPLE_INTERVAL_SEC,
           FAST_STABLE_SAMPLES, FAST_INTERVAL_SEC,
           gate.max_temp_mc / 1000, gate.min_mem_kb / (1024 * 1024),
           gate.max_runnable, gate.max_cpu_psi, gate.max_mem_psi,
           gate.max_io_psi, gate.min_uptime_sec, gate.max_mm_objects,
-          gate.max_mm_slabs, gate.max_mm_delta, MAX_WAIT_SEC);
+          gate.max_mm_slabs, gate.max_mm_delta,
+          PIPE_COUNT, PIPE_TARGET_SIZE / 4096, MAX_WAIT_SEC);
 #endif
   struct timespec started;
   if (clock_gettime(CLOCK_MONOTONIC, &started) != 0) {
@@ -555,7 +576,7 @@ int main(int argc, char **argv) {
               "load=%.2f psi=%.2f/%.2f/%.2f mm=%ld/%ld slabs=%ld dmm=%ld "
               "uptime=%.0fs boot=%d se=%ld\n",
               stable, gate.stable_samples, comfortable ? "fast" : "baseline",
-              m.temp_mc / 1000.0,
+              m.temp_mc == TEMP_UNAVAILABLE_MC ? -1.0 : m.temp_mc / 1000.0,
               m.mem_kb / 1024,
               m.runnable, m.load1, m.cpu_psi, m.mem_psi, m.io_psi,
               m.mm_active, m.mm_total, m.mm_slabs, mm_delta, m.uptime,

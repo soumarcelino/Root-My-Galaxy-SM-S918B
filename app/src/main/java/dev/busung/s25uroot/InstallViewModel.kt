@@ -396,12 +396,20 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             val stagedFactory = mmFactory?.let {
                 shizukuStage(it, SHIZUKU_MM_FACTORY_PATH, "755")
             }
+            /* The launcher runs as the Shizuku server UID (shell), which cannot
+             * traverse the app's private files/payloads directory (0700, app
+             * UID). A contract left there makes BOPE abort with "missing or
+             * invalid runtime target contract" even when its contents are
+             * correct. Stage it into shell-owned /data/local/tmp like every
+             * other artifact. */
+            val stagedContract = payloads.contract?.let { shizukuStageContract(it) }
             if (skipLauncher) {
                 val environment = directPayloadEnvironment(
                     stagedPayload.absolutePath,
                     helper.absolutePath,
                     stagedFactory?.absolutePath,
                     cachedP0Offset(bootToken),
+                    stagedContract?.absolutePath,
                 )
                 ShizukuController.exec(
                     arrayOf("/system/bin/true"),
@@ -411,6 +419,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 val stagedLauncher = shizukuStage(launcher, SHIZUKU_LAUNCHER_PATH, "755")
                 val launcherEnv = buildList {
                     cachedP0Offset(bootToken)?.let { add("$P0_OFFSET_ENV=$it") }
+                    stagedContract?.let { add("BOPE_TARGET_CONTRACT=${it.absolutePath}") }
                 }.toTypedArray()
                 val factoryArgument = stagedFactory?.absolutePath ?: "-"
                 val command = "exec ${shellQuote(helper.absolutePath)} --run-launcher " +
@@ -448,10 +457,12 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                             helper.absolutePath,
                             mmFactory?.absolutePath,
                             cachedP0Offset(bootToken),
+                            payloads.contract?.absolutePath,
                         ),
                     )
                 } else {
                     cachedP0Offset(bootToken)?.let { put(P0_OFFSET_ENV, it) }
+                    payloads.contract?.let { put("BOPE_TARGET_CONTRACT", it.absolutePath) }
                 }
             }
             processBuilder.start()
@@ -840,6 +851,34 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
 
     private fun shizukuEnabled(): Boolean = true
 
+    /**
+     * Stages the runtime target contract into shell-owned /data/local/tmp.
+     *
+     * Unlike [shizukuStage] this cannot assert ELF magic: the contract is a
+     * text key=value file. It is verified by reading it back and comparing
+     * length plus the trailing newline count, because BOPE rejects a contract
+     * whose last line is blank.
+     */
+    private fun shizukuStageContract(source: File): File {
+        val target = SHIZUKU_CONTRACT_PATH
+        try {
+            ShizukuController.exec(arrayOf("rm", "-f", target)).waitFor()
+            ShizukuController.writeFile(target, "644", source.inputStream())
+            val size = ShizukuController.capture(
+                arrayOf("sh", "-c", "wc -c < '$target'"),
+            ).trim().toIntOrNull()
+            check(size == source.length().toInt()) {
+                "staged $target size mismatch: $size != ${source.length()}"
+            }
+        } catch (error: Throwable) {
+            throw IllegalStateException(
+                app.getString(R.string.error_shizuku_stage, target, error.message.orEmpty()),
+                error,
+            )
+        }
+        return File(target)
+    }
+
     private fun shizukuStage(source: File, target: String, mode: String): File {
         val staged = File(target)
         // v0.2.29+: 不再复用旧文件（长度相同但内容可能损坏——bad ELF magic bug）。
@@ -984,6 +1023,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private const val SHIZUKU_LAUNCHER_PATH = "/data/local/tmp/stability-launcher"
         private const val SHIZUKU_LAUNCH_LOG_PATH = "/data/local/tmp/rmg-launcher-run.log"
         private const val SHIZUKU_MM_FACTORY_PATH = "/data/local/tmp/mm-exec-factory"
+        private const val SHIZUKU_CONTRACT_PATH = "/data/local/tmp/bope-target.contract"
         private const val SHIZUKU_KSUD_PATH = "/data/local/tmp/ksud-s25u-kdp"
         private const val SHIZUKU_KSUD_STAGE_PATH = "/data/local/tmp/.ksud-stage"
         private const val INSTALL_WAKE_LOCK_MILLIS = 1_200_000L
@@ -1006,9 +1046,11 @@ internal fun directPayloadEnvironment(
     helperPath: String,
     mmFactoryPath: String?,
     p0Offset: String?,
+    contractPath: String? = null,
 ): Map<String, String> = buildMap {
     put("CVE43499_ROOT_HELPER", helperPath)
     mmFactoryPath?.let { put("CVE43499_MM_FACTORY", it) }
+    contractPath?.let { put("BOPE_TARGET_CONTRACT", it) }
     put("EXPLOIT_ATTEMPTS", "3")
     put("P0_ATTEMPT_TIMEOUT_SEC", "45")
     put("EXPLOIT_ATTEMPT_TIMEOUT_SEC", "180")

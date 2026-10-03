@@ -129,7 +129,6 @@ BTF_ENUM_CONSTANTS: dict[str, tuple[str, str]] = {
 
 
 DERIVED_RELATIONS = {
-    "TARGET_WORKER_CALLER_OFF": ("TARGET_WORKER_THREAD_OFF", 0x78),
     "TARGET_RT_WAITER_TREE_RIGHT_OFF": ("TARGET_RT_WAITER_TREE_PARENT_OFF", 0x08),
     "TARGET_RT_WAITER_TREE_LEFT_OFF": ("TARGET_RT_WAITER_TREE_PARENT_OFF", 0x10),
     "TARGET_RT_WAITER_PI_RIGHT_OFF": ("TARGET_RT_WAITER_PI_PARENT_OFF", 0x08),
@@ -191,6 +190,35 @@ def _aarch64_adrp_add_targets(code: bytes, start: int) -> set[int]:
     return targets
 
 
+def _worker_caller_offset(elf_path: Path, symbols: dict[str, int], base: int) -> int:
+    """Return the ``worker_thread`` offset of the return address after ``bl schedule``.
+
+    ``sched_blocked_reason`` records ``get_wchan()`` for an idle kworker, which
+    is the instruction following the blocking ``bl schedule`` in
+    ``worker_thread``. The distance from ``worker_thread`` to that call is not
+    stable across kernel builds, so it is disassembled per target rather than
+    inherited from another firmware.
+    """
+    start = find_symbol(symbols, "worker_thread")
+    schedule = find_symbol(symbols, "schedule")
+    if start is None or schedule is None:
+        raise BopeError(
+            "worker_thread and schedule are both required to derive "
+            "TARGET_WORKER_CALLER_OFF"
+        )
+    code = _read_elf_virtual(elf_path, start, 0x800)
+    for offset in range(0, len(code) - 4, 4):
+        instruction, = struct.unpack_from("<I", code, offset)
+        if instruction & 0xFC000000 != 0x94000000:  # BL
+            continue
+        immediate = instruction & 0x03FFFFFF
+        if immediate & (1 << 25):
+            immediate -= 1 << 26
+        if start + offset + immediate * 4 == schedule:
+            return start + offset + 4 - base
+    raise BopeError("worker_thread does not contain a direct call to schedule")
+
+
 def _find_static_umh_guard_address(
     elf_path: Path, symbols: dict[str, int]
 ) -> int:
@@ -240,6 +268,23 @@ def parse_symbols(elf: Path, llvm_nm: Path) -> dict[str, int]:
         if len(parts) >= 3 and re.fullmatch(r"[0-9a-fA-F]+", parts[0]):
             result.setdefault(parts[2], int(parts[0], 16))
     return result
+
+
+def find_symbol(symbols: dict[str, int], name: str) -> int | None:
+    """Resolve a symbol, tolerating LTO/CFI clones such as name.llvm.<hash>.
+
+    Clang LTO renames internal-linkage functions to ``name.llvm.<digest>`` (and
+    sometimes ``name.cfi_jt``). Those clones are the real function bodies, so a
+    plain exact-match lookup misses them on LTO kernels.
+    """
+    exact = symbols.get(name)
+    if exact is not None:
+        return exact
+    for prefix in (name + ".llvm.", name + ".cfi_jt", name + ".constprop.", name + "."):
+        for symbol, address in symbols.items():
+            if symbol.startswith(prefix):
+                return address
+    return None
 
 
 def btf_layout(btf: Path, structure: str, pahole: Path) -> str:
@@ -364,13 +409,24 @@ def _replace_numeric(text: str, name: str, value: int) -> tuple[str, int | None]
 
 
 def _define_numeric(text: str, name: str, value: int, anchor: str) -> str:
-    """Rewrite a macro, or insert a newly derived unsigned value at an anchor."""
+    """Rewrite a macro, or insert a newly derived unsigned value at an anchor.
+
+    The anchor is a hint, not a hard requirement: contract-only donors may omit
+    it. Fall back to the first numeric ``TARGET_`` macro so a derived value is
+    still recorded instead of aborting the whole port.
+    """
     if re.search(rf"^#define[ \t]+{re.escape(name)}[ \t]", text, re.MULTILINE):
         text, _ = _replace_numeric(text, name, value)
         return text
     anchor_match = re.search(
         rf"^#define[ \t]+{re.escape(anchor)}[ \t]", text, re.MULTILINE
     )
+    if not anchor_match:
+        anchor_match = re.search(
+            r"^#define[ \t]+TARGET_[A-Z0-9_]+[ \t]+(?:0x[0-9a-fA-F]+|[0-9]+)",
+            text,
+            re.MULTILINE,
+        )
     if not anchor_match:
         raise BopeError(f"insertion anchor macro is missing: {anchor}")
     line = f"#define {name} {value}U\n"
@@ -427,7 +483,20 @@ def derive_contract(
         identity["TARGET_KERNEL_VERSION"] = kernel_version
     donor_identity: dict[str, str] = {}
     for name, value in identity.items():
-        text, old = _replace_string(text, name, value)
+        if re.search(rf"^#define[ \t]+{re.escape(name)}[ \t]", text, re.MULTILINE):
+            text, old = _replace_string(text, name, value)
+        else:
+            # Contract-only donors (the runtime-contract engine) keep identity
+            # in the contract file, not the header. Insert the macro so the
+            # generated header still records the exact firmware identity.
+            anchor = re.search(
+                r"^#define[ \t]+TARGET_NAME[ \t]", text, re.MULTILINE
+            )
+            if not anchor:
+                raise BopeError(f"donor target is missing string macro {name}")
+            line = f'#define {name} "{value}"\n'
+            text = text[: anchor.start()] + line + text[anchor.start() :]
+            old = ""
         donor_identity[name] = old
         derived[name] = value
         if old != value:
@@ -435,10 +504,15 @@ def derive_contract(
 
     # The contract body is copied from the donor. Keep its prose target-neutral
     # by updating source-build/name references after replacing identity macros.
-    text = text.replace(donor_identity["TARGET_BUILD"], build)
+    # Contract-only donors omit these macros; an empty needle would make
+    # str.replace inject the replacement between every character.
+    donor_build = donor_identity["TARGET_BUILD"]
+    if donor_build:
+        text = text.replace(donor_build, build)
     donor_name = donor_identity["TARGET_NAME"]
-    text = text.replace(donor_name.upper(), target_name.upper())
-    text = text.replace(donor_name, target_name)
+    if donor_name:
+        text = text.replace(donor_name.upper(), target_name.upper())
+        text = text.replace(donor_name, target_name)
     text = re.sub(
         r"must not carry [A-Z0-9]+ literals\.",
         "must not carry firmware literals.",
@@ -451,9 +525,17 @@ def derive_contract(
             _find_static_umh_guard_address(elf, symbols) - base
         )
     for macro, (symbol, delta) in SYMBOLS.items():
-        if symbol not in symbols:
+        address = find_symbol(symbols, symbol)
+        if address is None:
             raise BopeError(f"required kernel symbol is missing: {symbol}")
-        values[macro] = symbols[symbol] - base + delta
+        values[macro] = address - base + delta
+
+    # TARGET_WORKER_CALLER_OFF is the return address of the blocking
+    # ``bl schedule`` inside worker_thread, i.e. the instruction after it.
+    # It is *not* a fixed offset from worker_thread: the ``schedule`` call
+    # moves between kernel versions (0x78 on the S918B 5.15.189 build, 0xbc
+    # here), so it must come from this target's own disassembly.
+    values["TARGET_WORKER_CALLER_OFF"] = _worker_caller_offset(elf, symbols, base)
 
     layouts: dict[str, str] = {}
     for macro, (structure, field) in BTF_FIELDS.items():
@@ -544,12 +626,12 @@ def verify_contract(
                     macros["TARGET_STATIC_UMH_PATH_OFF"]
                 )
     for macro, (symbol, delta) in SYMBOLS.items():
-        expected = symbols.get(symbol)
+        resolved = find_symbol(symbols, symbol)
         actual = macros.get(macro)
-        if expected is None:
+        if resolved is None:
             errors.append(f"missing ELF symbol {symbol}")
             continue
-        expected = expected - base + delta
+        expected = resolved - base + delta
         if actual != expected:
             errors.append(f"{macro}: header={actual!r} ELF=0x{expected:x}")
         else:
@@ -580,6 +662,19 @@ def verify_contract(
             errors.append(f"{macro}: expected {parent}+0x{delta:x}")
         else:
             checks[macro] = expected
+    try:
+        expected_caller = _worker_caller_offset(elf, symbols, base)
+    except BopeError as error:
+        errors.append(str(error))
+    else:
+        if macros.get("TARGET_WORKER_CALLER_OFF") != expected_caller:
+            errors.append(
+                "TARGET_WORKER_CALLER_OFF: "
+                f"header={macros.get('TARGET_WORKER_CALLER_OFF')!r} "
+                f"disassembly=0x{expected_caller:x}"
+            )
+        else:
+            checks["TARGET_WORKER_CALLER_OFF"] = expected_caller
 
     enums: dict[str, dict[str, int]] = {}
     enum_constants: dict[str, int] = {}

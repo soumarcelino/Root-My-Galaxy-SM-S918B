@@ -22,6 +22,7 @@ data class TargetProfile(
     val helper: RemoteArtifact,
     val launcher: RemoteArtifact? = null,
     val mmFactory: RemoteArtifact? = null,
+    val contract: RemoteArtifact? = null,
     val buildDisplays: Set<String> = emptySet(),
     val fingerprints: Set<String> = emptySet(),
     val kernelReleases: Set<String> = emptySet(),
@@ -113,6 +114,12 @@ data class SupportManifest(
                                 RemoteArtifact(
                                     url = factory.getString("url"),
                                     size = factory.getLong("size"),
+                                )
+                            },
+                            contract = payload.optJSONObject("contract")?.let { contract ->
+                                RemoteArtifact(
+                                    url = contract.getString("url"),
+                                    size = contract.getLong("size"),
                                 )
                             },
                             buildDisplays = payload.optJSONArray("buildDisplays").strings(),

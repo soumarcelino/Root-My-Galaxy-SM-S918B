@@ -14,7 +14,7 @@ from .errors import BopeError
 
 
 AP_NAME = re.compile(
-    r"^AP_(?P<build>S\d{3}[A-Z][A-Z0-9]+)_.*_meta_OS(?P<os>\d+)\.tar\.md5$"
+    r"^AP_(?P<build>[A-Z]\d{3}[A-Z][A-Z0-9]+)_.*_meta_OS(?P<os>\d+)\.tar\.md5$"
 )
 
 
@@ -42,7 +42,7 @@ class FactoryInfo:
 
     @property
     def model(self) -> str:
-        match = re.match(r"(S\d{3}[A-Z])", self.post_build)
+        match = re.match(r"([A-Z]\d{3}[A-Z])", self.post_build)
         return f"SM-{match.group(1)}" if match else "UNKNOWN"
 
 
