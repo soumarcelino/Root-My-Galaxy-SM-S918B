@@ -27,6 +27,21 @@ make clean all so
 make -C targets/afzh3/brazilian-open-payload-engine clean all so
 ```
 
+## GTS9FE :: BOPE · Galaxy Tab S9 FE 5G
+
+```sh
+make -C targets/gts9fe-WIP/brazilian-open-payload-engine clean all so
+make -C targets/gts9fe-WIP/helper clean all
+```
+
+The KernelSU Next component is built separately, because the module needs the
+DDK KMI tree and an exact vermagic:
+
+```sh
+targets/gts9fe-WIP/kernelsu-next/build-gts9fe-v3.4.0.sh
+targets/gts9fe-WIP/kernelsu-next/build-ksud-v3.4.0-ko.sh
+```
+
 ## FZF5 :: Old Chinese Payload
 
 Build the legacy FZF5 payload from the repository root:
